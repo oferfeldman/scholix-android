@@ -1,0 +1,42 @@
+# IntelliJ / Android Studio
+*.iml
+.idea/
+!.idea/codeStyles  # (optional: keep project-wide code style)
+!.idea/runConfigurations  # (optional: keep shared run configs)
+
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration
+local.properties
+
+# Android generated files
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing keys (never commit!)
+*.jks
+*.keystore
+
+# Google Services (may keep in repo depending on policy)
+google-services.json
+
+# Logs
+*.log
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Kotlin/Java build outputs
+*.class
+*.jar
+*.war
+*.ear
+
+# Proguard
+proguard/
