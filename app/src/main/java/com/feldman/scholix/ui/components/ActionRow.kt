@@ -46,6 +46,9 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
@@ -644,61 +647,73 @@ fun ActionRow(
                     @Suppress("UNCHECKED_CAST")
                     val group = item as RowItem.SegmentedToggleGroupItem<Any?>
 
-                    Row(
-                        modifier = Modifier.weight(group.weight).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
-                        verticalAlignment = Alignment.CenterVertically
+                    var selectedIndex by remember {
+                        mutableStateOf(group.options.indexOfFirst { it.value == group.state.value })
+                    }
+
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier
+                            .weight(group.weight)
+                            .fillMaxWidth()
+                            .height(70.dp)
                     ) {
                         group.options.forEachIndexed { index, opt ->
-                            ToggleButton(
-                                checked = (opt.value == group.state.value),
-                                onCheckedChange = { isChecked ->
-                                    if (isChecked && group.state.value != opt.value) {
+                            SegmentedButton(
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = group.options.size
+                                ),
+                                modifier = Modifier.height(70.dp),
+                                onClick = {
+                                    selectedIndex = index
+                                    if (group.state.value != opt.value) {
                                         group.state.value = opt.value
                                         group.onSelectedChange?.invoke(opt.value)
                                     }
                                 },
+                                selected = index == selectedIndex,
                                 enabled = opt.enabled,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(60.dp),
-                                colors = ToggleButtonDefaults.toggleButtonColors(
-                                    containerColor = opt.backgroundColor ?: MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    checkedContainerColor = opt.selectedBackgroundColor ?: MaterialTheme.colorScheme.primary,
-                                    contentColor = Color.Black.copy(alpha = 0.2f),
-                                    checkedContentColor = Color.White
-                                )
-                            ) {
-                                opt.iconRes?.let {
-                                    Icon(
-                                        painter = painterResource(it),
-                                        contentDescription = opt.text,
-                                        tint = when {
-                                            opt.value == group.state.value && opt.selectedTextColor != null -> opt.selectedTextColor
-                                            opt.value == group.state.value -> Color.White
-                                            opt.textColor != null -> opt.textColor
-                                            else -> Color.Black.copy(alpha = 0.7f)
-                                        },
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                }
-                                Text(
-                                    opt.text,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = when {
-                                        opt.value == group.state.value && opt.selectedTextColor != null -> opt.selectedTextColor
-                                        opt.value == group.state.value -> Color.White
-                                        opt.textColor != null -> opt.textColor
-                                        else -> Color.Black.copy(alpha = 0.7f)
+                                colors = SegmentedButtonDefaults.colors(
+                                    activeContainerColor = opt.selectedBackgroundColor
+                                        ?: MaterialTheme.colorScheme.primary,
+                                    activeContentColor = opt.selectedTextColor
+                                        ?: MaterialTheme.colorScheme.onPrimary,
+                                    inactiveContainerColor = opt.backgroundColor
+                                        ?: MaterialTheme.colorScheme.surfaceVariant,
+                                    inactiveContentColor = opt.textColor
+                                        ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                                    disabledActiveContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                    disabledActiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                    disabledInactiveContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                    disabledInactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                ),
+                                label = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                        modifier = Modifier.fillMaxHeight()
+                                    ) {
+                                        opt.iconRes?.let {
+                                            Icon(
+                                                painter = painterResource(it),
+                                                contentDescription = opt.text,
+                                                modifier = Modifier.size(36.dp)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(
+                                            text = opt.text,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
                                     }
-                                )
-                            }
-
+                                }
+                            )
                         }
                     }
                 }
+
+
 
                 is RowItem.ComposableItem -> {
                     Box(Modifier.weight(item.weight)) {

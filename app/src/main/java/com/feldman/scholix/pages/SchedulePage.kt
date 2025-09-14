@@ -1,5 +1,6 @@
 import android.text.BidiFormatter
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -189,11 +190,12 @@ fun SchedulePage(
 
 @Composable
 fun ScheduleCard(item: JSONObject) {
+    val colors = getColorFromClass(item.optString("colorClass"))
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = getColorFromClass(item.optString("colorClass"))
-        )
+        colors = CardDefaults.cardColors(containerColor = colors.background)
+
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             val onSurface = MaterialTheme.colorScheme.onSurface
@@ -231,39 +233,95 @@ fun ScheduleCard(item: JSONObject) {
             Text(
                 text = item.optString("teacher"),
                 fontSize = 14.sp,
-                color = Color.DarkGray
+                color = reversedColor
             )
             if (item.optString("changes").isNotEmpty()) {
                 Text(
                     text = item.optString("changes"),
                     fontSize = 14.sp,
-                    color = Color.Red
+                    color = reversedColor
                 )
             } else if (item.optString("exams").isNotEmpty()) {
                 Text(
                     text = item.optString("exams"),
                     fontSize = 14.sp,
-                    color = Color.Blue
+                    color = reversedColor
                 )
             }
         }
     }
 }
 
-fun getColorFromClass(colorClass: String): Color {
+data class ThemedColor(val background: Color, val content: Color)
+
+@Composable
+fun getColorFromClass(colorClass: String): ThemedColor {
+    val darkTheme = !isSystemInDarkTheme()
     return when (colorClass) {
-        "pink-cell" -> Color(0xFFFFCCFB)
-        "lightgreen-cell" -> Color(0xFFC3FFC1)
-        "lightyellow-cell" -> Color(0xFFFAFFB8)
-        "lightblue-cell" -> Color(0xFFB6E1EE)
-        "lightred-cell" -> Color(0xFFFFBAB3)
-        "lightpurple-cell" -> Color(0xFFDBC2FF)
-        "lightorange-cell" -> Color(0xFFFFCFA6)
-        "blue-cell" -> Color(0xFFB5C2FF)
-        "lime-cell" -> Color(0xffebffbc)
-        "lightgrey-cell" -> Color(0xFFCFD5D9)
-        "custom-pink-cell" -> Color(0xFFF8C8FA)
-        "cancel-cell" -> Color(0xff7d5b5d)
-        else -> Color.White
+        "pink-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFFD81B60), Color.White)     // dark bg, light text
+        } else {
+            ThemedColor(Color(0xFFFFCCFB), Color.Black)     // light bg, dark text
+        }
+        "lightgreen-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFF2E7D32), Color.White)
+        } else {
+            ThemedColor(Color(0xFFC3FFC1), Color.Black)
+        }
+        "lightyellow-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFFF9A825), Color.Black)    // yellow is bright → dark text
+        } else {
+            ThemedColor(Color(0xFFFAFFB8), Color.Black)
+        }
+        "lightblue-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFF0277BD), Color.White)
+        } else {
+            ThemedColor(Color(0xFFB6E1EE), Color.Black)
+        }
+        "lightred-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFFC62828), Color.White)
+        } else {
+            ThemedColor(Color(0xFFFFBAB3), Color.Black)
+        }
+        "lightpurple-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFF6A1B9A), Color.White)
+        } else {
+            ThemedColor(Color(0xFFDBC2FF), Color.Black)
+        }
+        "lightorange-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFFEF6C00), Color.White)
+        } else {
+            ThemedColor(Color(0xFFFFCFA6), Color.Black)
+        }
+        "blue-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFF303F9F), Color.White)
+        } else {
+            ThemedColor(Color(0xFFB5C2FF), Color.Black)
+        }
+        "lime-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFF827717), Color.White)
+        } else {
+            ThemedColor(Color(0xFFEBFFBC), Color.Black)
+        }
+        "lightgrey-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFF37474F), Color.White)
+        } else {
+            ThemedColor(Color(0xFFCFD5D9), Color.Black)
+        }
+        "custom-pink-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFFAD1457), Color.White)
+        } else {
+            ThemedColor(Color(0xFFF8C8FA), Color.Black)
+        }
+        "cancel-cell" -> if (darkTheme) {
+            ThemedColor(Color(0xFF4E342E), Color.White)
+        } else {
+            ThemedColor(Color(0xFF7D5B5D), Color.White) // keep white text even in light
+        }
+        else -> if (darkTheme) {
+            ThemedColor(Color.DarkGray, Color.White)
+        } else {
+            ThemedColor(Color.White, Color.Black)
+        }
     }
 }
