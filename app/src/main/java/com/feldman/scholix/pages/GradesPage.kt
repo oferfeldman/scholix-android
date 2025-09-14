@@ -166,7 +166,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     ) {
         Title(stringResource(R.string.grades))
 
-        if (courses.isNotEmpty()) {
+        if (courses.size > 1) {
             PrimaryScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 edgePadding = 0.dp,
