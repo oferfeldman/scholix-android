@@ -554,7 +554,6 @@ fun SettingsPage(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        Title("Settings")
 
         ActionRow {
             addVerticalActionList(

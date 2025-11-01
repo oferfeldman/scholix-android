@@ -52,6 +52,17 @@ enum class Dest(
 
 }
 
+fun isSubDestinationTransition(from: String?, to: String?): Boolean {
+    if (from == null || to == null) return false
+
+    val fromDest = Dest.entries.find { it.name == from } ?: return false
+    val toDest = Dest.entries.find { it.name == to } ?: return false
+
+    // Either direction: going from a parent to a child or from a child back to its parent
+    return (fromDest.parent == toDest) || (toDest.parent == fromDest)
+}
+
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun NavHost(
@@ -83,10 +94,11 @@ fun NavHost(
     )
 
     val items = Dest.entries
-    var currentRoute by remember { mutableStateOf<String?>(null) }
     var prevIndex by remember { mutableIntStateOf(0) }
     var forward by remember { mutableStateOf(true) }
 
+    var prevRoute by remember { mutableStateOf<String?>(null) }
+    var currentRoute by remember { mutableStateOf<String?>(null) }
 
 
 
@@ -105,27 +117,28 @@ fun NavHost(
     DisposableEffect(navController) {
         val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
             val newRoute = destination.route ?: return@OnDestinationChangedListener
-
             val oldRoute = currentRoute
-            if (oldRoute != null && newRoute != oldRoute) {
-                val oldIndex = items.indexOfFirst {
-                    oldRoute.startsWith(it.name, ignoreCase = true)
-                }.takeIf { it != -1 } ?: prevIndex
-                val newIndex = items.indexOfFirst {
-                    newRoute.startsWith(it.name, ignoreCase = true)
-                }.takeIf { it != -1 } ?: oldIndex
-                forward = newIndex > oldIndex
 
-                println("new: $newRoute $newIndex, old: $oldRoute $oldIndex forward $forward")
+            if (oldRoute != null && newRoute != oldRoute) {
+                val oldIndex = items.indexOfFirst { oldRoute.startsWith(it.name, ignoreCase = true) }
+                    .takeIf { it != -1 } ?: prevIndex
+                val newIndex = items.indexOfFirst { newRoute.startsWith(it.name, ignoreCase = true) }
+                    .takeIf { it != -1 } ?: oldIndex
+                forward = newIndex > oldIndex
                 prevIndex = newIndex
             }
 
+            prevRoute = oldRoute
             currentRoute = newRoute
         }
 
         navController.addOnDestinationChangedListener(listener)
         onDispose { navController.removeOnDestinationChangedListener(listener) }
     }
+    val subDestTransition = remember(currentRoute, prevRoute) {
+        isSubDestinationTransition(prevRoute, currentRoute)
+    }
+
 
 
     if (isLoggedIn == null) {
@@ -141,47 +154,41 @@ fun NavHost(
         enterTransition = {
             val from = initialState.destination.route
             val to = targetState.destination.route
-            if (from == Dest.Login.name || to == Dest.Login.name) {
-                fadeIn() // just fade, no slide
-            } else if (forward) {
-                slideInHorizontally(initialOffsetX = { fullWidth -> fullWidth }) + fadeIn()
-            } else {
-                slideInHorizontally(initialOffsetX = { fullWidth -> -fullWidth }) + fadeIn()
+            when {
+                from == Dest.Login.name || to == Dest.Login.name || subDestTransition -> fadeIn()
+                forward -> slideInHorizontally(initialOffsetX = { full -> full }) + fadeIn()
+                else -> slideInHorizontally(initialOffsetX = { full -> -full }) + fadeIn()
             }
         },
         exitTransition = {
             val from = initialState.destination.route
             val to = targetState.destination.route
-            if (from == Dest.Login.name || to == Dest.Login.name) {
-                fadeOut() // just fade, no slide
-            } else if (forward) {
-                slideOutHorizontally(targetOffsetX = { fullWidth -> -fullWidth }) + fadeOut()
-            } else {
-                slideOutHorizontally(targetOffsetX = { fullWidth -> fullWidth }) + fadeOut()
+            when {
+                from == Dest.Login.name || to == Dest.Login.name || subDestTransition -> fadeOut()
+                forward -> slideOutHorizontally(targetOffsetX = { full -> -full }) + fadeOut()
+                else -> slideOutHorizontally(targetOffsetX = { full -> full }) + fadeOut()
             }
         },
+
         popEnterTransition = {
             val from = initialState.destination.route
             val to = targetState.destination.route
-            if (from == Dest.Login.name || to == Dest.Login.name) {
-                fadeIn()
-            } else if (forward) {
-                slideInHorizontally(initialOffsetX = { fullWidth -> -fullWidth }) + fadeIn()
-            } else {
-                slideInHorizontally(initialOffsetX = { fullWidth -> fullWidth }) + fadeIn()
+            when {
+                from == Dest.Login.name || to == Dest.Login.name || subDestTransition -> fadeIn()
+                forward -> slideInHorizontally(initialOffsetX = { full -> -full }) + fadeIn()
+                else -> slideInHorizontally(initialOffsetX = { full -> full }) + fadeIn()
             }
         },
         popExitTransition = {
             val from = initialState.destination.route
             val to = targetState.destination.route
-            if (from == Dest.Login.name || to == Dest.Login.name) {
-                fadeOut()
-            } else if (forward) {
-                slideOutHorizontally(targetOffsetX = { fullWidth -> fullWidth }) + fadeOut()
-            } else {
-                slideOutHorizontally(targetOffsetX = { fullWidth -> -fullWidth }) + fadeOut()
+            when {
+                from == Dest.Login.name || to == Dest.Login.name || subDestTransition -> fadeOut()
+                forward -> slideOutHorizontally(targetOffsetX = { full: Int -> full }) + fadeOut()
+                else -> slideOutHorizontally(targetOffsetX = { full -> -full }) + fadeOut()
             }
         },
+
 
         modifier = modifier
     ) {

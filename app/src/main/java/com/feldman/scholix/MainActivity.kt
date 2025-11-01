@@ -258,7 +258,7 @@ fun MainScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
 
     val visibleDests = Dest.entries.filter { dest ->
-        dest.visible && when (dest) {
+        dest.visible && dest.parent==null && when (dest) {
             Dest.Grades -> hasGrades
             Dest.Schedule -> hasSchedule
             Dest.Attendance -> hasAttendance
@@ -267,7 +267,7 @@ fun MainScreen(
         }
     }
     val visibleSideDests = Dest.entries.filter { dest ->
-        dest.visible && when (dest) {
+        dest.visible && dest.parent==null  && when (dest) {
             Dest.Grades -> hasGrades
             Dest.Schedule -> hasSchedule
             Dest.Attendance -> hasAttendance
@@ -280,10 +280,30 @@ fun MainScreen(
             topBar = {
                 if (isLoggedIn == true) {
                     CenterAlignedTopAppBar(
-                        title = { Text(currentTitle) },
+                        title = {
+                            Text(
+                                text = currentTitle,
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        },
                         navigationIcon = {
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(painterResource(id = R.drawable.ic_menu), contentDescription = "Menu")
+                            if (currentDest?.parent != null) {
+                                IconButton(onClick = { navController.navigateUp() }) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_back),
+                                        contentDescription = "Back"
+                                    )
+                                }
+                            } else {
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_menu),
+                                        contentDescription = "Menu"
+                                    )
+                                }
                             }
                         }
                     )
@@ -293,11 +313,11 @@ fun MainScreen(
                 if (isLoggedIn == true) {
                     NavigationBar {
                         visibleDests.forEach { dest ->
-                            val selected = currentDest == dest
+                            val selected = currentDest == dest || currentDest?.parent == dest
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = {
-                                    if (!selected) {
+                                    if (!selected || currentDest.parent == dest) {
                                         navController.navigate(dest.name) {
                                             launchSingleTop = true
                                             restoreState = true

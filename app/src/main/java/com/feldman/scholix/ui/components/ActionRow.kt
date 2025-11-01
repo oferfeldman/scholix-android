@@ -769,18 +769,19 @@ fun ActionRow(
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                                 label = "pickerContent"
                             )
-
-                            val shape = when (index) {
-                                0 -> RoundedCornerShape(
+                            val shape = when {
+                                picker.options.size == 1 -> RoundedCornerShape(16.dp)
+                                index == 0 -> RoundedCornerShape(
                                     topStart = 16.dp, topEnd = 16.dp,
                                     bottomStart = 4.dp, bottomEnd = 4.dp
                                 )
-                                picker.options.lastIndex -> RoundedCornerShape(
+                                index == picker.options.lastIndex -> RoundedCornerShape(
                                     topStart = 4.dp, topEnd = 4.dp,
                                     bottomStart = 16.dp, bottomEnd = 16.dp
                                 )
                                 else -> RoundedCornerShape(4.dp)
                             }
+
 
                             Card(
                                 onClick = {
@@ -978,9 +979,16 @@ fun ActionRow(
                                 containerColor = Color.Transparent
                             }
 
-                            val shape = when (index) {
-                                0 -> RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
-                                list.options.lastIndex -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
+                            val shape = when {
+                                list.options.size == 1 -> RoundedCornerShape(20.dp)
+                                index == 0 -> RoundedCornerShape(
+                                    topStart = 20.dp, topEnd = 20.dp,
+                                    bottomStart = 4.dp, bottomEnd = 4.dp
+                                )
+                                index == list.options.lastIndex -> RoundedCornerShape(
+                                    topStart = 4.dp, topEnd = 4.dp,
+                                    bottomStart = 20.dp, bottomEnd = 20.dp
+                                )
                                 else -> RoundedCornerShape(4.dp)
                             }
                             val dark = isSystemInDarkTheme()
@@ -1100,7 +1108,7 @@ fun ActionRow(
 
 @Composable
 fun Title(text: String) {
-    ActionRow(spacing = 8.dp) {
+    ActionRow(spacing = 0.dp) {
         addTitle(
             text = text
         )
