@@ -1,4 +1,6 @@
 package com.feldman.scholix.ui.components
+
+import android.annotation.SuppressLint
 import com.feldman.scholix.R
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
@@ -7,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,7 +33,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -50,12 +52,10 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.ToggleButton
-import androidx.compose.material3.ToggleButtonDefaults
-import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -66,9 +66,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -78,6 +75,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import com.kyant.backdrop.effects.vibrancy
 
 @Composable
 fun CircleCheckbox(selected: Boolean, enabled: Boolean = true, onChecked: () -> Unit) {
@@ -108,13 +110,15 @@ data class SegmentedOption<T>(
     val iconRes: Int? = null,
     val enabled: Boolean = true,
     val title: String? = null,
+    val desc: String? = null,
     val font: FontFamily? = null,
     val autoFitText: Boolean = false,
     val colorSwatch: Color? = null,
     val backgroundColor: Color? = null,
     val selectedBackgroundColor: Color? = null,
     val textColor: Color? = null,
-    val selectedTextColor: Color? = null
+    val selectedTextColor: Color? = null,
+    val iconColor: Color? = null
 )
 @DslMarker
 annotation class ActionRowDsl
@@ -209,6 +213,14 @@ sealed class RowItem {
         val perRow: Int = 3,
         val onSelectedChange: ((T) -> Unit)? = null
     ) : RowItem()
+
+    data class VerticalActionListItem<T>(
+        val options: List<SegmentedOption<T>>,
+        val onClick: (T) -> Unit,
+        val isGlass: Boolean,
+        val backdrop: Backdrop
+    ) : RowItem()
+
 }
 
 @Suppress("unused")
@@ -245,12 +257,14 @@ class ActionRowScope {
     ) {
         items.add(RowItem.TextItem(text, style, fontSize, color, align, weight))
     }
+    @SuppressLint("ComposableNaming")
     @Composable
     fun addTitle(
         text: String,
     ) {
         items.add(RowItem.TextItem(text, MaterialTheme.typography.titleLarge, 24, null, TextAlign.Center, FontWeight.Bold))
     }
+    @SuppressLint("ComposableNaming")
     @Composable
     fun addSmallTitle(
         text: String,
@@ -333,7 +347,7 @@ class ActionRowScope {
 
     fun <T> ActionRowScope.addVerticalPicker(
         state: MutableState<T>,
-        vararg options: SegmentedOption<T>,
+        options: List<SegmentedOption<T>>,
         onSelectedChange: ((T) -> Unit)? = null
     ) {
         require(options.isNotEmpty())
@@ -348,6 +362,16 @@ class ActionRowScope {
     ) {
         require(options.isNotEmpty())
         items.add(RowItem.GridPickerItem(state, options.toList(), perRow, onSelectedChange))
+    }
+
+    fun <T> ActionRowScope.addVerticalActionList(
+        options: List<SegmentedOption<T>>,
+        onClick: (T) -> Unit,
+        isGlass: Boolean,
+        backdrop: Backdrop
+    ) {
+        require(options.isNotEmpty())
+        items.add(RowItem.VerticalActionListItem(options, onClick, isGlass, backdrop))
     }
 }
 
@@ -648,7 +672,7 @@ fun ActionRow(
                     val group = item as RowItem.SegmentedToggleGroupItem<Any?>
 
                     var selectedIndex by remember {
-                        mutableStateOf(group.options.indexOfFirst { it.value == group.state.value })
+                        mutableIntStateOf(group.options.indexOfFirst { it.value == group.state.value })
                     }
 
                     SingleChoiceSegmentedButtonRow(
@@ -898,7 +922,7 @@ fun ActionRow(
                                             if (opt.title != null) {
                                                 Spacer(Modifier.height(10.dp))
                                                 Text(
-                                                    text = opt.title ?: "",
+                                                    text = opt.title,
                                                     style = MaterialTheme.typography.titleLarge.copy(
                                                         fontSize = 24.sp,
                                                         fontWeight = FontWeight.Bold,
@@ -936,6 +960,137 @@ fun ActionRow(
                         }
                     }
                 }
+                is RowItem.VerticalActionListItem<*> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val list = item as RowItem.VerticalActionListItem<Any?>
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(if(item.isGlass) 10.dp else 2.dp)
+                    ) {
+                        list.options.forEachIndexed { index, opt ->
+
+                            var containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            val contentColor = MaterialTheme.colorScheme.onSurface
+                            val primaryColor = MaterialTheme.colorScheme.primary
+
+                            if(item.isGlass){
+                                containerColor = Color.Transparent
+                            }
+
+                            val shape = when (index) {
+                                0 -> RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
+                                list.options.lastIndex -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
+                                else -> RoundedCornerShape(4.dp)
+                            }
+                            val dark = isSystemInDarkTheme()
+
+
+                            Card(
+                                onClick = { list.onClick(opt.value) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (item.isGlass) {
+                                            Modifier.drawBackdrop(
+                                                backdrop = item.backdrop,
+                                                effects = {
+                                                    vibrancy()
+                                                    blur(12.dp.toPx())
+                                                    lens(
+                                                        refractionHeight = 40.dp.toPx(),
+                                                        refractionAmount = 120.dp.toPx(),
+                                                        depthEffect = true
+                                                    )
+                                                },
+                                                shape = { RoundedCornerShape(50) },
+                                                onDrawSurface = {
+                                                    drawRect(
+                                                        if (dark)
+                                                            Color(0xFF313131).copy(alpha = 0.2f)
+                                                        else
+                                                            Color(0xFFBDBDBD).copy(alpha = 0.2f)
+                                                    )
+                                                }
+                                            )
+                                        } else {
+                                            Modifier.background(
+                                                color = if (dark)
+                                                    Color(0xFF1E1E1E)
+                                                else
+                                                    Color.White.copy(alpha = 0.7f),
+                                                shape = RoundedCornerShape(50)
+                                            )
+                                        }
+                                    )
+                                    .height(90.dp),
+                                shape = shape,
+                                colors = CardDefaults.cardColors(containerColor),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    opt.iconRes?.let {
+                                        val bgColor = opt.backgroundColor ?: primaryColor
+                                        val iconColor = opt.iconColor ?: if(isSystemInDarkTheme()) bgColor.darken(0.7f) else bgColor.lighten(0.9f)
+
+
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .background(bgColor, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(it),
+                                                contentDescription = opt.text,
+                                                tint = iconColor,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                        Spacer(Modifier.width(16.dp))
+                                    }
+
+
+                                    Column(
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.Start,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = opt.text,
+                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                fontFamily = opt.font ?: MaterialTheme.typography.bodyLarge.fontFamily,
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 16.sp
+                                            ),
+                                            color = contentColor
+                                        )
+
+                                        opt.desc?.let {
+                                            Spacer(Modifier.height(2.dp))
+                                            Text(
+                                                text = it,
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    fontFamily = opt.font ?: MaterialTheme.typography.bodySmall.fontFamily,
+                                                    fontWeight = FontWeight.Normal,
+                                                    fontSize = 14.sp
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 2
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                        }
+                    }
+                }
+
                 else -> {}
             }
         }
@@ -953,13 +1108,16 @@ fun Title(text: String) {
     Spacer(modifier = Modifier.height(24.dp))
 }
 
+fun Color.darken(factor: Float): Color {
+    val r = (red * (1 - factor)).coerceIn(0f, 1f)
+    val g = (green * (1 - factor)).coerceIn(0f, 1f)
+    val b = (blue * (1 - factor)).coerceIn(0f, 1f)
+    return Color(r, g, b, alpha)
+}
 
-@Composable
-fun Subtitle(text: String) {
-    ActionRow(spacing = 8.dp) {
-        addSmallTitle(
-            text = text
-        )
-    }
-    Spacer(modifier = Modifier.height(4.dp))
+fun Color.lighten(factor: Float): Color {
+    val r = red + (1 - red) * factor
+    val g = green + (1 - green) * factor
+    val b = blue + (1 - blue) * factor
+    return Color(r.coerceIn(0f, 1f), g.coerceIn(0f, 1f), b.coerceIn(0f, 1f), alpha)
 }

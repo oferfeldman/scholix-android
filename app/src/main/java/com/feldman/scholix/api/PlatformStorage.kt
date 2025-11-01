@@ -1,7 +1,6 @@
 package com.feldman.scholix.api
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.util.Log
 import com.feldman.app.api.BarIlanPlatform
 import kotlinx.coroutines.async
@@ -13,6 +12,26 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import androidx.core.content.edit
+import com.feldman.scholix.R
+import com.feldman.scholix.api.platforms.DemoPlatform
+import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.api.platforms.WebtopPlatform
+
+data class PlatformInfo(
+    val name: String,
+    val iconRes: Int,
+    val factory: () -> Platform
+)
+
+val platformOptions = listOf(
+    PlatformInfo("Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
+    PlatformInfo("Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
+    PlatformInfo("Open University", R.drawable.ic_open_au) { OpenAUPlatform() as Platform },
+    PlatformInfo("Demo", R.drawable.ic_account_circle) { DemoPlatform() as Platform }
+)
+
+
 
 object PlatformStorage {
 
@@ -24,6 +43,7 @@ object PlatformStorage {
      * Serializes and saves the entire list of Platform objects.
      */
     fun savePlatforms(context: Context, platforms: List<Platform>) {
+        println(platforms)
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val array = JSONArray()
         for (p in platforms) {
@@ -33,9 +53,9 @@ object PlatformStorage {
                 Log.e(TAG, "Error serializing platform: ${p.javaClass.simpleName}", e)
             }
         }
-        prefs.edit()
-            .putString(KEY_PLATFORMS, array.toString())
-            .apply()
+        prefs.edit {
+            putString(KEY_PLATFORMS, array.toString())
+        }
     }
 
     /**
@@ -68,7 +88,9 @@ object PlatformStorage {
     }
 
     fun addPlatform(context: Context, platform: Platform) {
+
         val platforms = loadPlatforms(context)
+
         platforms.add(platform)
         savePlatforms(context, platforms)
     }
@@ -79,7 +101,12 @@ object PlatformStorage {
         val newPlatforms = mutableListOf<Platform>()
 
         try {
-            val barIlan = BarIlanPlatform(username, password)
+
+            val barIlanFields = LoginFields()
+                .addField("id", Type.Id, username)
+                .addField("password", Type.Password, password)
+
+            val barIlan = BarIlanPlatform(barIlanFields)
             if (barIlan.loggedIn) {
                 platforms.add(barIlan)
                 newPlatforms.add(barIlan)
@@ -89,7 +116,9 @@ object PlatformStorage {
         }
 
         try {
-            val webtop = WebtopPlatform(username, password)
+            val fields = LoginFields().addField("username", Type.Username, username).addField("password", Type.Password, password)
+
+            val webtop = WebtopPlatform(fields)
             if (webtop.loggedIn) {
                 platforms.add(webtop)
                 newPlatforms.add(webtop)
@@ -99,7 +128,7 @@ object PlatformStorage {
         }
 
         try {
-            val demo = DemoPlatform(username, password)
+            val demo = DemoPlatform()
             if (demo.loggedIn) {
                 platforms.add(demo)
                 newPlatforms.add(demo)
@@ -114,10 +143,18 @@ object PlatformStorage {
 
     fun checkPlatform(context: Context, username: String, password: String): Boolean {
         val executor = Executors.newFixedThreadPool(3)
-        val tasks = listOf<Callable<Boolean>>(
-            Callable { BarIlanPlatform(username, password).loggedIn },
-            Callable { WebtopPlatform(username, password).loggedIn },
-            Callable { DemoPlatform(username, password).loggedIn }
+        val webtopFields = LoginFields()
+            .addField("username", Type.Username, username)
+            .addField("password", Type.Password, password)
+
+        val barIlanFields = LoginFields()
+            .addField("id", Type.Id, username)
+            .addField("password", Type.Password, password)
+
+        val tasks = listOf(
+            Callable { BarIlanPlatform(barIlanFields).loggedIn },
+            Callable { WebtopPlatform(webtopFields).loggedIn },
+            Callable { DemoPlatform().loggedIn }
         )
 
         return try {
@@ -137,68 +174,35 @@ object PlatformStorage {
         }
     }
 
-    suspend fun refreshCookies(context: Context) = coroutineScope {
+    suspend fun refreshCookies(context: Context): List<String> = coroutineScope {
         val platforms = loadPlatforms(context)
 
-        // Launch all refresh tasks in parallel
         val results = platforms.map { p ->
             async {
                 val success = try {
                     p.refreshCookies()
                 } catch (e: Exception) {
-                    Log.e("Refresh", "Error refreshing cookies for ${p.javaClass.simpleName}", e)
+                    Log.e("PlatformStorage", "Error refreshing cookies for ${p.javaClass.simpleName}", e)
                     false
                 }
 
-                if (success) {
-                    Log.d("Refresh", "Successfully refreshed cookies for ${p.javaClass.simpleName}")
-
-                    // ✅ If Webtop refreshed, immediately reload grades
-                    if (p is WebtopPlatform) {
-                        try {
-                            val courses = p.getCourses()
-                            if (courses.isNotEmpty()) {
-                                courses[0].put("grades", p.getGrades())
-                            }
-                        } catch (e: Exception) {
-                            Log.e("Refresh", "Error refreshing grades for WebtopPlatform", e)
-                        }
-                    }
-                } else {
-                    Log.w("Refresh", "Failed to refresh cookies for ${p.javaClass.simpleName}")
-
-                    // Optional: retry once for Webtop
-                    if (p is WebtopPlatform) {
-                        try {
-                            if (p.refreshCookies()) {
-                                Log.d("Refresh", "Retry succeeded for WebtopPlatform")
-                                val courses = p.getCourses()
-                                if (courses.isNotEmpty()) {
-                                    courses[0].put("grades", p.getGrades())
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Log.e("Refresh", "Retry also failed for WebtopPlatform", e)
-                        }
-                    }
+                if (!success) {
+                    Log.w("PlatformStorage", "Failed to refresh cookies for ${p.javaClass.simpleName}")
+                    return@async p.javaClass.simpleName
                 }
-                p // return the platform after refresh
+                null
             }
         }
 
-        // ✅ Wait until all refreshes are done
-        val updatedPlatforms = results.awaitAll()
+        val failed = results.awaitAll().filterNotNull()
+        if (failed.isNotEmpty()) Log.w("Refresh", "Failed to refresh: $failed")
 
-        savePlatforms(context, updatedPlatforms)
+        savePlatforms(context, platforms)
+        failed // return list of failed platform names
     }
 
-    fun clearPlatforms(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .remove(KEY_PLATFORMS)
-            .apply()
-        Log.d(TAG, "Cleared all stored platforms")
-    }
+
+
 
     fun getAccount(context: Context, index: Int): Platform? {
         val platforms = loadPlatforms(context)
@@ -241,8 +245,8 @@ object PlatformStorage {
         for ((index, platform) in platforms.withIndex()) {
             for (course in platform.getCourses()) {
                 val name = course.optString("name")
-                if (seenNames.add(name)) {   // ✅ only add first occurrence
-                    val copy = JSONObject(course.toString()) // deep copy
+                if (seenNames.add(name)) {
+                    val copy = JSONObject(course.toString())
                     copy.put("index", index)
                     allCourses.add(copy)
                 }
@@ -250,4 +254,30 @@ object PlatformStorage {
         }
         return allCourses
     }
+
+    //Clear all platforms from shared preferences
+    fun clearPlatforms(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit {
+            remove(KEY_PLATFORMS)
+        }
+        Log.d(TAG, "Cleared all stored platforms")
+    }
+
+    fun hasGradesSupport(context: Context): Boolean {
+        val platforms = loadPlatforms(context)
+        return platforms.any { it.suportsGrades }
+    }
+
+    fun hasScheduleSupport(context: Context): Boolean {
+        val platforms = loadPlatforms(context)
+        return platforms.any { it.supportsSchedule }
+    }
+
+    fun hasAttendanceSupport(context: Context): Boolean {
+        val platforms = loadPlatforms(context)
+        return platforms.any { it.supportsAttendance }
+    }
+
+
 }

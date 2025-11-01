@@ -4,7 +4,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-
+import androidx.compose.ui.platform.LocalContext
 private val DarkColors = darkColorScheme(
     primary = Color(0xFF54B3FF),
     secondary = Color(0xFF47CB4C),
@@ -23,15 +23,24 @@ private val LightColors = lightColorScheme(
 )
 
 @Composable
+fun darkColors(): ColorScheme{
+    return DarkColors
+}
+
+@Composable
 fun AppTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    useDarkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    val colors = if (darkTheme) DarkColors else LightColors
+    val context = LocalContext.current
+    val colorScheme =
+        if (useDarkTheme) dynamicDarkColorScheme(context)
+        else dynamicLightColorScheme(context)
 
     MaterialTheme(
-        colorScheme = colors,
-        typography = Typography(),
+        colorScheme = colorScheme,
+        typography = MaterialTheme.typography,
+        shapes = MaterialTheme.shapes,
         content = content
     )
 }

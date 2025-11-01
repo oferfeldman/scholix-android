@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("kotlin-kapt")
+    id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
 }
 
 android {
@@ -21,7 +23,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("F:/Users/feldm/Projects/feldman.jks")
+            storeFile = file("feldman.jks")
             storePassword = "***REMOVED***"
             keyAlias = "key0"
             keyPassword = "***REMOVED***"
@@ -50,13 +52,20 @@ android {
 }
 
 dependencies {
+    //BOMS
+    implementation(platform(libs.firebase.bom))
+    implementation(platform(libs.androidx.compose.bom))
+
+    //Kotlin
+    implementation(libs.kotlin.reflect)
+
+
     // Core Android
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material.v1130)
 
     // Jetpack Compose BOM
-    implementation(platform(libs.androidx.compose.bom))
     implementation(libs.ui)
     // Jetpack Compose
     implementation(libs.androidx.activity.compose)
@@ -68,7 +77,6 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.foundation)
     implementation(libs.androidx.animation)
-    implementation(libs.foundation)
     implementation(libs.androidx.ui.text)
     kapt(libs.androidx.room.compiler)
     // Optional but useful
@@ -80,6 +88,7 @@ dependencies {
 
     // Optional - navigation
     implementation(libs.navigation.compose)
+    implementation(libs.jsoup)
 
     // Tests
     testImplementation(libs.junit)
@@ -89,4 +98,13 @@ dependencies {
     implementation(libs.accompanist.swiperefresh)
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)
+
+    //Firebase
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.crashlytics.ndk)
+
+
+    implementation(libs.androidliquidglass)
+    implementation(libs.capsule)
+
 }

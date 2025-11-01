@@ -223,7 +223,7 @@ fun AttendancePage(modifier: Modifier = Modifier) {
             if (platform != null) {
                 println(1)
                 try {
-                    val json = platform.getDisciplineEvents(yearState, semesterState.lowercase())
+                    val json = platform.getAttendanceEvents(yearState, semesterState.lowercase())
                     val grouped = mutableMapOf<String, MutableList<JSONObject>>()
 
                     val eventsJson = json.optJSONObject("events")
@@ -254,7 +254,7 @@ fun AttendancePage(modifier: Modifier = Modifier) {
             val platform = PlatformStorage.getAccount(context, 0)
             if (platform != null) {
                 try {
-                    val json = platform.getDisciplineEvents(yearState, semesterState.lowercase())
+                    val json = platform.getAttendanceEvents(yearState, semesterState.lowercase())
                     val grouped = mutableMapOf<String, MutableList<JSONObject>>()
 
                     val eventsJson = json.optJSONObject("events")
@@ -283,9 +283,9 @@ fun AttendancePage(modifier: Modifier = Modifier) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 16.dp, top = 48.dp, end = 16.dp, bottom = 0.dp)
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 0.dp)
     ) {
-        Title(stringResource(R.string.attendance))
+//        Title(stringResource(R.string.attendance))
 
         FiltersRow(
             sortBy = sortBy,
@@ -333,7 +333,6 @@ fun AttendancePage(modifier: Modifier = Modifier) {
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(RoundedCornerShape(16.dp))
-                        .navigationBarsPadding()
                 ) {
                     groupedEvents.forEach { (groupKey, list) ->
 
@@ -408,7 +407,6 @@ fun AttendancePage(modifier: Modifier = Modifier) {
 
                         item { Spacer(Modifier.height(20.dp)) }
                     }
-                    item { Spacer(Modifier.height(80.dp)) }
                 }
 
             }

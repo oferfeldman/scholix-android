@@ -1,16 +1,21 @@
 import android.text.BidiFormatter
+import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.intl.Locale
@@ -25,15 +30,51 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import com.feldman.scholix.R
 import androidx.compose.ui.text.intl.LocaleList
+import com.feldman.lockerapp.ui.theme.darkColors
+import com.feldman.scholix.api.PlatformStorage
+import com.feldman.scholix.pages.ChipDropdown
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.Calendar
+import kotlin.sequences.asSequence
 
 enum class ScheduleMode() { Original(), Updated(); }
+@Composable
+fun ClassFiltersRow(
+    grade: String,
+    onGradeChange: (String) -> Unit,
+    clazz: String,
+    onClassChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // שכבה (grade)
+        ChipDropdown(
+            label = "שכבה",
+            icon = painterResource(R.drawable.ic_school), // pick any icon you have
+            options = listOf("7", "8", "9"),
+            selected = grade,
+            onSelectedChange = onGradeChange
+        )
+
+        // כיתה (classroom inside the grade)
+        ChipDropdown(
+            label = "כיתה",
+            icon = painterResource(R.drawable.ic_calendar), // pick any icon you have
+            options = (1..9).map { it.toString() }, // classes 1–9
+            selected = clazz,
+            onSelectedChange = onClassChange
+        )
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SchedulePage(
     modifier: Modifier = Modifier,
-    fetchScheduleUpdated: suspend (dayIdx: Int) -> List<JSONObject>,
-    fetchScheduleOriginal: suspend (dayIdx: Int) -> List<JSONObject>,
 ) {
     val dayNames = listOf(
         stringResource(R.string.sunday),
@@ -43,72 +84,86 @@ fun SchedulePage(
         stringResource(R.string.thursday),
         stringResource(R.string.friday)
     )
+
     val allSchedulesUpdated = remember { mutableStateMapOf<Int, List<JSONObject>>() }
     val allSchedulesOriginal = remember { mutableStateMapOf<Int, List<JSONObject>>() }
-    var isUpdated by remember { mutableStateOf(true) }
-    val today = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)
-    val initialPage = if (today == java.util.Calendar.SATURDAY) {
-        0 // treat Saturday as Sunday
-    } else {
-        (today + 6) % 7
-    }
+    val errorMessages = remember { mutableStateMapOf<Int, String?>() }
+
+    val today = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+    val initialPage = if (today == Calendar.SATURDAY) 0 else (today + 6) % 7
 
     val pagerState = rememberPagerState(
         initialPage = initialPage,
         pageCount = { dayNames.size }
     )
     val coroutineScope = rememberCoroutineScope()
-
-    var scheduleItemsUpdated by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-    var scheduleItemsOriginal by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-
     var isLoading by remember { mutableStateOf(false) }
 
+    var selectedGrade by remember { mutableStateOf("9") }
+    var selectedClass by remember { mutableStateOf("6") }
+    val selectedValue = "${selectedGrade}|${selectedClass}"
+    val context = LocalContext.current
 
-
-
-    LaunchedEffect(pagerState.currentPage) {
+    LaunchedEffect(pagerState.currentPage, selectedValue) {
         isLoading = true
+        errorMessages[pagerState.currentPage] = null
         try {
-            val updated = fetchScheduleUpdated(pagerState.currentPage)
-            scheduleItemsUpdated = updated
-            isLoading = false
-            val original = fetchScheduleOriginal(pagerState.currentPage)
-            scheduleItemsOriginal = original
+            Log.d("SchedulePage", "Fetching schedule for $selectedValue")
 
-        } catch (_: Exception) {
-            scheduleItemsUpdated = emptyList()
-            scheduleItemsOriginal = emptyList()
+            val platform = PlatformStorage.getAccount(context, 0)
+            if (platform != null) {
+                // --- Updated schedule ---
+                val updated = withContext(Dispatchers.IO) {
+                    val schedule = platform.getSchedule(pagerState.currentPage, null, selectedValue)
+
+                    // detect if an error object is returned
+                    if (schedule.has("error")) {
+                        val err = when (schedule.optString("error")) {
+                            "server_unreachable" -> "Cannot reach the server.\nCheck your internet connection."
+                            "login_failed" -> "Login failed.\nPlease re-login."
+                            else -> "Unknown error occurred while loading schedule."
+                        }
+                        errorMessages[pagerState.currentPage] = err
+                        emptyList()
+                    } else {
+                        schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
+                    }
+                }
+                allSchedulesUpdated[pagerState.currentPage] = updated
+
+                // --- Original schedule ---
+                val original = withContext(Dispatchers.IO) {
+                    val schedule = platform.getOriginalSchedule(pagerState.currentPage, null, selectedValue)
+                    schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
+                }
+                allSchedulesOriginal[pagerState.currentPage] = original
+            } else {
+                errorMessages[pagerState.currentPage] = "No platform account found."
+            }
+        } catch (e: Exception) {
+            Log.e("SchedulePage", "Error fetching schedule", e)
+            errorMessages[pagerState.currentPage] = "Unknown error occurred while loading schedule."
+        } finally {
+            isLoading = false
         }
     }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(start=16.dp, top=48.dp, end=16.dp, bottom=16.dp)
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 0.dp)
     ) {
-        Text(
-            text = stringResource(R.string.schedule),
-            style = MaterialTheme.typography.headlineSmall.copy(
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp
-            ),
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.align(Alignment.CenterHorizontally)
-        )
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        val updatedState = remember { mutableStateOf(ScheduleMode.Updated) }
+        val scheduleMode = remember { mutableStateOf(ScheduleMode.Updated) }
 
         ActionRow {
             addSegmentedToggleGroup(
-                state = updatedState,
+                state = scheduleMode,
                 SegmentedOption(
                     ScheduleMode.Original,
                     stringResource(R.string.original),
                     R.drawable.ic_raw,
-                    selectedBackgroundColor = MaterialTheme.colorScheme.errorContainer,
+                    selectedBackgroundColor = darkColors().errorContainer,
                     textColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     selectedTextColor = MaterialTheme.colorScheme.onSurface
                 ),
@@ -116,21 +171,28 @@ fun SchedulePage(
                     ScheduleMode.Updated,
                     stringResource(R.string.updated),
                     R.drawable.ic_new,
-                    selectedBackgroundColor = MaterialTheme.colorScheme.secondary,
+                    selectedBackgroundColor = darkColors().secondary,
                     textColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     selectedTextColor = MaterialTheme.colorScheme.onSurface
-
                 ),
                 onSelectedChange = { newStyle ->
-                    isUpdated = newStyle == ScheduleMode.Updated
+                    scheduleMode.value = newStyle
                 }
             )
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+
+        ClassFiltersRow(
+            grade = selectedGrade,
+            onGradeChange = { selectedGrade = it },
+            clazz = selectedClass,
+            onClassChange = { selectedClass = it },
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Tabs
         PrimaryTabRow(
             selectedTabIndex = pagerState.currentPage,
             modifier = Modifier.fillMaxWidth()
@@ -140,47 +202,66 @@ fun SchedulePage(
                     selected = pagerState.currentPage == index,
                     onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
                     selectedContentColor = MaterialTheme.colorScheme.primary,
-                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    content = {
-                        Text(
-                            text = day,
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Clip,
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(horizontal = 3.dp, vertical = 16.dp)
-                        )
-                    }
-                )
+                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ) {
+                    Text(
+                        text = day,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 16.dp)
+                    )
+                }
             }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
-        val scheduleItems = if (isUpdated) scheduleItemsUpdated else scheduleItemsOriginal
 
-        // Pager content (one page per day)
-        HorizontalPager(state = pagerState) { _ ->
-            if (isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularWavyProgressIndicator()
+        HorizontalPager(state = pagerState) { page ->
+            val scheduleItems = when (scheduleMode.value) {
+                ScheduleMode.Updated -> allSchedulesUpdated[page] ?: emptyList()
+                ScheduleMode.Original -> allSchedulesOriginal[page] ?: emptyList()
+            }
+
+            val errMessage = errorMessages[page]
+
+            when {
+                isLoading && scheduleItems.isEmpty() -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularWavyProgressIndicator()
+                    }
                 }
-            } else if (scheduleItems.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(stringResource(R.string.noSchedule), color = Color.Gray)
+                errMessage != null -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = errMessage,
+                            color = Color.Red,
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 18.sp
+                            )
+                        )
+                    }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(scheduleItems) { item ->
-                        ScheduleCard(item)
+                scheduleItems.isEmpty() -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            stringResource(R.string.noSchedule),
+                            color = Color.Gray,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(scheduleItems) { item ->
+                            ScheduleCard(item)
+                        }
                     }
                 }
             }
@@ -188,12 +269,13 @@ fun SchedulePage(
     }
 }
 
+
 @Composable
 fun ScheduleCard(item: JSONObject) {
     val colors = getColorFromClass(item.optString("colorClass"))
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
         colors = CardDefaults.cardColors(containerColor = colors.background)
 
     ) {
@@ -209,20 +291,21 @@ fun ScheduleCard(item: JSONObject) {
 
             val subjectRaw = item.optString("subject")
 
-// Wrap with Unicode bidi markers based on a Hebrew context
             val subjectBidi = remember(subjectRaw) {
-                BidiFormatter.getInstance(java.util.Locale("he")).unicodeWrap(subjectRaw)
+                val locale = java.util.Locale.forLanguageTag("he")
+                BidiFormatter.getInstance(locale).unicodeWrap(subjectRaw)
             }
+
 
             Text(
                 text = subjectBidi,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
-                    textDirection = TextDirection.ContentOrRtl,   // heuristics: use RTL if content starts RTL
+                    textDirection = TextDirection.ContentOrRtl,
                     localeList = LocaleList(
-                        Locale("he"), // Hebrew
-                        Locale("en")  // English
+                        Locale("he"),
+                        Locale("en")
                     )
                 ),
                 color = reversedColor,

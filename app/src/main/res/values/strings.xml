@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">scholix</string>
+    <string name="app_name" translatable="false">Scholix</string>
     <string name="grades">Grades</string>
     <string name="average">Average</string>
     <string name="sunday">Sun</string>

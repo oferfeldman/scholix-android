@@ -1,40 +1,62 @@
 package com.feldman.scholix
 
-import SchedulePage
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
 import androidx.room.Room
-import com.feldman.scholix.pages.LockerApp
 import com.feldman.scholix.pages.LockerDatabase
 import com.feldman.scholix.pages.LockerRepository
-import com.feldman.scholix.pages.LockerViewModel
-import com.feldman.scholix.pages.LockerViewModelFactory
 import com.feldman.lockerapp.ui.theme.AppTheme
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.api.WebtopPlatform
-import com.feldman.scholix.pages.AttendancePage
-import com.feldman.scholix.pages.GradesScreen
-import com.feldman.scholix.pages.SettingsPage
+import com.feldman.scholix.navigation.Dest
+import com.feldman.scholix.navigation.NavHost
+import com.feldman.scholix.pages.LoginPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.lang.Thread.sleep
+import java.io.IOException
+
+fun isSmartSchoolReachable(): Boolean {
+    return try {
+        val process = Runtime.getRuntime().exec("ping -c 1 smartschool.co.il")
+        val exitCode = process.waitFor()
+        exitCode == 0 // success if 0
+    } catch (e: IOException) {
+        false
+    } catch (e: InterruptedException) {
+        false
+    }
+}
 
 class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -44,25 +66,101 @@ class MainActivity : ComponentActivity() {
             applicationContext,
             LockerDatabase::class.java,
             "locker-db"
-        ).build()
-        val repository = LockerRepository(db.lockerItemDao())
+        )
+            .fallbackToDestructiveMigration(false)
+            .build()
+
+        val repository = LockerRepository(
+            itemDao = db.lockerItemDao(),
+            tabDao = db.lockerTabDao()
+        )
+
         setContent {
             AppTheme {
                 var isLoggedIn by remember { mutableStateOf<Boolean?>(null) }
                 val context = LocalContext.current
+                val scope = rememberCoroutineScope()
+                var platforms by remember { mutableStateOf<List<Platform>>(emptyList()) }
+                var isLoading by remember { mutableStateOf(true) }
+                var preloadedCourses by remember { mutableStateOf(listOf<JSONObject>()) }
+                val snackbarHostState = remember { SnackbarHostState() }
 
-                LaunchedEffect(Unit) {
-                    withContext(Dispatchers.IO) {
-                        val platforms = PlatformStorage.loadPlatforms(context)
-                        val valid = platforms.any { it.isLoggedIn() }
+                fun reloadPlatforms() {
+                    val ctx = context
+                    scope.launch(Dispatchers.IO) {
+                        val newPlatforms = PlatformStorage.loadPlatforms(ctx)
+                        val valid = newPlatforms.any { it.isLoggedIn() }
                         withContext(Dispatchers.Main) {
+                            platforms = newPlatforms
+                            println(platforms)
                             isLoggedIn = valid
+                            sleep(120.toLong())
+                            isLoading = false
+
                         }
                     }
                 }
 
-                when (isLoggedIn) {
-                    null -> {
+                fun reloadPreloads(snackbarHostState: SnackbarHostState) {
+                    Log.d("MainActivity", "Reloading platforms")
+                    scope.launch(Dispatchers.IO) {
+                        val reachable = isSmartSchoolReachable()
+                        if (!reachable) {
+                            withContext(Dispatchers.Main) {
+                                scope.launch {
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = "Cannot connect to Webtop. Check your internet connection.",
+                                        actionLabel = "Retry"
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        reloadPreloads(snackbarHostState)
+                                    }
+                                }
+                            }
+                            return@launch
+                        }
+
+                        val failedPlatforms = PlatformStorage.refreshCookies(this@MainActivity)
+                        val courses = PlatformStorage.getCourses(this@MainActivity)
+
+                        withContext(Dispatchers.Main) {
+                            preloadedCourses = courses
+                            isLoading = false
+
+                            if (failedPlatforms.isNotEmpty()) {
+                                scope.launch {
+                                    val message = "Failed to reload: ${failedPlatforms.joinToString(", ")}"
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = message,
+                                        actionLabel = "Retry"
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        isLoading = true
+                                        reloadPreloads(snackbarHostState)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+                LaunchedEffect(Unit) {
+                    withContext(Dispatchers.IO) {
+                        reloadPreloads(snackbarHostState)
+                        val newPlatforms = PlatformStorage.loadPlatforms(context)
+                        val valid = newPlatforms.any { it.isLoggedIn() }
+
+                        withContext(Dispatchers.Main) {
+                            platforms = newPlatforms
+                            isLoggedIn = valid
+                            isLoading = false
+                        }
+                    }
+                }
+
+                when {
+                    isLoading -> {
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
@@ -70,68 +168,34 @@ class MainActivity : ComponentActivity() {
                             CircularWavyProgressIndicator()
                         }
                     }
-                    false -> {
-                        LoginScreen(onLoginSuccess = { isLoggedIn = true })
+
+                    isLoggedIn==false -> {
+                        LoginPage(
+                            onLoginSuccess = {
+                                isLoading = true
+                                reloadPlatforms()
+                                isLoggedIn = true
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
-                    true -> {
-                        var isLoading by remember { mutableStateOf(true) }
-                        var preloadedCourses by remember { mutableStateOf(listOf<JSONObject>()) }
-                        val scope = rememberCoroutineScope()
-                        var selectedItem by remember { mutableStateOf(0) }
-                        var platforms by remember { mutableStateOf<List<Platform>>(emptyList()) }
-                        LaunchedEffect(Unit) {
-                            withContext(Dispatchers.IO) {
-                                platforms = PlatformStorage.loadPlatforms(context)
-                                val valid = platforms.any { it.isLoggedIn() }
-                                withContext(Dispatchers.Main) { isLoggedIn = valid }
+
+                    else -> {
+                        MainScreen(
+                            preloadedCourses = preloadedCourses,
+                            repository = repository,
+                            onPlatformsChanged = {
+                                reloadPlatforms()
+                                reloadPreloads(snackbarHostState)
+                            },
+                            platforms = platforms,
+                            onLoginSuccess = {
+                                isLoading = true
+                                reloadPlatforms()
+                                reloadPreloads(snackbarHostState)
+                                isLoggedIn = true
                             }
-                        }
-                        fun reloadPreloads() {
-                            scope.launch(Dispatchers.IO) {
-                                PlatformStorage.refreshCookies(this@MainActivity)
-                                val courses = PlatformStorage.getCourses(this@MainActivity)
-//                                val filled = coroutineScope {
-//                                    courses.map { course ->
-//                                        async {
-//                                            val platformIndex = course.optInt("index")
-//                                            val courseName = course.optString("name")
-//                                            try {
-//                                                val gradesArray = platforms[platformIndex].getGrades(courseName)
-//                                                course.put("grades", gradesArray)
-//                                            } catch (_: Exception) {
-//                                                course.put("grades", JSONArray())
-//                                            }
-//                                            course
-//                                        }
-//                                    }.awaitAll()
-//                                }
-                                withContext(Dispatchers.Main) {
-                                    preloadedCourses = courses
-                                    isLoading = false
-                                }
-                            }
-                        }
-
-                        LaunchedEffect(Unit) { reloadPreloads() }
-
-                        if (isLoading) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularWavyProgressIndicator()
-                            }
-                        } else {
-
-                            MainScreen(
-                                preloadedCourses = preloadedCourses,
-                                repository = repository,
-                                selectedItem = selectedItem,
-                                onSelectedChange = { selectedItem = it },
-                                onPlatformsChanged = { reloadPreloads() }
-                            )
-                        }
-
+                        )
                     }
                 }
             }
@@ -140,181 +204,202 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun LoginScreen(
-    onLoginSuccess: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Login", style = MaterialTheme.typography.headlineMedium)
-
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                label = { Text("Username") }
-            )
-
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Password") },
-                visualTransformation = PasswordVisualTransformation()
-            )
-
-
-            if (isLoading) {
-                CircularProgressIndicator()
-            } else {
-                Button(onClick = {
-                    if (username.isBlank() || password.isBlank()) {
-                        errorMessage = "Please enter both fields"
-                        return@Button
-                    }
-                    isLoading = true
-                    errorMessage = null
-
-                    scope.launch {
-                        try {
-                            val platform = withContext(Dispatchers.IO) {
-                                WebtopPlatform(username, password)
-                            }
-
-                            if (platform.isLoggedIn()) {
-                                PlatformStorage.savePlatforms(context, listOf(platform))
-                                onLoginSuccess()
-                            } else {
-                                errorMessage = "Invalid credentials"
-                            }
-                        } catch (e: Exception) {
-                            errorMessage = "Login error: ${e.localizedMessage}"
-                        } finally {
-                            isLoading = false
-                        }
-                    }
-                }) {
-                    Text("Login")
-                }
-            }
-
-            errorMessage?.let {
-                Text(it, color = MaterialTheme.colorScheme.error)
-            }
-        }
-    }
-}
-
-
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     preloadedCourses: List<JSONObject>,
     repository: LockerRepository,
-    selectedItem: Int,
-    onSelectedChange: (Int) -> Unit,
-    onPlatformsChanged: () -> Unit
+    onPlatformsChanged: () -> Unit,
+    platforms: List<Platform>,
+    onLoginSuccess: () -> Unit,
 ) {
-
-    val items = listOf(
-        stringResource(R.string.grades),
-        stringResource(R.string.schedule),
-        stringResource(R.string.attendance),
-        stringResource(R.string.locker),
-        "Settings"
-    )
-
-    val icons = listOf(
-        R.drawable.ic_grade,
-        R.drawable.ic_schedule,
-        R.drawable.ic_alarm,
-        R.drawable.ic_locker,
-        R.drawable.ic_settings
-    )
+    // Local login state (independent of MainActivity)
+    var isLoggedIn by remember { mutableStateOf<Boolean?>(null) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
-    val factory = LockerViewModelFactory(repository)
-    val viewModel: LockerViewModel = viewModel(factory = factory)
+    // Feature availability
+    var hasGrades by remember { mutableStateOf(false) }
+    var hasSchedule by remember { mutableStateOf(false) }
+    var hasAttendance by remember { mutableStateOf(false) }
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                items.forEachIndexed { index, label ->
-                    NavigationBarItem(
-                        selected = selectedItem == index,
-                        onClick = { onSelectedChange(index) },
+    // Determine feature support
+    LaunchedEffect(platforms) {
+        withContext(Dispatchers.IO) {
+            val g = PlatformStorage.hasGradesSupport(context)
+            val s = PlatformStorage.hasScheduleSupport(context)
+            val a = PlatformStorage.hasAttendanceSupport(context)
+            withContext(Dispatchers.Main) {
+                hasGrades = g
+                hasSchedule = s
+                hasAttendance = a
+            }
+        }
+    }
+
+    // 🔄 Check login state once when screen loads
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val valid = PlatformStorage.loadPlatforms(context).any { it.isLoggedIn() }
+            withContext(Dispatchers.Main) {
+                isLoggedIn = valid
+            }
+        }
+    }
+
+    val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val currentDest = Dest.entries.firstOrNull { dest ->
+        currentRoute?.startsWith(dest.name) == true
+    }
+
+    val currentTitle = currentDest?.label ?: "Scholix"
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+
+    val visibleDests = Dest.entries.filter { dest ->
+        dest.visible && when (dest) {
+            Dest.Grades -> hasGrades
+            Dest.Schedule -> hasSchedule
+            Dest.Attendance -> hasAttendance
+            Dest.Messages -> false
+            else -> true
+        }
+    }
+    val visibleSideDests = Dest.entries.filter { dest ->
+        dest.visible && when (dest) {
+            Dest.Grades -> hasGrades
+            Dest.Schedule -> hasSchedule
+            Dest.Attendance -> hasAttendance
+            else -> true
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                if (isLoggedIn == true) {
+                    CenterAlignedTopAppBar(
+                        title = { Text(currentTitle) },
+                        navigationIcon = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(painterResource(id = R.drawable.ic_menu), contentDescription = "Menu")
+                            }
+                        }
+                    )
+                }
+            },
+            bottomBar = {
+                if (isLoggedIn == true) {
+                    NavigationBar {
+                        visibleDests.forEach { dest ->
+                            val selected = currentDest == dest
+                            NavigationBarItem(
+                                selected = selected,
+                                onClick = {
+                                    if (!selected) {
+                                        navController.navigate(dest.name) {
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    }
+                                },
+                                icon = {
+                                    Icon(
+                                        painterResource(
+                                            id = if (selected) dest.filledIcon else dest.outlineIcon
+                                        ),
+                                        contentDescription = dest.label
+                                    )
+                                },
+                                label = { Text(dest.label) },
+                                alwaysShowLabel = true
+                            )
+                        }
+                    }
+                }
+            }
+        ) { innerPadding ->
+            NavHost(
+                navController = navController,
+                modifier = Modifier.padding(innerPadding),
+                preloadedCourses = preloadedCourses,
+                repository = repository,
+                platforms = platforms,
+                onPlatformsChanged = onPlatformsChanged,
+                onLogout = { isLoggedIn = false }, // 👈 internal state changes
+                onLoginSuccess = { onLoginSuccess(); isLoggedIn = true } // 👈 update internal state
+            )
+        }
+
+        // Drawer overlay
+        AnimatedVisibility(visible = drawerState.isOpen, enter = fadeIn(), exit = fadeOut()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.4f))
+                    .noRippleClickable { scope.launch { drawerState.close() } }
+            )
+        }
+
+        val offsetX by animateDpAsState(
+            targetValue = if (drawerState.isOpen) 0.dp else (-260).dp,
+            label = "drawerOffset"
+        )
+
+        Surface(
+            modifier = Modifier
+                .width(260.dp)
+                .fillMaxHeight()
+                .offset(x = offsetX)
+                .align(Alignment.CenterStart),
+            tonalElevation = 4.dp,
+            shadowElevation = 8.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerLow
+        ) {
+            Column(modifier = Modifier.padding(top = 60.dp)) {
+                Spacer(Modifier.height(8.dp))
+                visibleSideDests.forEach { dest ->
+                    val selected = currentDest == dest
+                    NavigationDrawerItem(
                         icon = {
                             Icon(
-                                painter = painterResource(id = icons[index]),
-                                contentDescription = label
+                                painterResource(
+                                    id = if (selected) dest.filledIcon else dest.outlineIcon
+                                ),
+                                contentDescription = dest.label
                             )
                         },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                        ),
                         label = {
                             Text(
-                                text = label,
+                                text = dest.label,
                                 style = MaterialTheme.typography.bodyLarge.copy(
                                     fontWeight = FontWeight.Bold
                                 )
                             )
                         },
+                        selected = selected,
+                        onClick = {
+                            if (!selected) {
+                                navController.navigate(dest.name.lowercase()) {
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
             }
         }
-    ) { innerPadding ->
-        when (selectedItem) {
-            0 -> GradesScreen(
-                modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()),
-                preloadedCourses = preloadedCourses
-            )
-            1 -> SchedulePage(
-                modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()),
-                fetchScheduleUpdated = { dayIdx ->
-                    val platform = PlatformStorage.getAccount(context, 0)
-                    if (platform != null) {
-                        withContext(Dispatchers.IO) {
-                            val schedule = platform.getSchedule(dayIdx)
-                            schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
-                        }
-                    } else {
-                        emptyList()
-                    }
-                },
-                fetchScheduleOriginal = { dayIdx ->
-                    val platform = PlatformStorage.getAccount(context, 0)
-                    if (platform != null) {
-                        withContext(Dispatchers.IO) {
-                            val schedule = platform.getOriginalSchedule(dayIdx)
-                            schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
-                        }
-                    } else {
-                        emptyList()
-                    }
-                }
-            )
-            2 -> AttendancePage(modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()))
-            3 -> LockerApp(modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()), viewModel = viewModel)
-            4 -> SettingsPage(
-                modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding()),
-                onPlatformsChanged = onPlatformsChanged
-            )
-        }
     }
 }
+
+
+
+@Composable
+fun Modifier.noRippleClickable(onClick: () -> Unit): Modifier =
+    pointerInput(Unit) {
+        detectTapGestures(onTap = { onClick() })
+    }

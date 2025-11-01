@@ -1,13 +1,22 @@
 package com.feldman.scholix.pages
+import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.combinedClickable
 import com.feldman.scholix.R
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -23,19 +32,34 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
 import com.feldman.app.api.BarIlanPlatform
+import com.feldman.scholix.api.LoginFields
+import com.feldman.scholix.api.Platform
+import com.feldman.scholix.api.PlatformInfo
 import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.api.WebtopPlatform
+import com.feldman.scholix.api.Type
+import com.feldman.scholix.api.applyLoginFields
+import com.feldman.scholix.api.platformOptions
+import com.feldman.scholix.api.platforms.DemoPlatform
+import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.navigation.Dest
+import com.feldman.scholix.ui.components.ActionRow
+import com.feldman.scholix.ui.components.SegmentedOption
 import com.feldman.scholix.ui.components.Title
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.reflect.full.companionObjectInstance
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsPage(
+fun PlatformsPage(
     modifier: Modifier = Modifier,
-    onPlatformsChanged: () -> Unit
+    onPlatformsChanged: () -> Unit,
+    onLogout: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -58,28 +82,75 @@ fun SettingsPage(
 
     var confirmDeleteIndex by remember { mutableStateOf<Int?>(null) }
 
+    val backdrop = rememberLayerBackdrop()
+
+
+//    Column(
+//        modifier = modifier
+//            .verticalScroll(rememberScrollState())
+//            .fillMaxSize()
+//            .padding(horizontal = 24.dp),
+//    ) {
+//        Title("Settings")
+//        ActionRow {
+//            addVerticalActionList(
+//                options = listOf(
+//                    SegmentedOption(
+//                        "customization",
+//                        text = "Customization",
+//                        desc = "Customize the app look",
+//                        iconRes = R.drawable.ic_palette
+//                    ),
+//                    SegmentedOption("compass", text = "Compass", desc = "Adjust compass settings", iconRes = R.drawable.ic_compass)
+//                ),
+//                onClick = { option ->
+//                    when (option) {
+//                        "customization" -> navController.navigate("settings/customization")
+//                        "compass" -> navController.navigate("settings/compass")
+//                    }
+//                }
+//            )
+//
+//        }
+//    }
+
     Scaffold(
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAddSheet = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.surface,
-                icon = { Icon(painter = painterResource(R.drawable.ic_add), contentDescription = null) },
-                text = { Text("Add platform") }
-            )
+            Row(
+                modifier = Modifier
+                    .padding(end = 16.dp, bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 🔹 Logout FAB
+                ExtendedFloatingActionButton(
+                    onClick = { onLogout() },
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    icon = { Icon(painterResource(R.drawable.ic_logout), contentDescription = "Logout") },
+                    text = { Text("Logout") }
+                )
+
+                // 🔹 Add Platform FAB
+                ExtendedFloatingActionButton(
+                    onClick = { showAddSheet = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.surface,
+                    icon = { Icon(painterResource(R.drawable.ic_add), contentDescription = "Add platform") },
+                    text = { Text("Add platform") }
+                )
+            }
         },
         modifier = modifier
             .fillMaxSize()
             .navigationBarsPadding()
     ) { innerPadding ->
         Column(
-            modifier = modifier
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(start = 16.dp, top = 48.dp, end = 16.dp, bottom = 0.dp)
+                .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 0.dp)
         ) {
-            Title("Settings")
-            Spacer(Modifier.height(12.dp))
 
             if (platforms.isEmpty()) {
                 Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
@@ -114,15 +185,8 @@ fun SettingsPage(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .combinedClickable(
-                                    onClick = { /* no-op or future details */ },
-                                    onLongClick = {
-                                        editIndex = index
-                                        val p = platform
-                                        // Prefill using reflection-safe helpers below
-                                        editUsername = extractUsername(p) ?: ""
-                                        editPassword = extractPassword(p) ?: ""
-                                        showPassword = false
-                                    }
+                                    onClick = { editIndex = index },
+                                    onLongClick = { editIndex = index }
                                 ),
 
                         ) {
@@ -167,17 +231,6 @@ fun SettingsPage(
                                             Icon(painter = painterResource(R.drawable.ic_star_border), contentDescription = "Make primary")
                                         }
                                     }
-//
-//                                    IconButton(
-//                                        onClick = {
-//                                            scope.launch(Dispatchers.IO) {
-//                                                PlatformStorage.refreshCookies(context)
-//                                                withContext(Dispatchers.Main) { toast = "Cookies refreshed." }
-//                                            }
-//                                        }
-//                                    ) {
-//                                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh cookies")
-//                                    }
 
                                     IconButton(onClick = { confirmDeleteIndex = index }) {
                                         Icon(painter = painterResource(R.drawable.ic_delete), contentDescription = "Remove")
@@ -194,313 +247,99 @@ fun SettingsPage(
         }
     }
 
-//
-//    // ── layout ───────────────────────────────────────────────────────────────────
-//    Column(
-//        modifier = modifier
-//            .fillMaxSize()
-//            .padding(start = 16.dp, top = 48.dp, end = 16.dp, bottom = 0.dp)
-//    ) {
-//        Title("Settings")
-//
-//        Spacer(Modifier.height(12.dp))
-//
-//        // ── Add platform card (matches chip-driven header style) ─────────────────
-//        ElevatedCard(
-//            modifier = Modifier.fillMaxWidth(),
-//            shape = RoundedCornerShape(16.dp)
-//        ) {
-//            Column(Modifier.padding(16.dp)) {
-//                Text("Add a platform", style = MaterialTheme.typography.titleMedium)
-//                Spacer(Modifier.height(8.dp))
-//
-//                // Use your ChipDropdown for platform type selection
-//                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-//                    ChipDropdown(
-//                        label = "Platform: $selectedType",
-//                        options = platformTypes,
-//                        selected = selectedType,
-//                        onSelectedChange = { selectedType = it }
-//                    )
-//                }
-//
-//                Spacer(Modifier.height(12.dp))
-//                OutlinedTextField(
-//                    value = username,
-//                    onValueChange = { username = it },
-//                    label = {
-//                        Text(if (selectedType == "Bar-Ilan") "Student ID" else "Username")
-//                    },
-//                    modifier = Modifier.fillMaxWidth()
-//                )
-//                Spacer(Modifier.height(8.dp))
-//                OutlinedTextField(
-//                    value = password,
-//                    onValueChange = { password = it },
-//                    label = { Text("Password") },
-//                    visualTransformation = PasswordVisualTransformation(),
-//                    modifier = Modifier.fillMaxWidth()
-//                )
-//
-//                Spacer(Modifier.height(12.dp))
-//                Button(
-//                    enabled = !busy && username.isNotBlank() && password.isNotBlank(),
-//                    onClick = {
-//                        busy = true; toast = null
-//                        scope.launch {
-//                            try {
-//                                val newPlatform = withContext(Dispatchers.IO) {
-//                                    when (selectedType) {
-//                                        "Webtop" -> WebtopPlatform(username.trim(), password)
-//                                        "Bar-Ilan" -> BarIlanPlatform(username.trim(), password)
-//                                        else -> null
-//                                    }
-//                                } ?: return@launch.also { toast = "Unsupported platform." }
-//
-//                                val ok = withContext(Dispatchers.IO) { newPlatform.isLoggedIn() }
-//                                if (!ok) {
-//                                    toast = "Login failed. Check credentials."
-//                                } else {
-//                                    withContext(Dispatchers.IO) {
-//                                        val list = PlatformStorage.loadPlatforms(context).toMutableList()
-//                                        list.add(newPlatform)
-//                                        PlatformStorage.savePlatforms(context, list)
-//                                    }
-//                                    username = ""; password = ""
-//                                    toast = "Platform added."
-//                                    refreshKey++
-//                                }
-//                            } catch (t: Throwable) {
-//                                toast = "Error: ${t.localizedMessage}"
-//                            } finally {
-//                                busy = false
-//                            }
-//                        }
-//                    }
-//                ) {
-//                    if (busy) CircularWavyProgressIndicator()
-//                    else Text("Add platform")
-//                }
-//
-//                Spacer(Modifier.height(8.dp))
-//                TextButton(onClick = {
-//                    scope.launch(Dispatchers.IO) {
-//                        PlatformStorage.refreshCookies(context)
-//                        withContext(Dispatchers.Main) { toast = "Cookies refreshed for all platforms." }
-//                    }
-//                }) { Text("Refresh cookies for all") }
-//
-//                toast?.let {
-//                    Spacer(Modifier.height(6.dp))
-//                    Text(it, color = MaterialTheme.colorScheme.primary)
-//                }
-//            }
-//        }
-//
-//        Spacer(Modifier.height(20.dp))
-//
-//        // ── Connected platforms list (segmented cards, like Attendance list) ─────
-//        Text("Connected platforms", style = MaterialTheme.typography.titleMedium)
-//        Spacer(Modifier.height(8.dp))
-//
-//        if (platforms.isEmpty()) {
-//            Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-//                Text("No platforms yet")
-//            }
-//        } else {
-//            LazyColumn(
-//                modifier = Modifier
-//                    .fillMaxWidth()
-//                    .clip(RoundedCornerShape(16.dp))
-//                    .navigationBarsPadding()
-//            ) {
-//                itemsIndexed(platforms) { index, platform ->
-//                    val isPrimary = index == 0
-//                    val label = when (platform) {
-//                        is WebtopPlatform -> "Webtop"
-//                        is BarIlanPlatform -> "Bar-Ilan"
-//                        else -> platform.javaClass.simpleName ?: "Unknown"
-//                    }
-//
-//                    val shape = when (index) {
-//                        0 ->
-//                            if (platforms.lastIndex == 0) RoundedCornerShape(16.dp)
-//                            else RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
-//                        platforms.lastIndex ->
-//                            RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp, topStart = 4.dp, topEnd = 4.dp)
-//                        else -> RoundedCornerShape(4.dp)
-//                    }
-//
-//                    Card(shape = shape, modifier = Modifier.fillMaxWidth()) {
-//                        Row(
-//                            modifier = Modifier
-//                                .fillMaxWidth()
-//                                .padding(horizontal = 20.dp, vertical = 14.dp),
-//                            verticalAlignment = Alignment.CenterVertically,
-//                            horizontalArrangement = Arrangement.SpaceBetween
-//                        ) {
-//                            Column(Modifier.weight(1f)) {
-//                                Text(
-//                                    text = label,
-//                                    style = MaterialTheme.typography.titleLarge
-//                                )
-//                                val secondary = if (isPrimary) "Primary" else "Tap star to make primary"
-//                                Text(secondary, style = MaterialTheme.typography.bodySmall)
-//                            }
-//
-//                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-//                                IconButton(
-//                                    onClick = {
-//                                        if (!isPrimary) {
-//                                            scope.launch(Dispatchers.IO) {
-//                                                val list = PlatformStorage.loadPlatforms(context).toMutableList()
-//                                                if (index in list.indices) {
-//                                                    val item = list.removeAt(index)
-//                                                    list.add(0, item)
-//                                                    PlatformStorage.savePlatforms(context, list)
-//                                                }
-//                                                withContext(Dispatchers.Main) { refreshKey++ }
-//                                            }
-//                                        }
-//                                    }
-//                                ) {
-//                                    if (isPrimary) {
-//                                        Icon(Icons.Filled.Star, contentDescription = "Primary")
-//                                    } else {
-//                                        Icon(Icons.Outlined.StarBorder, contentDescription = "Make primary")
-//                                    }
-//                                }
-//
-//                                IconButton(
-//                                    onClick = {
-//                                        scope.launch(Dispatchers.IO) {
-//                                            PlatformStorage.refreshCookies(context)
-//                                            withContext(Dispatchers.Main) { toast = "Cookies refreshed." }
-//                                        }
-//                                    }
-//                                ) {
-//                                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh cookies")
-//                                }
-//
-//                                IconButton(onClick = { confirmDeleteIndex = index }) {
-//                                    Icon(Icons.Filled.Delete, contentDescription = "Remove")
-//                                }
-//                            }
-//                        }
-//                    }
-//
-//                    Spacer(Modifier.height(3.dp))
-//                }
-//                item { Spacer(Modifier.height(80.dp)) }
-//            }
-//        }
-//    }
 
-    val editSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val infoByClassName = remember {
+        platformOptions.associateBy { it.factory()::class.java.name }
+    }
 
+    // helper to resolve PlatformInfo dynamically
+    fun resolveInfoFor(platform: Platform?): PlatformInfo? {
+        val key = platform?.javaClass?.name ?: return null
+        return infoByClassName[key]
+    }
     if (editIndex != null) {
         val idx = editIndex!!
         val current = platforms.getOrNull(idx)
-        val label = when (current) {
-            is WebtopPlatform -> "Webtop"
-            is BarIlanPlatform -> "Bar-Ilan"
-            else -> "Unknown"
+        val selectedPlatform = resolveInfoFor(current) ?: return
+
+        var loginFields by remember {
+            mutableStateOf(selectedPlatform.factory().getLoginFields().apply {
+                current?.let { loadFrom(it) }
+            })
         }
 
+        var errorMessage by remember { mutableStateOf<String?>(null) }
+
         ModalBottomSheet(
-            onDismissRequest = {
-                if (!busy) {
-                    editIndex = null
-                    toast = null
-                }
-            },
-            sheetState = editSheetState
+            onDismissRequest = { if (!busy) editIndex = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
-            Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("Edit $label", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
 
-                OutlinedTextField(
-                    value = editUsername,
-                    onValueChange = { editUsername = it },
-                    label = { Text(if (current is BarIlanPlatform) "Student ID" else "Username") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = editPassword,
-                    onValueChange = { editPassword = it },
-                    label = { Text("Password") },
-                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showPassword = !showPassword }) {
-                            Icon(
-                                imageVector = if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (showPassword) "Hide password" else "Show password"
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                Text(
+                    text = "Edit ${selectedPlatform.name} Account",
+                    style = MaterialTheme.typography.titleMedium
                 )
 
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
-                        enabled = !busy && editUsername.isNotBlank() && editPassword.isNotBlank(),
-                        onClick = {
-                            busy = true; toast = null
-                            scope.launch {
-                                try {
-                                    val newPlatform = withContext(Dispatchers.IO) {
-                                        when (current) {
-                                            is WebtopPlatform -> WebtopPlatform(editUsername.trim(), editPassword)
-                                            is BarIlanPlatform -> BarIlanPlatform(editUsername.trim(), editPassword)
-                                            else -> null
-                                        }
-                                    } ?: run { toast = "Unsupported platform."; busy = false; return@launch }
+                Spacer(Modifier.height(16.dp))
 
-                                    val ok = withContext(Dispatchers.IO) { newPlatform.isLoggedIn() }
-                                    if (!ok) {
-                                        toast = "Login failed. Check credentials."
+                DynamicEditFields(
+                    fields = loginFields,
+                    onFieldsChanged = { loginFields = it },
+                    isLoading = busy,
+                    errorMessage = errorMessage,
+                    onLogin = {
+                        busy = true
+                        errorMessage = null
+                        val platformClass = current?.javaClass
+                        val companion = platformClass?.kotlin?.companionObjectInstance
+
+                        scope.launch {
+                            try {
+                                val isCorrect = withContext(Dispatchers.IO) {
+                                    if (companion is Platform.Companion) {
+                                        val ok = companion.checkCredentials(loginFields)
+                                        Log.d("Login", "checkCredentials(${platformClass.simpleName}) → $ok")
+                                        ok
                                     } else {
-                                        withContext(Dispatchers.IO) {
-                                            val list = PlatformStorage.loadPlatforms(context).toMutableList()
-                                            if (idx in list.indices) {
-                                                list[idx] = newPlatform
-                                                PlatformStorage.savePlatforms(context, list)
-                                            }
-                                        }
-                                        withContext(Dispatchers.Main) {
-                                            toast = "Updated."
-                                            refreshKey++
-                                            onPlatformsChanged()
-                                            editIndex = null
-                                        }
+                                        Log.w("SettingsPage", "No static credential checker for ${platformClass?.simpleName}")
+                                        false
                                     }
-                                } catch (t: Throwable) {
-                                    toast = "Error: ${t.localizedMessage}"
-                                } finally {
-                                    busy = false
                                 }
+
+                                if (isCorrect) {
+                                    withContext(Dispatchers.IO) {
+                                        val list = PlatformStorage.loadPlatforms(context).toMutableList()
+                                        val platform = list.getOrNull(idx) ?: return@withContext
+
+                                        platform.applyLoginFields(loginFields)
+                                        PlatformStorage.savePlatforms(context, list)
+                                    }
+
+                                    refreshKey++
+                                    onPlatformsChanged()
+                                    editIndex = null
+                                    Log.d("Login", "Credentials updated successfully for ${platformClass?.simpleName}")
+                                } else {
+                                    errorMessage = "Invalid username or password"
+                                    Log.w("Login", "Invalid credentials for ${platformClass?.simpleName}")
+                                }
+                            } catch (e: Exception) {
+                                errorMessage = e.localizedMessage
+                                Log.e("Login", "Error during login update", e)
+                            } finally {
+                                busy = false
                             }
                         }
-                    ) {
-                        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        else Text("Save")
-                    }
-                    TextButton(enabled = !busy, onClick = { editIndex = null }) {
-                        Text("Cancel")
-                    }
-                }
+                    },
+                    onCancel = { editIndex = null }
 
-                toast?.let {
-                    Spacer(Modifier.height(6.dp))
-                    Text(it, color = MaterialTheme.colorScheme.primary)
-                }
+                )
 
-                Spacer(Modifier.height(12.dp))
             }
         }
     }
@@ -519,111 +358,155 @@ fun SettingsPage(
     }
 
     if (showAddSheet) {
+        var selectedPlatform by remember { mutableStateOf<PlatformInfo?>(null) }
+        var loginFields by remember { mutableStateOf<LoginFields?>(null) }
+        var isLoading by remember { mutableStateOf(false) }
+        var errorMessage by remember { mutableStateOf<String?>(null) }
+
         ModalBottomSheet(
             onDismissRequest = { closeAddSheet() },
             sheetState = sheetState
         ) {
-            Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("Add a platform", style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(8.dp))
+            if (selectedPlatform == null) {
+                // ────────────── Platform Selection ──────────────
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Choose a platform",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
 
-                // Reuse your ChipDropdown for platform type
-                ChipDropdown(
-                    label = "Platform: $selectedType",
-                    icon = painterResource(R.drawable.ic_school),
-                    options = platformTypes,
-                    selected = selectedType,
-                    onSelectedChange = { selectedType = it }
-                )
+                    Spacer(Modifier.height(12.dp))
 
-                Spacer(Modifier.height(12.dp))
-                val focusManager = LocalFocusManager.current
-
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text(if (selectedType == "Bar-Ilan") "Student ID" else "Username") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() })
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password") },
-                    singleLine = true,
-                    visualTransformation = if (showAddPassword) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showAddPassword = !showAddPassword }) {
-                            Icon(
-                                imageVector = if (showAddPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (showAddPassword) "Hide password" else "Show password"
-                            )
-                        }
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
-                        enabled = !busy && username.isNotBlank() && password.isNotBlank(),
-                        onClick = {
-                            busy = true; toast = null
-                            scope.launch {
-                                try {
-                                    val newPlatform = withContext(Dispatchers.IO) {
-                                        when (selectedType) {
-                                            "Webtop" -> WebtopPlatform(username.trim(), password)
-                                            "Bar-Ilan" -> BarIlanPlatform(username.trim(), password)
-                                            else -> null
-                                        }
-                                    } ?: run { toast = "Unsupported platform."; busy = false; return@launch }
-
-                                    val ok = withContext(Dispatchers.IO) { newPlatform.isLoggedIn() }
-                                    if (!ok) {
-                                        toast = "Login failed. Check credentials."
-                                    } else {
-                                        withContext(Dispatchers.IO) {
-                                            val list = PlatformStorage.loadPlatforms(context).toMutableList()
-                                            list.add(newPlatform)
-                                            PlatformStorage.savePlatforms(context, list)
-                                        }
-                                        username = ""; password = ""
-                                        toast = "Platform added."
-                                        refreshKey++
-                                        showAddSheet = false
-                                        onPlatformsChanged()
-                                    }
-                                } catch (t: Throwable) {
-                                    toast = "Error: ${t.localizedMessage}"
-                                } finally {
-                                    busy = false
-                                }
-                            }
-                        }
-                    ) {
-                        if (busy) CircularWavyProgressIndicator()
-                        else Text("Add")
+                    ActionRow {
+                        addVerticalActionList(
+                            options = platformOptions.map { option ->
+                                SegmentedOption(
+                                    option,
+                                    text = option.name,
+                                    iconRes = option.iconRes
+                                )
+                            },
+                            onClick = { option ->
+                                selectedPlatform = option
+                                loginFields = option.factory().getLoginFields()
+                                errorMessage = null
+                            },
+                            isGlass = false,
+                            backdrop = backdrop
+                        )
                     }
-                    TextButton(enabled = !busy, onClick = { showAddSheet = false }) {
+
+                    Spacer(Modifier.height(12.dp))
+                    TextButton(onClick = { closeAddSheet() }) {
                         Text("Cancel")
                     }
                 }
 
-                toast?.let {
-                    Spacer(Modifier.height(6.dp))
-                    Text(it, color = MaterialTheme.colorScheme.primary)
-                }
+            } else {
+                // ────────────── Login Fields Step ──────────────
+                val fields = loginFields ?: selectedPlatform!!.factory().getLoginFields()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Back button + title
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        IconButton(
+                            onClick = {
+                                selectedPlatform = null
+                                errorMessage = null
+                            },
+                            modifier = Modifier.align(Alignment.CenterStart)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back"
+                            )
+                        }
+                        Text(
+                            text = selectedPlatform!!.name,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
 
-                Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(16.dp))
+
+                    DynamicAddFields(
+                        fields = fields,
+                        onFieldsChanged = { loginFields = it },
+                        isLoading = isLoading,
+                        errorMessage = errorMessage,
+                        onLogin = {
+                            val missing = fields.getFields().any { it.value.isNullOrBlank() }
+                            if (missing) {
+                                errorMessage = "Please fill in all fields"
+                                return@DynamicAddFields
+                            }
+
+                            isLoading = true
+                            errorMessage = null
+
+                            scope.launch {
+                                try {
+
+                                    val created = withContext(Dispatchers.IO) {
+                                        val info = selectedPlatform!!
+
+                                        // Try to call constructor(LoginFields)
+                                        val platformClass = info.factory()::class.java
+                                        val constructor = platformClass.constructors.find { ctor ->
+                                            ctor.parameterTypes.size == 1 && ctor.parameterTypes[0] == LoginFields::class.java
+                                        }
+
+                                        val instance = if (constructor != null) {
+                                            // Platform supports direct loginFields constructor (e.g., WebtopPlatform)
+                                            constructor.newInstance(fields) as Platform
+                                        } else {
+                                            // Fall back: create a blank one, then apply login fields
+                                            info.factory().apply {
+                                                applyLoginFields(fields)
+                                            }
+                                        }
+
+                                        instance
+                                    }
+                                    println(created)
+                                    println(created.isLoggedIn())
+                                    println(created.toString())
+                                    val ok = withContext(Dispatchers.IO) { created.isLoggedIn() }
+                                    if (ok) {
+                                        withContext(Dispatchers.IO) {
+                                            val list = PlatformStorage.loadPlatforms(context).toMutableList()
+                                            list.add(created)
+                                            PlatformStorage.savePlatforms(context, list)
+                                        }
+
+                                        refreshKey++
+                                        onPlatformsChanged()
+                                        closeAddSheet()
+                                    } else {
+                                        errorMessage = "Invalid credentials"
+                                    }
+                                } catch (e: Exception) {
+                                    errorMessage = "Error: ${e.localizedMessage}"
+                                } finally {
+                                    isLoading = false
+                                }
+                            }
+                        },
+                        onCancel = { closeAddSheet() }
+                    )
+                }
             }
         }
     }
@@ -653,44 +536,259 @@ fun SettingsPage(
         )
     }
 }
-@Suppress("SwallowedException")
-private fun extractUsername(platform: Any): String? {
-    // Try common field names without breaking compilation
-    val candidates = listOf("username", "user", "id", "studentId", "login")
-    for (name in candidates) {
-        try {
-            val f = platform.javaClass.getDeclaredField(name)
-            f.isAccessible = true
-            (f.get(platform) as? String)?.let { if (it.isNotBlank()) return it }
-        } catch (_: Throwable) {}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsPage(
+    navController: NavController,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+
+    val backdrop = rememberLayerBackdrop()
+
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+    ) {
+        Title("Settings")
+
+        ActionRow {
+            addVerticalActionList(
+                options = listOf(
+                    SegmentedOption("platforms", text = "Platforms", desc = "Add, Remove Or Edit Platforms", iconRes = R.drawable.ic_account),
+                ),
+                onClick = { option ->
+                    when (option) {
+                        "platforms" -> navController.navigate(Dest.Platforms.name)
+                    }
+                },
+                isGlass = false,
+                backdrop = backdrop
+            )
+
+        }
+        Spacer(Modifier.height(10.dp))
     }
-    // Try getter methods
-    val getters = listOf("getUsername", "getUser", "getId", "getStudentId", "getLogin")
-    for (m in getters) {
-        try {
-            val method = platform.javaClass.getMethod(m)
-            (method.invoke(platform) as? String)?.let { if (it.isNotBlank()) return it }
-        } catch (_: Throwable) {}
-    }
-    return null
+
 }
 
-@Suppress("SwallowedException")
-private fun extractPassword(platform: Any): String? {
-    val candidates = listOf("password", "pass", "pwd")
-    for (name in candidates) {
-        try {
-            val f = platform.javaClass.getDeclaredField(name)
-            f.isAccessible = true
-            (f.get(platform) as? String)?.let { if (it.isNotBlank()) return it }
-        } catch (_: Throwable) {}
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun DynamicEditFields(
+    fields: LoginFields,
+    onFieldsChanged: (LoginFields) -> Unit,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onLogin: () -> Unit,
+    onCancel: () -> Unit
+) {
+    var mutableFields by remember { mutableStateOf(fields) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        fields.getFields().forEach { field ->
+            var value by remember { mutableStateOf(field.value ?: "") }
+            var passwordVisible by remember { mutableStateOf(false) }
+
+            OutlinedTextField(
+                value = value,
+                onValueChange = {
+                    value = it
+                    mutableFields.setValue(field.id, it)
+                    onFieldsChanged(mutableFields)
+                },
+                label = { Text(field.id.replaceFirstChar { c -> c.uppercase() }) },
+                leadingIcon = {
+                    when (field.type) {
+                        Type.Username, Type.Id -> Icon(Icons.Default.Person, null)
+                        Type.Password -> Icon(Icons.Default.Lock, null)
+                        else -> {}
+                    }
+                },
+                trailingIcon = if (field.type == Type.Password) {
+                    {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible)
+                                    Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = null
+                            )
+                        }
+                    }
+                } else null,
+                visualTransformation = if (field.type == Type.Password && !passwordVisible)
+                    PasswordVisualTransformation() else VisualTransformation.None,
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        AnimatedVisibility(visible = isLoading, enter = fadeIn(), exit = fadeOut()) {
+            CircularWavyProgressIndicator()
+        }
+
+        AnimatedVisibility(
+            visible = !isLoading,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(30)
+                ) {
+                    Text(
+                        "Cancel",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+
+                Button(
+                    onClick = onLogin,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(35)
+                ) {
+                    Text(
+                        "Update",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+        }
+
+        errorMessage?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
     }
-    val getters = listOf("getPassword", "getPass", "getPwd")
-    for (m in getters) {
-        try {
-            val method = platform.javaClass.getMethod(m)
-            (method.invoke(platform) as? String)?.let { if (it.isNotBlank()) return it }
-        } catch (_: Throwable) {}
+}
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun DynamicAddFields(
+    fields: LoginFields,
+    onFieldsChanged: (LoginFields) -> Unit,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onLogin: () -> Unit,
+    onCancel: () -> Unit
+) {
+    var mutableFields by remember { mutableStateOf(fields) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        fields.getFields().forEach { field ->
+            var value by remember { mutableStateOf(field.value ?: "") }
+            var passwordVisible by remember { mutableStateOf(false) }
+
+            OutlinedTextField(
+                value = value,
+                onValueChange = {
+                    value = it
+                    mutableFields.setValue(field.id, it)
+                    onFieldsChanged(mutableFields)
+                },
+                label = { Text(field.id.replaceFirstChar { c -> c.uppercase() }) },
+                leadingIcon = {
+                    when (field.type) {
+                        Type.Username, Type.Id -> Icon(Icons.Default.Person, null)
+                        Type.Password -> Icon(Icons.Default.Lock, null)
+                        else -> {}
+                    }
+                },
+                trailingIcon = if (field.type == Type.Password) {
+                    {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible)
+                                    Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = null
+                            )
+                        }
+                    }
+                } else null,
+                visualTransformation = if (field.type == Type.Password && !passwordVisible)
+                    PasswordVisualTransformation() else VisualTransformation.None,
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        AnimatedVisibility(visible = isLoading, enter = fadeIn(), exit = fadeOut()) {
+            CircularWavyProgressIndicator()
+        }
+
+        AnimatedVisibility(
+            visible = !isLoading,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(30)
+                ) {
+                    Text(
+                        "Cancel",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+
+                Button(
+                    onClick = onLogin,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(35)
+                ) {
+                    Text(
+                        "Add",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+        }
+
+        errorMessage?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
     }
-    return null
 }

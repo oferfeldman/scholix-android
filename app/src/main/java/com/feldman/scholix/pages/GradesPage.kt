@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.feldman.lockerapp.ui.theme.AppTheme
+import com.feldman.lockerapp.ui.theme.darkColors
 import com.feldman.scholix.R
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.ui.components.ActionRow
@@ -72,24 +73,39 @@ fun gradeColor(gradeStr: String): Color {
 fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     val context = LocalContext.current
 
+
+    val currentYear = java.time.Year.now().value
+    val currentMonth = java.time.LocalDate.now().monthValue
+
+    val initialSemester = if (currentMonth in 9..12 || currentMonth == 1) "A" else "B"
+    val initialYear = if (initialSemester == "A") currentYear + 1 else currentYear
+
+    var semesterState by rememberSaveable { mutableStateOf(initialSemester) }
+    var yearState by rememberSaveable { mutableStateOf(initialYear) }
+
     var courses by remember { mutableStateOf(preloadedCourses) }
-    var selectedTab by remember { mutableStateOf(0) }
+    var selectedTab by remember { mutableIntStateOf(0) }
     var grades by remember { mutableStateOf(listOf<JSONObject>()) }
-    var average by remember { mutableStateOf(0) }
+    var average by remember { mutableIntStateOf(0) }
     var isRefreshing by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
-    var requestId by remember { mutableStateOf(0) }
+    var requestId by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
+
+    Log.d("GradesPage", "initial year: $initialYear | initial semester: $initialSemester")
+
+    println("$initialYear | $initialSemester")
     fun launchGradesRequest(
         context: Context,
         course: JSONObject,
-        year: Int? = null,
-        semester: String? = null,
-        onResult: (List<JSONObject>, Int) -> Unit
+        year: Int = initialYear,
+        semester: String = initialSemester,
+        onResult: (List<JSONObject>, Int, String?) -> Unit
     ) {
-        val currentId = ++requestId // bump id
+        val currentId = ++requestId
         isLoading = true
         grades = emptyList()
         average = 0
@@ -98,349 +114,382 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
             withContext(Dispatchers.IO) {
                 val platformIndex = course.optInt("index")
                 val platform = PlatformStorage.loadPlatforms(context)[platformIndex]
+                val gradesArray = platform.getGrades(
+                    course = course.getString("name"),
+                    year = year,
+                    semester = semester
+                )
 
-                val gradesArray = if (year != null && semester != null) {
-                    platform.getGrades(course.getString("name"), year, semester)
-                } else {
-                    platform.getGrades(course.getString("name"))
+                var errorMessage: String? = null
+                println(gradesArray)
+                println(gradesArray)
+                println(gradesArray)
+                println(gradesArray)
+                // detect error responses
+                if (gradesArray.length() == 1) {
+                    val first = gradesArray.optJSONObject(0)
+                    if (first != null && first.has("error")) {
+                        errorMessage = when (first.optString("error")) {
+                            "server_unreachable" -> "Cannot reach the server.\nCheck your internet connection."
+                            "login_failed" -> "Login failed.\nPlease re-login."
+                            else -> "Unknown error occurred while loading grades."
+                        }
+                    }
                 }
 
-                val (list, avg) = processGrades(gradesArray)
+                val (list, avg) =
+                    if (errorMessage == null) processGrades(gradesArray)
+                    else Pair(emptyList<JSONObject>(), 0)
 
                 withContext(Dispatchers.Main) {
-                    if (currentId == requestId) { // ✅ only update if still latest request
+                    if (currentId == requestId) {
                         course.put("grades", gradesArray)
-                        onResult(list, avg)
+                        onResult(list, avg, errorMessage)
                         isLoading = false
                     }
                 }
             }
         }
     }
-    LaunchedEffect(selectedTab, courses) {
-        if (courses.isNotEmpty()) {
-            val selectedCourse = courses[selectedTab]
-            launchGradesRequest(context, selectedCourse) { g, avg ->
+
+    LaunchedEffect(courses, selectedTab, semesterState, yearState) {
+        val selectedCourse = courses.getOrNull(selectedTab)
+        if (selectedCourse != null) {
+            launchGradesRequest(
+                context,
+                selectedCourse,
+                year = yearState,
+                semester = semesterState.lowercase()
+            ) { g, avg, err ->
                 grades = g
                 average = avg
+                errorMessage = err
+            }
+        }
+    }
+    fun refreshCoursesIfEmpty() {
+        if (courses.isEmpty()) {
+            scope.launch(Dispatchers.IO) {
+                val refreshed = PlatformStorage.getCourses(context)
+                withContext(Dispatchers.Main) {
+                    if (refreshed.isNotEmpty()) {
+                        courses = refreshed
+                        selectedTab = 0
+                    }
+                }
             }
         }
     }
     LaunchedEffect(Unit) {
-        if (courses.isNotEmpty()) {
-            val selectedCourse = courses[selectedTab]
-            withContext(Dispatchers.IO) {
-                val platformIndex = selectedCourse.optInt("index")
-                val platform = PlatformStorage.loadPlatforms(context)[platformIndex]
-                val gradesArray = platform.getGrades(
-                    selectedCourse.getString("name")
-                )
-                selectedCourse.put("grades", gradesArray)
-                val (list, avg) = processGrades(gradesArray)
-                grades = list
-                average = avg
-            }
-        }
-    }
-    LaunchedEffect(preloadedCourses) {
-        val newIndex = selectedTab.coerceIn(0, preloadedCourses.lastIndex.coerceAtLeast(0))
-        courses = preloadedCourses
-        selectedTab = newIndex
-
-        if (preloadedCourses.isNotEmpty()) {
-            val selectedCourse = preloadedCourses[newIndex]
-            launchGradesRequest(context, selectedCourse) { g, avg ->
-                grades = g
-                average = avg
-            }
-        } else {
-            grades = emptyList()
-            average = 0
-        }
+        refreshCoursesIfEmpty()
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(start = 16.dp, top = 48.dp, end = 16.dp, bottom = 0.dp)
-    ) {
-        Title(stringResource(R.string.grades))
-
-        if (courses.size > 1) {
-            PrimaryScrollableTabRow(
-                selectedTabIndex = selectedTab,
-                edgePadding = 0.dp,
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                divider = {},
-                indicator = {
-                    TabRowDefaults.PrimaryIndicator(
-                        modifier = Modifier.tabIndicatorOffset(selectedTab),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            ) {
-                courses.forEachIndexed { index, course ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        text = {
-                            Text(
-                                text = course.optString("name", stringResource(R.string.course)),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selectedTab == index)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    )
-                }
-            }
-
+    if (courses.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Loading courses…", color = Color.Gray)
         }
-
-        val pullRefreshState = rememberPullToRefreshState()
-
-        PullToRefreshBox(
-            state = pullRefreshState,
-            isRefreshing = isRefreshing,
-            onRefresh = {
-                if (courses.isNotEmpty()) {
-                    launchGradesRequest(context, courses[selectedTab]) { g, avg ->
-                        grades = g
-                        average = avg
+        refreshCoursesIfEmpty()
+        return
+    }
+    else{
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+        ) {
+            if (courses.size > 1) {
+                PrimaryScrollableTabRow(
+                    selectedTabIndex = selectedTab,
+                    edgePadding = 0.dp,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    divider = {},
+                    indicator = {
+                        TabRowDefaults.PrimaryIndicator(
+                            modifier = Modifier.tabIndicatorOffset(selectedTab),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                ) {
+                    courses.forEachIndexed { index, course ->
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            text = {
+                                Text(
+                                    text = course.optString("name", stringResource(R.string.course)),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selectedTab == index)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        )
                     }
                 }
-            },
-            indicator = {
-                Indicator(
-                    modifier = Modifier.align(Alignment.TopCenter),
-                    isRefreshing = isRefreshing,
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    state = pullRefreshState
-                )
-            },
-        ) {
-            LazyColumn(
-                modifier = modifier
-                    .fillMaxSize()
+            }
 
-            ) {
-                item {
-                    Spacer(Modifier.height(12.dp))
+            val pullRefreshState = rememberPullToRefreshState()
 
-                    val selectedCourse = courses[selectedTab]
-                    if (selectedCourse.optBoolean("semesterPicker", false)) {
-                        val currentYear = java.time.Year.now().value
-                        val currentMonth = java.time.LocalDate.now().monthValue
-
-                        val initialSemester = if (currentMonth in 9..12 || currentMonth == 1) "A" else "B"
-                        val initialYear = if (initialSemester == "A") currentYear + 1 else currentYear
-
-                        var semesterState by rememberSaveable { mutableStateOf(initialSemester) }
-                        var yearState by rememberSaveable { mutableStateOf(initialYear) }
-
-                        ActionRow {
-                            addSegmentedToggleGroup(
-                                state = remember { mutableStateOf(yearState.toString()) },
-                                SegmentedOption((currentYear - 1).toString(), (currentYear - 1).toString(), textColor = MaterialTheme.colorScheme.onSurfaceVariant, selectedTextColor = MaterialTheme.colorScheme.onSurface),
-                                SegmentedOption(currentYear.toString(), currentYear.toString(), textColor = MaterialTheme.colorScheme.onSurfaceVariant, selectedTextColor = MaterialTheme.colorScheme.onSurface),
-                                SegmentedOption((currentYear + 1).toString(), (currentYear + 1).toString(), textColor = MaterialTheme.colorScheme.onSurfaceVariant, selectedTextColor = MaterialTheme.colorScheme.onSurface),
-                                onSelectedChange = { newYear ->
-                                    yearState = newYear.toInt()
-                                    val selectedCourse = courses[selectedTab]
-                                    launchGradesRequest(context, selectedCourse, yearState, semesterState.lowercase()) { g, avg ->
-                                        grades = g
-                                        average = avg
-                                    }
-                                }
-                            )
+            PullToRefreshBox(
+                state = pullRefreshState,
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    val selectedCourse = courses.getOrNull(selectedTab)
+                    if (selectedCourse != null) {
+                        launchGradesRequest(context, selectedCourse) { g, avg, err ->
+                            grades = g
+                            average = avg
+                            errorMessage = err
                         }
+                    } else {
+                        refreshCoursesIfEmpty()
+                    }
+                },
+                indicator = {
+                    Indicator(
+                        modifier = Modifier.align(Alignment.TopCenter),
+                        isRefreshing = isRefreshing,
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        state = pullRefreshState
+                    )
+                },
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.TopCenter
+            ) {
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize(),
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    item {
                         Spacer(Modifier.height(12.dp))
 
-                        ActionRow {
-                            addSegmentedToggleGroup(
-                                state = remember { mutableStateOf(semesterState) },
-                                SegmentedOption("A", "A", selectedBackgroundColor = MaterialTheme.colorScheme.tertiary, textColor = MaterialTheme.colorScheme.onSurfaceVariant, selectedTextColor = MaterialTheme.colorScheme.onSurface),
-                                SegmentedOption("B", "B", selectedBackgroundColor = MaterialTheme.colorScheme.secondary, textColor = MaterialTheme.colorScheme.onSurfaceVariant, selectedTextColor = MaterialTheme.colorScheme.onSurface),
-                                onSelectedChange = { newSemester ->
-                                    semesterState = newSemester
-                                    val selectedCourse = courses[selectedTab]
+                        val selectedCourse = courses.getOrNull(selectedTab)
+                        val showSemesterPicker = selectedCourse?.optBoolean("semesterPicker", false) == true
 
-                                    launchGradesRequest(
-                                        context,
-                                        selectedCourse,
-                                        year = yearState,
-                                        semester = semesterState.lowercase()
-                                    ) { g, avg ->
-                                        grades = g
-                                        average = avg
+                        if (showSemesterPicker) {
+
+
+                            ActionRow {
+                                val yearStateString = yearState.toString()
+                                addSegmentedToggleGroup(
+                                    state = remember { mutableStateOf(yearStateString) }.apply {
+                                        value = yearStateString
+                                    },
+                                    SegmentedOption((currentYear - 1).toString(), (currentYear - 1).toString()),
+                                    SegmentedOption(currentYear.toString(), currentYear.toString()),
+                                    SegmentedOption((currentYear + 1).toString(), (currentYear + 1).toString()),
+                                    onSelectedChange = { newYear ->
+                                        yearState = newYear.toInt()
+                                        val selectedCourse = courses[selectedTab]
+                                        launchGradesRequest(
+                                            context,
+                                            selectedCourse,
+                                            yearState,
+                                            semesterState.lowercase()
+                                        ) { g, avg, err ->
+                                            grades = g
+                                            average = avg
+                                            errorMessage = err
+                                        }
                                     }
-                                }
-                            )
-                        }
-
-                    }
-                    Spacer(Modifier.height(36.dp))
-
-                    when {
-
-                        isLoading -> {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(24.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularWavyProgressIndicator()
-                            }
-                        }
-                        grades.isNotEmpty() -> {
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
                                 )
-                            ) {
-                                Row(
+                            }
+                            Spacer(Modifier.height(12.dp))
+
+                            ActionRow {
+                                addSegmentedToggleGroup(
+                                    state = remember { mutableStateOf(semesterState) },
+                                    SegmentedOption("A", "A", selectedBackgroundColor = darkColors().tertiary, textColor = MaterialTheme.colorScheme.onSurfaceVariant, selectedTextColor = MaterialTheme.colorScheme.onSurface),
+                                    SegmentedOption("B", "B", selectedBackgroundColor = darkColors().secondary, textColor = MaterialTheme.colorScheme.onSurfaceVariant, selectedTextColor = MaterialTheme.colorScheme.onSurface),
+                                    onSelectedChange = { newSemester ->
+                                        semesterState = newSemester
+                                        val selectedCourse = courses[selectedTab]
+
+                                        launchGradesRequest(
+                                            context,
+                                            selectedCourse,
+                                            year = yearState,
+                                            semester = semesterState.lowercase()
+                                        ) { g, avg, err ->
+                                            grades = g
+                                            average = avg
+                                            errorMessage = err
+                                        }
+                                    }
+                                )
+                            }
+
+                        }
+                        Spacer(Modifier.height(36.dp))
+
+                        when {
+
+                            isLoading -> {
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 20.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(24.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier.fillMaxHeight(),
-                                        contentAlignment = Alignment.Center
+                                    CircularWavyProgressIndicator()
+                                }
+                            }
+                            grades.isNotEmpty() -> {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 20.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = stringResource(R.string.average),
-                                            fontSize = 60.sp
+                                        Box(
+                                            modifier = Modifier.fillMaxHeight(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.average),
+                                                fontSize = 60.sp
 //                                            style = MaterialTheme.typography.bodyLarge.copy(
 //                                                fontWeight = FontWeight.Medium,
 //                                                fontSize = 50.sp,
 //                                                fontFamily = FontFamily.SansSerif
 //                                            )
-                                        )
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier.fillMaxHeight(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = average.toString(),
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontWeight = FontWeight.Black,
+                                                    fontSize = 60.sp,
+                                                    fontFamily = FontFamily.SansSerif
+                                                ),
+                                                color = gradeColor(average.toString())
+                                            )
+                                        }
                                     }
-                                    Box(
-                                        modifier = Modifier.fillMaxHeight(),
-                                        contentAlignment = Alignment.Center
+                                }
+                                Spacer(Modifier.height(12.dp))
+                            }
+                            else -> {
+                                val message = errorMessage ?: stringResource(R.string.no_grades_for_semester)
+                                Text(
+                                    text = message,
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 18.sp
+                                    ),
+                                    color = if (errorMessage != null) Color.Red else Color.Gray,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+
+                        }
+
+                    }
+                    if (!isLoading){
+                        itemsIndexed(grades) { index, grade ->
+                            val isFirst = index == 0
+                            val isLast = index == grades.lastIndex
+
+                            val shape = when {
+                                isFirst && isLast -> RoundedCornerShape(16.dp)
+                                isFirst -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
+                                isLast -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+                                else -> RoundedCornerShape(4.dp)
+                            }
+
+                            val bidi = BidiFormatter.getInstance()
+                            val subject = bidi.unicodeWrap(grade.optString("subject", "Unknown"))
+                            val name = bidi.unicodeWrap(grade.optString("name", ""))
+
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = shape,
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                ),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 12.dp, top = 12.dp, end = 24.dp, bottom = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f)
                                     ) {
                                         Text(
-                                            text = average.toString(),
+                                            text = subject,
+                                            style = MaterialTheme.typography.titleLarge.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 22.sp
+                                            )
+                                        )
+                                        Text(
+                                            text = name,
                                             style = MaterialTheme.typography.bodyLarge.copy(
-                                                fontWeight = FontWeight.Black,
-                                                fontSize = 60.sp,
-                                                fontFamily = FontFamily.SansSerif
-                                            ),
-                                            color = gradeColor(average.toString())
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 18.sp
+                                            )
                                         )
                                     }
-                                }
-                            }
-                            Spacer(Modifier.height(12.dp))
-                        }
-                        else -> {
-                            Text(
-                                text = stringResource(R.string.no_grades_for_semester),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 18.sp
-                                ),
-                                color = Color.Gray,
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
 
-                }
-                if (!isLoading){
-                    itemsIndexed(grades) { index, grade ->
-                        val isFirst = index == 0
-                        val isLast = index == grades.lastIndex
+                                    val gradeStr = grade.optString("grade", "-")
 
-                        val shape = when {
-                            isFirst && isLast -> RoundedCornerShape(16.dp)
-                            isFirst -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
-                            isLast -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
-                            else -> RoundedCornerShape(4.dp)
-                        }
-
-                        val bidi = BidiFormatter.getInstance()
-                        val subject = bidi.unicodeWrap(grade.optString("subject", "Unknown"))
-                        val name = bidi.unicodeWrap(grade.optString("name", ""))
-
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = shape,
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                            ),
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 12.dp, top = 12.dp, end = 24.dp, bottom = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f)
-                                ) {
                                     Text(
-                                        text = subject,
-                                        style = MaterialTheme.typography.titleLarge.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 22.sp
-                                        )
-                                    )
-                                    Text(
-                                        text = name,
+                                        text = gradeStr,
                                         style = MaterialTheme.typography.bodyLarge.copy(
-                                            fontWeight = FontWeight.Medium,
-                                            fontSize = 18.sp
+                                            fontWeight = FontWeight.Black,
+                                            fontFamily = FontFamily.SansSerif,
+                                            lineHeight = 40.sp
+                                        ),
+                                        color = gradeColor(gradeStr),
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        modifier = Modifier.widthIn(max = 120.dp),
+                                        autoSize = TextAutoSize.StepBased(
+                                            minFontSize = 10.sp,
+                                            maxFontSize = 60.sp,
+                                            stepSize = 2.sp
                                         )
                                     )
+
                                 }
-
-                                val gradeStr = grade.optString("grade", "-")
-
-                                Text(
-                                    text = gradeStr,
-                                    style = MaterialTheme.typography.bodyLarge.copy(
-                                        fontWeight = FontWeight.Black,
-                                        fontFamily = FontFamily.SansSerif,
-                                        lineHeight = 40.sp
-                                    ),
-                                    color = gradeColor(gradeStr),
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 2,
-                                    modifier = Modifier.widthIn(max = 120.dp),
-                                    autoSize = TextAutoSize.StepBased(
-                                        minFontSize = 10.sp,
-                                        maxFontSize = 60.sp,
-                                        stepSize = 2.sp
-                                    )
-                                )
-
                             }
+
+                            Spacer(Modifier.height(3.dp))
                         }
-
-                        Spacer(Modifier.height(3.dp))
                     }
+
                 }
-
             }
-        }
 
+        }
     }
+
 }
 
 
