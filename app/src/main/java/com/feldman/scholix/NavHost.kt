@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -26,8 +27,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
+import com.feldman.scholix.api.hasLoggedInPlatforms
+import com.feldman.scholix.api.scholixLogout
 import com.feldman.scholix.pages.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -86,15 +90,15 @@ fun NavHost(
     var currentRoute by remember { mutableStateOf<String?>(null) }
 
 
+    val scope = rememberCoroutineScope()
 
     var isLoggedIn by remember { mutableStateOf<Boolean?>(null) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            val platforms = PlatformStorage.loadPlatforms(context)
-            val valid = platforms.any { it.isLoggedIn() }
+            val scholixValid = hasLoggedInPlatforms(context)
             withContext(Dispatchers.Main) {
-                isLoggedIn = valid
+                isLoggedIn = scholixValid
             }
         }
     }
@@ -193,7 +197,6 @@ fun NavHost(
 
         composable(Dest.Grades.name) {
             GradesScreen(
-                preloadedCourses = preloadedCourses,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -228,13 +231,17 @@ fun NavHost(
                 modifier = Modifier.fillMaxSize(),
                 onPlatformsChanged = onPlatformsChanged,
                 onLogout = {
-                    PlatformStorage.clearPlatforms(context)
-                    isLoggedIn = false
-                    navController.navigate(Dest.Login.name) {
-                        popUpTo(0)
+                    scope.launch {
+                        scholixLogout(context)
+                        withContext(Dispatchers.Main) {
+                            isLoggedIn = false
+                            navController.navigate(Dest.Login.name) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
                     }
-                    onLogout()
                 }
+
             )
         }
 

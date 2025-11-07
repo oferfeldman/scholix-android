@@ -2,6 +2,7 @@
 <network-security-config>
     <domain-config cleartextTrafficPermitted="false">
         <domain includeSubdomains="true">webtopserver.smartschool.co.il</domain>
+        <domain includeSubdomains="true">https://scholix.web.app</domain>
 
     </domain-config>
 </network-security-config>

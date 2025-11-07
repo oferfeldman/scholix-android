@@ -1,17 +1,13 @@
 package com.feldman.scholix.pages
 
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
@@ -21,19 +17,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.feldman.app.api.BarIlanPlatform
-import com.feldman.scholix.R
-import com.feldman.scholix.api.*
+import com.feldman.scholix.api.ApiService
+import com.feldman.scholix.api.LoginFields
+import com.feldman.scholix.api.PlatformInfo
+import com.feldman.scholix.api.Type
+import com.feldman.scholix.api.checkScholixLoggedIn
+import com.feldman.scholix.api.platformOptions
 import com.feldman.scholix.ui.components.ActionRow
 import com.feldman.scholix.ui.components.SegmentedOption
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -43,16 +42,32 @@ fun LoginPage(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var scholixLoggedIn by remember { mutableStateOf(false) }
+    var scholixLoading by remember { mutableStateOf(false) }
+
+// 🔹 Auto-check Scholix login on launch
+    LaunchedEffect(Unit) {
+        scholixLoading = true
+        val alreadyLoggedIn = withContext(Dispatchers.IO) {
+            checkScholixLoggedIn(context)
+        }
+        scholixLoggedIn = alreadyLoggedIn
+        scholixLoading = false
+    }
+
+    var scholixEmail by remember { mutableStateOf("") }
+    var scholixPassword by remember { mutableStateOf("") }
+    var isSignupMode by remember { mutableStateOf(false) }
+    var scholixError by remember { mutableStateOf<String?>(null) }
 
 
+    // Platform selection
     var selectedPlatform by remember { mutableStateOf<PlatformInfo?>(null) }
     var loginFields by remember { mutableStateOf<LoginFields?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    val showLoginPage = selectedPlatform != null
-    val backdrop = rememberLayerBackdrop()
-
+    val showPlatformPage = scholixLoggedIn && selectedPlatform == null
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -62,74 +77,151 @@ fun LoginPage(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-
-        AnimatedVisibility(visible = !showLoginPage, enter = fadeIn(), exit = fadeOut()) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // ───── Stage 1: Scholix account login/signup ─────
+        AnimatedVisibility(visible = !scholixLoggedIn, enter = fadeIn(), exit = fadeOut()) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text(
-                    text = "Choose Your Platform",
+                    text = if (isSignupMode) "Create Scholix Account" else "Login to Scholix",
                     style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
 
                 Spacer(Modifier.height(16.dp))
 
+                OutlinedTextField(
+                    value = scholixEmail,
+                    onValueChange = { scholixEmail = it },
+                    label = { Text("Email") },
+                    leadingIcon = { Icon(Icons.Default.Email, null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                var passwordVisible by remember { mutableStateOf(false) }
+
+                OutlinedTextField(
+                    value = scholixPassword,
+                    onValueChange = { scholixPassword = it },
+                    label = { Text("Password") },
+                    leadingIcon = { Icon(Icons.Default.Lock, null) },
+                    trailingIcon = {
+                        val icon = if (passwordVisible)
+                            Icons.Default.VisibilityOff else Icons.Default.Visibility
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(icon, null)
+                        }
+                    },
+                    visualTransformation = if (passwordVisible)
+                        VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                AnimatedVisibility(visible = scholixLoading, enter = fadeIn(), exit = fadeOut()) {
+                    CircularWavyProgressIndicator()
+                }
+
+                AnimatedVisibility(visible = !scholixLoading, enter = fadeIn(), exit = fadeOut()) {
+                    Button(
+                        onClick = {
+                            if (scholixEmail.isBlank() || scholixPassword.isBlank()) {
+                                scholixError = "Please fill in all fields"
+                                return@Button
+                            }
+
+                            scholixLoading = true
+                            scholixError = null
+
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val body = JSONObject().apply {
+                                        put("email", scholixEmail)
+                                        put("password", scholixPassword)
+                                        put("name", scholixEmail.substringBefore("@"))
+                                    }
+
+                                    val endpoint = if (isSignupMode) "signup" else "login"
+                                    val response = ApiService.postJson(endpoint, body)
+
+                                    Log.d("ScholixAuth", "Response: $response")
+
+                                    withContext(Dispatchers.Main) {
+                                        ApiService.saveSessionCookie(context)
+                                        scholixLoggedIn = true
+                                        scholixLoading = false
+                                    }
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        scholixError = "Auth failed: ${e.message}"
+                                        scholixLoading = false
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text(if (isSignupMode) "Sign Up" else "Sign In", style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+
+                scholixError?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = { isSignupMode = !isSignupMode }) {
+                    Text(
+                        if (isSignupMode)
+                            "Already have an account? Log in"
+                        else
+                            "Don't have an account? Sign up"
+                    )
+                }
+            }
+        }
+        val backdrop = rememberLayerBackdrop()
+
+        // ───── Stage 2: Choose platform ─────
+        AnimatedVisibility(visible = showPlatformPage, enter = fadeIn(), exit = fadeOut()) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "Choose Your Platform",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(16.dp))
                 ActionRow {
                     addVerticalActionList(
-                        options = listOf(
-                            *platformOptions.map { option ->
-                                SegmentedOption(
-                                    option,
-                                    text = option.name,
-                                    iconRes = option.iconRes
-                                )
-                            }.toTypedArray()
-                        ),
+                        options = platformOptions.map {
+                            SegmentedOption(it, text = it.name, iconRes = it.iconRes)
+                        },
                         onClick = { option ->
                             selectedPlatform = option
                             loginFields = option.factory().getLoginFields()
                             errorMessage = null
                         },
-                        isGlass = false,
-                        backdrop = backdrop
+                        backdrop = backdrop,
+                        isGlass = false
                     )
-
                 }
             }
-
-            // ─── Platform Selection Page ────────────────────────
-//            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-//                Text(
-//                    text = "Choose Your Platform",
-//                    style = MaterialTheme.typography.headlineMedium,
-//                    color = MaterialTheme.colorScheme.primary
-//                )
-//
-//                Spacer(Modifier.height(16.dp))
-//
-//                LazyVerticalGrid(
-//                    columns = GridCells.Adaptive(minSize = 120.dp),
-//                    modifier = Modifier
-//                        .fillMaxWidth()
-//                        .heightIn(max = 280.dp),
-//                    verticalArrangement = Arrangement.spacedBy(12.dp),
-//                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-//                ) {
-//                    items(platformOptions) { option ->
-//                        PlatformCard(
-//                            option = option,
-//                            onSelect = {
-//                                selectedPlatform = option
-//                                loginFields = option.factory().getLoginFields()
-//                                errorMessage = null
-//                            }
-//                        )
-//                    }
-//                }
-//            }
         }
 
-        // ─── Inner Login Page ─────────────────────────────
-        AnimatedVisibility(visible = showLoginPage, enter = fadeIn(), exit = fadeOut()) {
+        // ───── Stage 3: Platform login ─────
+        AnimatedVisibility(visible = selectedPlatform != null, enter = fadeIn(), exit = fadeOut()) {
             selectedPlatform?.let { platform ->
                 val fields = loginFields ?: platform.factory().getLoginFields()
 
@@ -137,35 +229,11 @@ fun LoginPage(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        IconButton(
-                            onClick = {
-                                selectedPlatform = null
-                                errorMessage = null
-                                loginFields = null
-                            },
-                            modifier = Modifier.align(Alignment.CenterStart),
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                contentDescription = "Back"
-                            )
-                        }
-
-                        // 🔹 Centered title text
-                        Text(
-                            text = platform.name,
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
-                    }
+                    Text(
+                        text = platform.name,
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
 
                     DynamicLoginFields(
                         fields = fields,
@@ -182,39 +250,40 @@ fun LoginPage(
                             isLoading = true
                             errorMessage = null
 
-                            scope.launch {
+                            scope.launch(Dispatchers.IO) {
                                 try {
-                                    val created = withContext(Dispatchers.IO) {
-                                        val info = selectedPlatform!!
-
-                                        // Try to call constructor(LoginFields)
-                                        val platformClass = info.factory()::class.java
-                                        val constructor = platformClass.constructors.find { ctor ->
-                                            ctor.parameterTypes.size == 1 && ctor.parameterTypes[0] == LoginFields::class.java
+                                    val body = JSONObject().apply {
+                                        put("name", platform.apiName)
+                                        fields.getFields().forEach {
+                                            put(it.id, JSONObject().apply {
+                                                put("type", when (val t = it.type) {
+                                                    Type.Id -> "id"
+                                                    Type.Username -> "username"
+                                                    Type.Password -> "password"
+                                                    Type.Email -> "email"
+                                                    Type.Token -> "token"
+                                                    is Type.Custom -> t.name.lowercase()
+                                                })
+                                                put("value", it.value)
+                                            })
                                         }
-
-                                        val instance = if (constructor != null) {
-                                            // Platform supports direct loginFields constructor (e.g., WebtopPlatform)
-                                            constructor.newInstance(fields) as Platform
-                                        } else {
-                                            // Fall back: create a blank one, then apply login fields
-                                            info.factory().apply {
-                                                applyLoginFields(fields)
-                                            }
-                                        }
-
-                                        instance
                                     }
 
-                                    val ok = withContext(Dispatchers.IO) { created.isLoggedIn() }
-                                    if (ok) {
-                                        PlatformStorage.savePlatforms(context, listOf(created))
+                                    val response = ApiService.postJson("user/platform", body)
+                                    Log.d("PlatformLogin", "Response: $response")
+
+                                    withContext(Dispatchers.Main) {
+                                        scholixLoggedIn = false
+                                        selectedPlatform = null
+                                        isLoading = false
                                         onLoginSuccess()
-                                    } else errorMessage = "Invalid credentials"
+                                    }
+
                                 } catch (e: Exception) {
-                                    errorMessage = "Login failed: ${e.localizedMessage}"
-                                } finally {
-                                    isLoading = false
+                                    withContext(Dispatchers.Main) {
+                                        errorMessage = "Login failed: ${e.message}"
+                                        isLoading = false
+                                    }
                                 }
                             }
                         }
@@ -224,10 +293,6 @@ fun LoginPage(
         }
     }
 }
-
-// ──────────────────────────────────────────────
-// Platform Card model and composable
-// ──────────────────────────────────────────────
 
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

@@ -41,14 +41,16 @@ import com.feldman.scholix.pages.LockerRepository
 import com.feldman.lockerapp.ui.theme.AppTheme
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.pages.LoginPage
+import com.feldman.scholix.api.hasLoggedInPlatforms
 import com.feldman.scholix.services.GradeMonitorWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.lang.Thread.sleep
 import java.io.IOException
+object ApiConfig {
+    const val BASE_URL = "https://scholix.web.app/api"
+}
 
 fun isSmartSchoolReachable(): Boolean {
     return try {
@@ -93,128 +95,35 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AppTheme {
-                var isLoggedIn by remember { mutableStateOf<Boolean?>(null) }
                 val context = LocalContext.current
                 val scope = rememberCoroutineScope()
                 var platforms by remember { mutableStateOf<List<Platform>>(emptyList()) }
-                var isLoading by remember { mutableStateOf(true) }
                 var preloadedCourses by remember { mutableStateOf(listOf<JSONObject>()) }
                 val snackbarHostState = remember { SnackbarHostState() }
 
-                fun reloadPlatforms() {
-                    val ctx = context
-                    scope.launch(Dispatchers.IO) {
-                        val newPlatforms = PlatformStorage.loadPlatforms(ctx)
-                        val valid = newPlatforms.any { it.isLoggedIn() }
-                        withContext(Dispatchers.Main) {
-                            platforms = newPlatforms
-                            isLoggedIn = valid
-                            sleep(120.toLong())
-                            isLoading = false
-
-                        }
-                    }
-                }
-
-                fun reloadPreloads(snackbarHostState: SnackbarHostState) {
-                    Log.d("MainActivity", "Reloading platforms")
-                    scope.launch(Dispatchers.IO) {
-                        val reachable = isSmartSchoolReachable()
-                        if (!reachable) {
-                            withContext(Dispatchers.Main) {
-                                scope.launch {
-                                    val result = snackbarHostState.showSnackbar(
-                                        message = "Cannot connect to Webtop. Check your internet connection.",
-                                        actionLabel = "Retry"
-                                    )
-                                    if (result == SnackbarResult.ActionPerformed) {
-                                        reloadPreloads(snackbarHostState)
-                                    }
-                                }
-                            }
-                            return@launch
-                        }
-
-                        val failedPlatforms = PlatformStorage.refreshCookies(this@MainActivity)
-                        val courses = PlatformStorage.getCourses(this@MainActivity)
-
-                        withContext(Dispatchers.Main) {
-                            preloadedCourses = courses
-                            isLoading = false
-
-                            if (failedPlatforms.isNotEmpty()) {
-                                scope.launch {
-                                    val message = "Failed to reload: ${failedPlatforms.joinToString(", ")}"
-                                    val result = snackbarHostState.showSnackbar(
-                                        message = message,
-                                        actionLabel = "Retry"
-                                    )
-                                    if (result == SnackbarResult.ActionPerformed) {
-                                        isLoading = true
-                                        reloadPreloads(snackbarHostState)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-
+                // preload once, but don't branch UI based on login here
                 LaunchedEffect(Unit) {
                     withContext(Dispatchers.IO) {
-                        reloadPreloads(snackbarHostState)
-                        val newPlatforms = PlatformStorage.loadPlatforms(context)
-                        val valid = newPlatforms.any { it.isLoggedIn() }
-
+                        val courses = PlatformStorage.getCourses(context)
                         withContext(Dispatchers.Main) {
-                            platforms = newPlatforms
-                            isLoggedIn = valid
-                            isLoading = false
+                            preloadedCourses = courses
                         }
                     }
                 }
 
-                when {
-                    isLoading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularWavyProgressIndicator()
-                        }
-                    }
-
-                    isLoggedIn==false -> {
-                        LoginPage(
-                            onLoginSuccess = {
-                                isLoading = true
-                                reloadPlatforms()
-                                isLoggedIn = true
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    else -> {
-                        MainScreen(
-                            preloadedCourses = preloadedCourses,
-                            repository = repository,
-                            onPlatformsChanged = {
-                                reloadPlatforms()
-                                reloadPreloads(snackbarHostState)
-                            },
-                            platforms = platforms,
-                            onLoginSuccess = {
-                                isLoading = true
-                                reloadPlatforms()
-                                reloadPreloads(snackbarHostState)
-                                isLoggedIn = true
-                            }
-                        )
-                    }
-                }
+                // ✅ Always show MainScreen — it hosts NavHost and decides everything internally
+                MainScreen(
+                    preloadedCourses = preloadedCourses,
+                    repository = repository,
+                    onPlatformsChanged = {
+                        scope.launch { platforms = PlatformStorage.loadPlatforms(context) }
+                    },
+                    platforms = platforms,
+                    onLoginSuccess = { /* can trigger background sync */ }
+                )
             }
         }
+
 
     }
 
@@ -287,12 +196,11 @@ fun MainScreen(
         }
     }
 
-    // 🔄 Check login state once when screen loads
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            val valid = PlatformStorage.loadPlatforms(context).any { it.isLoggedIn() }
+            val scholixValid = hasLoggedInPlatforms(context)
             withContext(Dispatchers.Main) {
-                isLoggedIn = valid
+                isLoggedIn = scholixValid
             }
         }
     }
@@ -309,18 +217,18 @@ fun MainScreen(
 
     val visibleDests = Dest.entries.filter { dest ->
         dest.visible && dest.parent==null && when (dest) {
-            Dest.Grades -> hasGrades
-            Dest.Schedule -> hasSchedule
-            Dest.Attendance -> hasAttendance
+            Dest.Grades -> true //hasGrades
+            Dest.Schedule -> true //hasGrades
+            Dest.Attendance -> true //hasGrades
             Dest.Messages -> false
             else -> true
         }
     }
     val visibleSideDests = Dest.entries.filter { dest ->
         dest.visible && dest.parent==null  && when (dest) {
-            Dest.Grades -> hasGrades
-            Dest.Schedule -> hasSchedule
-            Dest.Attendance -> hasAttendance
+            Dest.Grades -> true //hasGrades
+            Dest.Schedule -> true //hasGrades
+            Dest.Attendance -> true //hasAttendance
             else -> true
         }
     }

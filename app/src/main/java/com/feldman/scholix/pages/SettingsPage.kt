@@ -39,12 +39,15 @@ import com.feldman.scholix.api.applyLoginFields
 import com.feldman.scholix.api.platformOptions
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.Dest
+import com.feldman.scholix.api.ApiService
 import com.feldman.scholix.ui.components.ActionRow
 import com.feldman.scholix.ui.components.SegmentedOption
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.reflect.full.companionObjectInstance
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
@@ -58,7 +61,52 @@ fun PlatformsPage(
     val scope = rememberCoroutineScope()
 
     var refreshKey by remember { mutableIntStateOf(0) }
-    val platforms = remember(refreshKey) { PlatformStorage.loadPlatforms(context) }
+
+    var platforms by remember { mutableStateOf(listOf<Platform>()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(refreshKey) {
+        // First: try local cache
+        val local = PlatformStorage.loadPlatforms(context)
+        if (local.isNotEmpty()) {
+            platforms = local
+            isLoading = false
+        }
+
+        // Then: refresh from API
+        try {
+            ApiService.loadSessionCookie(context)
+            val cookie = ApiService.sessionCookie
+            val response = withContext(Dispatchers.IO) {
+                ApiService.getJson("user/courses", cookie ?: "")
+            }
+
+            val json = JSONObject(response)
+            val coursesArray = json.optJSONArray("courses") ?: JSONArray()
+
+            val updatedPlatforms = (0 until coursesArray.length()).mapNotNull { i ->
+                val obj = coursesArray.getJSONObject(i)
+                val course = obj.optJSONObject("course") ?: JSONObject()
+                val name = course.optString("name", "Unknown")
+                val platformType = obj.optString("platform_name", "")
+                // Map this to your Platform subclass
+                when (platformType.lowercase()) {
+                    "webtop" -> WebtopPlatform()
+                    "bar-ilan" -> BarIlanPlatform()
+                    else -> null
+                }
+            }
+
+            platforms = updatedPlatforms
+            PlatformStorage.savePlatforms(context, platforms)
+            isLoading = false
+        } catch (e: Exception) {
+            Log.e("PlatformsPage", "Failed to load from API: ${e.message}")
+            isLoading = false
+        }
+    }
+
+
     var showAddSheet by rememberSaveable { mutableStateOf(false) }
     var editIndex by remember { mutableStateOf<Int?>(null) }
     var editUsername by rememberSaveable { mutableStateOf("") }
@@ -479,6 +527,20 @@ fun PlatformsPage(
                                     val ok = withContext(Dispatchers.IO) { created.isLoggedIn() }
                                     if (ok) {
                                         withContext(Dispatchers.IO) {
+                                            // ✅ Save to backend as well
+                                            val body = JSONObject().apply {
+                                                put("platform_type", selectedPlatform!!.name.lowercase())
+                                                put("username", fields.getValue("username"))
+                                                put("password", fields.getValue("password"))
+                                            }
+                                            try {
+                                                ApiService.postJson("user/platforms/add", body)
+                                                Log.d("PlatformsPage", "✅ Platform added to backend: ${selectedPlatform!!.name}")
+                                            } catch (e: Exception) {
+                                                Log.w("PlatformsPage", "⚠️ Failed to sync platform to backend: ${e.message}")
+                                            }
+
+                                            // ✅ Update local cache too
                                             val list = PlatformStorage.loadPlatforms(context).toMutableList()
                                             list.add(created)
                                             PlatformStorage.savePlatforms(context, list)
@@ -490,6 +552,7 @@ fun PlatformsPage(
                                     } else {
                                         errorMessage = "Invalid credentials"
                                     }
+
                                 } catch (e: Exception) {
                                     errorMessage = "Error: ${e.localizedMessage}"
                                 } finally {

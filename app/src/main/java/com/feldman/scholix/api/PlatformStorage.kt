@@ -19,16 +19,17 @@ import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
 
 data class PlatformInfo(
+    val apiName: String,
     val name: String,
     val iconRes: Int,
     val factory: () -> Platform
 )
 
 val platformOptions = listOf(
-    PlatformInfo("Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
-    PlatformInfo("Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
-    PlatformInfo("Open University", R.drawable.ic_open_au) { OpenAUPlatform() as Platform },
-    PlatformInfo("Demo", R.drawable.ic_account_circle) { DemoPlatform() as Platform }
+    PlatformInfo("webtop","Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
+    PlatformInfo("barilan","Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
+    PlatformInfo("openau","Open University", R.drawable.ic_open_au) { OpenAUPlatform() as Platform },
+    PlatformInfo("demo","Demo", R.drawable.ic_account_circle) { DemoPlatform() as Platform }
 )
 
 
