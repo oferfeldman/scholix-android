@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerDefaults
-import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,7 +13,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.intl.Locale
@@ -24,15 +21,12 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.feldman.scholix.ui.components.ActionRow
-import com.feldman.scholix.ui.components.SegmentedOption
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import com.feldman.scholix.R
 import androidx.compose.ui.text.intl.LocaleList
-import com.feldman.lockerapp.ui.theme.darkColors
 import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.pages.ChipDropdown
+import com.feldman.scholix.pages.ChipPicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Calendar
@@ -48,28 +42,29 @@ fun ClassFiltersRow(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = modifier.fillMaxWidth()
     ) {
-        // שכבה (grade)
-        ChipDropdown(
-            label = "שכבה",
-            icon = painterResource(R.drawable.ic_school), // pick any icon you have
-            options = listOf("7", "8", "9"),
-            selected = grade,
-            onSelectedChange = onGradeChange
-        )
+        Box(modifier = Modifier.weight(1f)) {
+            ChipPicker(
+                label = stringResource(R.string.grade), // "שכבה"
+                options = listOf("7", "8", "9"),
+                selected = grade,
+                onSelectedChange = onGradeChange
+            )
+        }
 
-        // כיתה (classroom inside the grade)
-        ChipDropdown(
-            label = "כיתה",
-            icon = painterResource(R.drawable.ic_calendar), // pick any icon you have
-            options = (1..9).map { it.toString() }, // classes 1–9
-            selected = clazz,
-            onSelectedChange = onClassChange
-        )
+        Box(modifier = Modifier.weight(1f)) {
+            ChipPicker(
+                label = stringResource(R.string.classroom), // "כיתה"
+                options = (1..9).map { it.toString() },
+                selected = clazz,
+                onSelectedChange = onClassChange
+            )
+        }
     }
 }
+
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -110,7 +105,7 @@ fun SchedulePage(
         try {
             Log.d("SchedulePage", "Fetching schedule for $selectedValue")
 
-            val platform = PlatformStorage.getAccount(context, 0)
+            val platform = PlatformStorage.getPlatform(context, 0)
             if (platform != null) {
                 // --- Updated schedule ---
                 val updated = withContext(Dispatchers.IO) {
@@ -156,40 +151,50 @@ fun SchedulePage(
 
         val scheduleMode = remember { mutableStateOf(ScheduleMode.Updated) }
 
-        ActionRow {
-            addSegmentedToggleGroup(
-                state = scheduleMode,
-                SegmentedOption(
-                    ScheduleMode.Original,
-                    stringResource(R.string.original),
-                    R.drawable.ic_raw,
-                    selectedBackgroundColor = darkColors().errorContainer,
-                    textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    selectedTextColor = MaterialTheme.colorScheme.onSurface
-                ),
-                SegmentedOption(
-                    ScheduleMode.Updated,
-                    stringResource(R.string.updated),
-                    R.drawable.ic_new,
-                    selectedBackgroundColor = darkColors().secondary,
-                    textColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    selectedTextColor = MaterialTheme.colorScheme.onSurface
-                ),
-                onSelectedChange = { newStyle ->
-                    scheduleMode.value = newStyle
-                }
-            )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                val original = stringResource(R.string.original)
+                val updated = stringResource(R.string.updated)
+                ChipPicker(
+                    label = "Version",
+                    options = listOf(
+                        original,
+                        updated
+                    ),
+                    selected = when (scheduleMode.value) {
+                        ScheduleMode.Original -> original
+                        ScheduleMode.Updated -> updated
+                    },
+                    onSelectedChange = { newValue ->
+                        scheduleMode.value = if (newValue == original)
+                            ScheduleMode.Original
+                        else
+                            ScheduleMode.Updated
+                    }
+                )
+            }
+            Box(modifier = Modifier.weight(1f)) {
+                ChipPicker(
+                    label = stringResource(R.string.grade), // "שכבה"
+                    options = listOf("7", "8", "9"),
+                    selected = selectedGrade,
+                    onSelectedChange = { selectedGrade = it }
+                )
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                ChipPicker(
+                    label = stringResource(R.string.classroom), // "כיתה"
+                    options = (1..9).map { it.toString() },
+                    selected = selectedClass,
+                    onSelectedChange = { selectedClass = it }
+                )
+            }
+
         }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        ClassFiltersRow(
-            grade = selectedGrade,
-            onGradeChange = { selectedGrade = it },
-            clazz = selectedClass,
-            onClassChange = { selectedClass = it },
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -275,7 +280,9 @@ fun ScheduleCard(item: JSONObject) {
     val colors = getColorFromClass(item.optString("colorClass"))
 
     Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp),
         colors = CardDefaults.cardColors(containerColor = colors.background)
 
     ) {

@@ -7,8 +7,8 @@ import android.util.Log
 import com.feldman.scholix.api.LoginField
 import com.feldman.scholix.api.LoginFields
 import com.feldman.scholix.api.Platform
-import com.feldman.scholix.api.Type
 import com.feldman.scholix.api.UnsafeOkHttpClient
+import com.feldman.scholix.api.Type
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -879,7 +879,6 @@ class WebtopPlatform() : Platform {
 
 
     companion object : Platform.Companion {
-        override val client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
 
         @JvmStatic
         @Throws(IOException::class, JSONException::class)

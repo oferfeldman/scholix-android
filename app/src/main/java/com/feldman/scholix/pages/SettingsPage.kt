@@ -10,8 +10,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -26,9 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -41,13 +37,10 @@ import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.Type
 import com.feldman.scholix.api.applyLoginFields
 import com.feldman.scholix.api.platformOptions
-import com.feldman.scholix.api.platforms.DemoPlatform
-import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
-import com.feldman.scholix.navigation.Dest
+import com.feldman.scholix.Dest
 import com.feldman.scholix.ui.components.ActionRow
 import com.feldman.scholix.ui.components.SegmentedOption
-import com.feldman.scholix.ui.components.Title
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -64,7 +57,7 @@ fun PlatformsPage(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var refreshKey by remember { mutableStateOf(0) }
+    var refreshKey by remember { mutableIntStateOf(0) }
     val platforms = remember(refreshKey) { PlatformStorage.loadPlatforms(context) }
     var showAddSheet by rememberSaveable { mutableStateOf(false) }
     var editIndex by remember { mutableStateOf<Int?>(null) }

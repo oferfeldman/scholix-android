@@ -204,7 +204,7 @@ object PlatformStorage {
 
 
 
-    fun getAccount(context: Context, index: Int): Platform? {
+    fun getPlatform(context: Context, index: Int): Platform? {
         val platforms = loadPlatforms(context)
         return if (index in platforms.indices) {
             platforms[index]

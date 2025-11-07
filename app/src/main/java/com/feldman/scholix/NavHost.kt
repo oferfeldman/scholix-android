@@ -1,4 +1,4 @@
-package com.feldman.scholix.navigation
+package com.feldman.scholix
 
 import SchedulePage
 import android.util.Log
@@ -24,15 +24,12 @@ import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import com.feldman.scholix.R
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.pages.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import kotlin.text.compareTo
 
 enum class Dest(
     val label: String,
@@ -74,20 +71,8 @@ fun NavHost(
     onPlatformsChanged: () -> Unit,
     onLogout: () -> Unit,
     onLoginSuccess: () -> Unit,
-    ) {
+) {
     Log.d("NavHost", "Loading")
-    println(platforms)
-    println(platforms)
-    println(platforms)
-    println(platforms)
-    println(platforms)
-    println(platforms)
-    println(platforms)
-    println(platforms)
-    println(platforms)
-    println(platforms)
-    println(platforms)
-    println(platforms)
     val context = LocalContext.current
     val viewModel: LockerViewModel = viewModel(
         factory = LockerViewModelFactory(repository)

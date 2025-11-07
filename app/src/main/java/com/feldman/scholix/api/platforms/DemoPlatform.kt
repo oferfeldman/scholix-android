@@ -6,9 +6,7 @@ import android.util.Log
 import android.widget.Toast
 import com.feldman.scholix.api.LoginFields
 import com.feldman.scholix.api.Platform
-import com.feldman.scholix.api.Type
 import com.feldman.scholix.api.UnsafeOkHttpClient
-import com.feldman.scholix.api.platforms.WebtopPlatform.Companion.generateId
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 import org.json.JSONArray
@@ -277,7 +275,6 @@ class DemoPlatform: Platform {
             .put("supportsAttendance", true)
     }
     companion object : Platform.Companion {
-        override val client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
 
         private val SUBJECT_COLORS: MutableMap<String, String> = HashMap<String, String>().apply {
             put("מתמטיקה האצה", "lightgreen-cell")

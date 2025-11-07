@@ -2,9 +2,7 @@ package com.feldman.scholix.api.platforms
 
 import android.util.Log
 import com.feldman.scholix.api.*
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
+
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -13,6 +11,40 @@ import org.jsoup.nodes.Document
 import java.io.IOException
 import java.nio.charset.Charset
 import java.util.*
+import io.ktor.client.*
+import io.ktor.client.engine.okhttp.*
+import io.ktor.client.plugins.DefaultRequest
+import io.ktor.client.plugins.cookies.*
+import io.ktor.client.plugins.logging.*
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.forms.submitForm
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.json.*
+import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+
+private fun mergeCookieStrings(existing: String?, newCookies: List<String>): String {
+    val allCookies = mutableMapOf<String, String>()
+
+    // take existing cookies and split them by ;
+    existing?.split(";")?.forEach {
+        val parts = it.split("=", limit = 2)
+        if (parts.size == 2) allCookies[parts[0].trim()] = parts[1].trim()
+    }
+
+    // add/overwrite with new ones
+    for (c in newCookies) {
+        val parts = c.split(";", limit = 2)[0].split("=", limit = 2)
+        if (parts.size == 2) allCookies[parts[0].trim()] = parts[1].trim()
+    }
+
+    return allCookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+}
 
 class OpenAUPlatform() : Platform {
 
@@ -44,7 +76,26 @@ class OpenAUPlatform() : Platform {
     override var _username: String? = null
     override var _password: String? = null
     private var _cookies: String? = null
-    private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
+    private val _client = HttpClient(OkHttp) {
+        followRedirects = true
+
+        install(HttpCookies) {
+            storage = AcceptAllCookiesStorage()
+        }
+
+        install(ContentNegotiation) {
+            json()
+        }
+        install(DefaultRequest) {
+            _cookies?.let { headers.append("Cookie", it) }
+        }
+
+//        install(Logging) {
+//            logger = Logger.SIMPLE
+//            level = LogLevel.HEADERS
+//        }
+    }
+
     override var editing: Boolean = false
     override var loggedIn: Boolean = false
     private val _courses: ArrayList<JSONObject> = ArrayList()
@@ -82,73 +133,75 @@ class OpenAUPlatform() : Platform {
     // endregion
 
     // region --- Login Logic ---
-    private fun login(username: String, password: String, id: String): Boolean {
-        Log.d("OpenAU", "Attempting login for $username ($id)")
-
+    private fun login(username: String, password: String, id: String): Boolean = runBlocking {
         try {
-            // Step 1: Initial GET to get cookies
-            val loginPage =
-                "https://sso.apps.openu.ac.il/login?T_PLACE=https://sheilta.apps.openu.ac.il/pls/mtl/student.first?v_kurs="
+            val loginPage = "https://sso.apps.openu.ac.il/login?T_PLACE=https://sheilta.apps.openu.ac.il/pls/dmyopt2/myop.myop_screen"
 
-            val getReq = Request.Builder()
-                .url(loginPage)
-                .get()
-                .addHeader(
-                    "User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
-                )
-                .build()
+            // Step 1: GET initial cookies
+            val initialResp = _client.get(loginPage)
+            // ⬇️ ADD THIS
+            val setCookies1 = initialResp.headers.getAll(HttpHeaders.SetCookie).orEmpty()
+            _cookies = mergeCookieStrings(_cookies, setCookies1)
+            // ⬆️ ADD THIS
 
-            _client.newCall(getReq).execute().use { resp0 ->
-                if (!resp0.isSuccessful) {
-                    Log.e("OpenAU", "Initial GET failed: ${resp0.code}")
-                    return false
-                }
-                _cookies = resp0.headers("Set-Cookie").joinToString("; ")
-                Log.d("OpenAU", "Initial cookies: $_cookies")
-            }
+            if (!initialResp.status.isSuccess()) return@runBlocking false
 
-            // Step 2: Login POST
+            // Step 2: POST login
             val loginUrl = "https://sso.apps.openu.ac.il/process"
-            val formPayload =
-                "p_user=$username&p_sisma=$password&p_mis_student=$id&T_PLACE=https://sheilta.apps.openu.ac.il/pls/mtl/student.first?v_kurs="
+            val payload = listOf(
+                "p_user" to username,
+                "p_sisma" to password,
+                "p_mis_student" to id,
+                "T_PLACE" to "https://sheilta.apps.openu.ac.il/pls/dmyopt2/myop.myop_screen"
+            )
 
-            val headers = Headers.Builder()
-                .add(
-                    "User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
-                )
-                .add("Referer", loginPage)
-                .add("Content-Type", "application/x-www-form-urlencoded")
-                .add("Cookie", _cookies ?: "")
-                .build()
+            val loginResp: HttpResponse = _client.submitForm(
+                url = loginUrl,
+                formParameters = Parameters.build { payload.forEach { (k, v) -> append(k, v) } },
+                encodeInQuery = false
+            )
+            // ⬇️ ADD THIS
+            val setCookies2 = loginResp.headers.getAll(HttpHeaders.SetCookie).orEmpty()
+            _cookies = mergeCookieStrings(_cookies, setCookies2)
+            // ⬆️ ADD THIS
 
-            val request = Request.Builder()
-                .url(loginUrl)
-                .headers(headers)
-                .post(formPayload.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
-                .build()
+            val loginHtml = loginResp.bodyAsText(Charset.forName("windows-1255"))
 
-            _client.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) {
-                    Log.e("OpenAU", "Login failed: ${resp.code}")
-                    return false
+            // Step 3: follow hidden form if needed
+            val formActionMatch = Regex("""<form[^>]*action="([^"]+)"[^>]*>""").find(loginHtml)
+            if (formActionMatch != null) {
+                val formUrl = formActionMatch.groupValues[1]
+                val hiddenInputs = Regex("""<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"""").findAll(loginHtml)
+                val params = Parameters.build {
+                    hiddenInputs.forEach {
+                        append(it.groupValues[1], it.groupValues[2])
+                    }
                 }
 
-                val newCookies = resp.headers("Set-Cookie").joinToString("; ")
-                _cookies = listOfNotNull(_cookies, newCookies).joinToString("; ")
-
-                displayName = "OpenU: $username"
-                loggedIn = true
-                Log.d("OpenAU", "Login success! User=$username")
-                return true
+                val sheiltaResp: HttpResponse = _client.submitForm(
+                    url = formUrl,
+                    formParameters = params,
+                    encodeInQuery = false
+                )
+                // ⬇️ ADD THIS
+                val setCookies3 = sheiltaResp.headers.getAll(HttpHeaders.SetCookie).orEmpty()
+                _cookies = mergeCookieStrings(_cookies, setCookies3)
+                // ⬆️ ADD THIS
             }
+
+            loggedIn = true
+            displayName = "OpenU: $username"
+            fetchCourses()
+
+            Log.d("OpenAU", "Login success!")
+            return@runBlocking true
 
         } catch (e: Exception) {
             Log.e("OpenAU", "Login exception", e)
-            return false
+            return@runBlocking false
         }
     }
+
     // endregion
 
     // region --- Courses & Grades ---
@@ -163,138 +216,237 @@ class OpenAUPlatform() : Platform {
                 _courses.add(JSONObject().put("name", c))
             }
         }
-        println(_courses)
         Log.d("OpenAU", "getCourses: $_courses")
         return _courses
     }
 
     override fun getSubjectList(): List<String> = fetchCourses()
 
-    private fun fetchCourses(): List<String> {
+    private fun fetchCourses(): List<String> = runBlocking {
         val result = mutableListOf<String>()
 
-        // --- Ensure valid session ---
-//        if (!loggedIn || _cookies.isNullOrBlank()) {
-//            Log.w("OpenAU", "Not logged in or cookies missing. Attempting re-login...")
-//            if (!refreshCookies()) {
-//                Log.e("OpenAU", "Re-login failed. Cannot fetch courses.")
-//                return result
-//            }
-//            Log.d("OpenAU", "Re-login succeeded.")
-//        }
-        refreshCookies()
-        val firstUrl = "https://sheilta.apps.openu.ac.il/pls/mtl/student.first"
-        val fullUrl = "$firstUrl?v_kurs="
-
-        val req = Request.Builder()
-            .url(fullUrl)
-            .addHeader("Cookie", _cookies!!)
-            .addHeader(
-                "User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
-            )
-            .get()
-            .build()
-
         try {
-            _client.newCall(req).execute().use { resp ->
-//                Log.d("HTTP_DEBUG", "➡️ student.first: ${resp.code}")
-//                Log.d("HTTP_DEBUG", "Message: ${resp.message}")
-//                Log.d("HTTP_DEBUG", "URL: ${resp.request.url}")
-//                Log.d("HTTP_DEBUG", "Headers:\n${resp.headers}")
-
-                // Handle expired session (OpenU redirects to login or returns 302/401)
-                if (resp.code in listOf(302, 401, 403)) {
-                    Log.w("OpenAU", "Session expired (code=${resp.code}). Refreshing cookies...")
-                    if (!refreshCookies()) {
-                        Log.e("OpenAU", "Re-login after expiration failed.")
-                        return result
-                    }
-                    return fetchCourses() // retry once after re-login
+            if (!loggedIn) {
+                Log.w("OpenAU", "Not logged in. Attempting re-login...")
+                if (!refreshCookies()) {
+                    Log.e("OpenAU", "Re-login failed. Cannot fetch courses.")
+                    return@runBlocking emptyList<String>()
                 }
-
-                if (!resp.isSuccessful) {
-                    Log.e("OpenAU", "Fetch failed with code ${resp.code}")
-                    return result
-                }
-
-                // --- Read body once ---
-                val bytes = resp.body.bytes()
-                val charset = resp.body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8
-                val html = bytes.toString(charset)
-                Log.d("HTTP_DEBUG", "Body:\n$html")
-
-                // --- Parse courses ---
-                val doc = Jsoup.parse(html)
-                val options = doc.select("select[name=in_kurs] option")
-
-                for (opt in options) {
-                    val id = opt.attr("value").trim()
-                    val text = opt.text().trim()
-                    if (id.isNotEmpty()) {
-                        // Just return text as required
-                        result.add(text)
-                    }
-                }
-
-                Log.d("HTTP_DEBUG", "Final courses: $result")
             }
+
+            var currentUrl = "https://sheilta.apps.openu.ac.il/pls/dmyopt2/course_info.courses"
+            var html: String
+            var loops = 0
+
+            while (true) {
+                val response: HttpResponse = _client.get(currentUrl) {
+                    headers {
+                        append(
+                            "User-Agent",
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+                        )
+                    }
+                    header(HttpHeaders.Cookie, _cookies ?: "")
+                }
+
+                html = response.bodyAsText()
+                Log.d("OpenAUPlatform", "Fetched URL: $currentUrl (status=${response.status})")
+
+                val redirectMatch = Regex("document\\.location\\.href\\s*=\\s*\"([^\"]+)\"").find(html)
+                if (redirectMatch != null && loops < 3) {
+                    val newUrl = redirectMatch.groupValues[1]
+                    Log.w("OpenAU", "Detected JS redirect → $newUrl")
+                    currentUrl = newUrl
+                    loops++
+                    continue
+                }
+
+                if (!response.status.isSuccess()) {
+                    Log.e("OpenAU", "Fetch failed with status ${response.status}")
+                    return@runBlocking emptyList<String>()
+                }
+                break
+            }
+
+            val doc = Jsoup.parse(html)
+            val courseRows = doc.select("table.content_tbl tr:has(td)")
+
+            // Clear previous course list before updating
+            _courses.clear()
+            println(courseRows)
+//            for (row in courseRows) {
+//                val cols = row.select("td")
+//                if (cols.size >= 9) {
+//                    // From inspection:
+//                    // index 7 = course name, index 8 = course ID
+//                    val name = cols[7].text().trim()
+//                    val id = cols[8].text().trim().takeLast(5) // Extract only the numeric ID
+//                    if (id.matches(Regex("\\d{5}")) && name.isNotEmpty()) {
+//                        val courseObj = JSONObject()
+//                            .put("id", id)
+//                            .put("name", name)
+//                        _courses.add(courseObj)
+//                        result.add(name)
+//                    }
+//                }
+//            }
+            for (row in courseRows) {
+                val cols = row.select("td")
+                if (cols.size >= 9) {
+                    // Extract the "details" link (the one pointing to course_info.courseinfo)
+                    val detailLink = row.selectFirst("a[href*='course_info.courseinfo']")?.attr("href")?.trim()
+
+                    // The course ID and name columns (based on the HTML you pasted)
+                    val id = row.select("a[href*='courses/']").firstOrNull()?.text()?.trim()?.takeLast(5) ?: ""
+                    val name = cols.getOrNull(7)?.text()?.trim() ?: ""
+
+                    if (id.matches(Regex("\\d{5}")) && name.isNotEmpty()) {
+                        val infoUrl = if (detailLink?.startsWith("http") == true) {
+                            detailLink
+                        } else if (!detailLink.isNullOrEmpty()) {
+                            // Normalize relative href to full absolute URL
+                            "https://sheilta.apps.openu.ac.il/pls/dmyopt2/${detailLink.removePrefix("/")}"
+                        } else null
+
+                        val courseObj = JSONObject()
+                            .put("id", id)
+                            .put("name", name)
+                            .put("infoUrl", infoUrl)
+
+                        _courses.add(courseObj)
+                        result.add(name)
+                    }
+                }
+            }
+
+
+            Log.d("OpenAU", "Fetched ${result.size} courses and updated _courses.")
+
         } catch (e: Exception) {
             Log.e("OpenAU", "fetchCourses failed", e)
         }
 
-        return result
+        return@runBlocking result
     }
 
 
 
-    override fun getGrades(course: String, year: Int?, semester: String?): JSONArray = getGrades()
 
-    fun getGrades(): JSONArray {
-        val grades = JSONArray()
-        if (!loggedIn || _cookies.isNullOrBlank()) return grades
-
-        val sikumUrl = "https://sheilta.apps.openu.ac.il/pls/mtl/student.sikum?v_pro=1"
-        val request = Request.Builder()
-            .url(sikumUrl)
-            .addHeader("Cookie", _cookies!!)
-            .get()
-            .build()
-
-        try {
-            _client.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return grades
-
-                val bytes = resp.body.bytes()
-                val html = String(bytes, Charset.forName("windows-1255"))
-                val doc = Jsoup.parse(html)
-
-                val rows = doc.select("tr[bgcolor=White]")
-                for (row in rows) {
-                    val cells = row.select("> td")
-                    if (cells.isEmpty()) continue
-
-                    val assignment = cells[0].text().trim()
-                    if (!assignment.matches(Regex("\\d+"))) continue
-
-                    val gradeCell = cells.getOrNull(7)
-                    val grade = gradeCell?.select("a")?.text()?.trim().takeIf { !it.isNullOrEmpty() }
-                        ?: gradeCell?.text()?.trim().takeIf { !it.isNullOrEmpty() }
-                        ?: "-"
-
-                    grades.put(
-                        JSONObject()
-                            .put("assignment", assignment)
-                            .put("grade", grade)
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("OpenAU", "Error parsing grades", e)
+    override fun getGrades(course: String, year: Int?, semester: String?): JSONArray {
+        // Try to find the course object by name
+        val matchedCourse = _courses.find {
+            it.optString("name").equals(course, ignoreCase = true)
         }
 
-        return grades
+        val courseId = matchedCourse?.optString("id") ?: run {
+            Log.w("OpenAU", "Course '$course' not found in list; fetching general grades.")
+            return JSONArray()
+        }
+
+        Log.d("OpenAU", "Resolved course '$course' → id=$courseId")
+
+        // --- 🔒 Ensure valid session before fetching ---
+        if (!ensureSession()) {
+            Log.w("OpenAU", "Session invalid; re-login failed — cannot fetch grades.")
+            return JSONArray().put(JSONObject().put("error", "login_failed"))
+        }
+
+        // --- Proceed with actual fetch ---
+        return getGrades(courseId)
     }
+
+
+    fun getGrades(courseId: String): JSONArray = runBlocking {
+        val grades = JSONArray()
+
+        if (!loggedIn) {
+            Log.e("OpenAU", "Not logged in, cannot fetch grades.")
+            return@runBlocking grades
+        }
+
+        try {
+            // Find the corresponding course object
+            val courseObj = _courses.find { it.optString("id") == courseId }
+            val infoUrl = courseObj?.optString("infoUrl")
+            if (infoUrl.isNullOrEmpty()) {
+                Log.e("OpenAU", "No infoUrl found for course $courseId")
+                return@runBlocking grades
+            }
+
+            // Construct the grades URL
+            val gradesUrl = infoUrl.replace(
+                "course_info.courseinfo",
+                "course_info_2.ZIUNMATALA"
+            )
+
+            Log.d("OpenAU", "Fetching grades from $gradesUrl")
+
+            // Fetch grades page
+            val response: HttpResponse = _client.get(gradesUrl) {
+                header(HttpHeaders.Cookie, _cookies ?: "")
+            }
+
+            if (!response.status.isSuccess()) {
+                Log.e("OpenAU", "Failed to fetch grades: ${response.status}")
+                return@runBlocking grades
+            }
+
+            val html = response.bodyAsText(Charset.forName("windows-1255"))
+            val doc = Jsoup.parse(html)
+
+            // Extract final course grade
+            val finalGradeMatch = Regex("ציון סופי בקורס:&nbsp;\\s*(\\d+)").find(html)
+            val finalGrade = finalGradeMatch?.groupValues?.get(1)
+
+            // Extract all task/exam rows
+            val rows = doc.select("tr[valign=top][align=right]:has(td[bgcolor])")
+            for (row in rows.drop(1)) { //don't take the first row with headers
+                val cells = row.select("td")
+                if (cells.size < 8) continue
+
+                val subjectCell = cells[6].clone()
+                subjectCell.select("a").remove()
+                val subject = subjectCell.text().trim()
+
+                val number = cells[7].text().trim()
+                val grade = cells[5].text().trim()
+                val weight = cells[4].text().trim()
+                val date = cells.getOrNull(3)?.text()?.trim() ?: ""
+
+                if (subject.isEmpty() || grade.isEmpty()) continue
+
+                grades.put(
+                    JSONObject()
+                        .put("subject", subject)
+                        .put("name", number)
+                        .put("grade", grade)
+                        .put("weight", weight)
+                        .put("date", date)
+                )
+            }
+
+            //Final Grade
+            if (!finalGrade.isNullOrEmpty()) {
+                grades.put(
+                    JSONObject()
+                        .put("subject", "Final Grade")
+                        .put("name", "Final Grade")
+                        .put("type", "final")
+                        .put("grade", finalGrade)
+                )
+            }
+
+            Log.d("OpenAU", "Parsed ${grades.length()} grades for $courseId")
+
+        } catch (e: Exception) {
+            Log.e("OpenAU", "Error fetching grades for $courseId", e)
+        }
+
+        return@runBlocking grades
+    }
+
+
     // endregion
 
     // region --- Boilerplate ---
@@ -348,9 +500,36 @@ class OpenAUPlatform() : Platform {
         .put("supportsAttendance", supportsAttendance)
         .put("courses", JSONArray(_courses))
     // endregion
+    private fun ensureSession(): Boolean = runBlocking {
+        try {
+            // Ping the main page to test current session validity
+            val resp = _client.get("https://sheilta.apps.openu.ac.il/pls/mtl/student.first?v_kurs=") {
+                header(HttpHeaders.Cookie, _cookies ?: "")
+
+            }
+
+            val html = resp.bodyAsText(Charset.forName("windows-1255"))
+
+            // If HTML contains login fields, session expired
+            if (html.contains("p_user") || html.contains("sisma") || html.contains("כניסה")) {
+                Log.w("OpenAU", "Session appears expired — attempting re-login.")
+                val relog = refreshCookies()
+                if (!relog) {
+                    Log.e("OpenAU", "Re-login failed.")
+                    loggedIn = false
+                    return@runBlocking false
+                }
+                Log.d("OpenAU", "Re-login succeeded.")
+            }
+
+            true
+        } catch (e: Exception) {
+            Log.e("OpenAU", "Session validation failed", e)
+            false
+        }
+    }
 
     companion object : Platform.Companion {
-        override val client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
 
         @JvmStatic
         @Throws(IOException::class, JSONException::class)

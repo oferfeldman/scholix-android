@@ -1,5 +1,9 @@
 package com.feldman.scholix.pages
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -13,19 +17,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.feldman.scholix.R
 import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.ui.components.ActionRow
-import com.feldman.scholix.ui.components.SegmentedOption
-import com.feldman.scholix.ui.components.Title
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -33,8 +34,10 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 
+
+
 @Composable
-fun FiltersRow(
+fun FiltersGrid(
     sortBy: String,
     onSortChange: (String) -> Unit,
     year: Int,
@@ -44,38 +47,144 @@ fun FiltersRow(
     currentYear: Int,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Sort chip
-        ChipDropdown(
-            label = "Sort by",
-            icon = painterResource(R.drawable.ic_sort),
-            options = listOf("Type", "Date", "Subject"),
-            selected = sortBy,
-            onSelectedChange = onSortChange
-        )
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                ChipPicker(
+                    label = "Sort by",
+                    options = listOf("Type", "Date", "Subject"),
+                    selected = sortBy,
+                    onSelectedChange = onSortChange
+                )
+            }
+            Box(modifier = Modifier.weight(1f)) {
+                ChipPicker(
+                    label = "Year",
+                    options = listOf(
+                        (currentYear - 1).toString(),
+                        currentYear.toString(),
+                        (currentYear + 1).toString()
+                    ),
+                    selected = year.toString(),
+                    onSelectedChange = { onYearChange(it.toInt()) }
+                )
+            }
+        }
 
-        // Year chip
-        ChipDropdown(
-            label = "Year",
-            icon = painterResource(R.drawable.ic_calendar),
-            options = listOf((currentYear - 1).toString(), currentYear.toString(), (currentYear + 1).toString()),
-            selected = year.toString(),
-            onSelectedChange = { onYearChange(it.toInt()) }
-        )
+        Spacer(Modifier.height(12.dp))
 
-        // Semester chip
-        ChipDropdown(
-            label = "Semester",
-            icon = painterResource(R.drawable.ic_book),
-            options = listOf("A", "B"),
-            selected = semester,
-            onSelectedChange = onSemesterChange
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                ChipPicker(
+                    label = "Semester",
+                    options = listOf("A", "B"),
+                    selected = semester,
+                    onSelectedChange = onSemesterChange
+                )
+            }
+            Spacer(modifier = Modifier.weight(1f)) // balances layout to keep 2-per-row
+        }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChipPicker(
+    label: String,
+    options: List<String>,
+    selected: String,
+    onSelectedChange: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var chipWidthPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(200),
+        label = "arrowRotation"
+    )
+
+    // Animate the bottom corners only
+    val bottomRadius by animateDpAsState(
+        targetValue = if (expanded) 12.dp else 28.dp,
+        animationSpec = tween(200),
+        label = "bottomRadius"
+    )
+
+    // Top corners stay constant
+    val chipShape = RoundedCornerShape(
+        topStart = 28.dp,
+        topEnd = 28.dp,
+        bottomStart = bottomRadius,
+        bottomEnd = bottomRadius
+    )
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            shape = chipShape,
+            tonalElevation = 2.dp,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .onGloballyPositioned { chipWidthPx = it.size.width }
+                .clickable { expanded = !expanded }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 32.dp, end = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(verticalArrangement = Arrangement.Center) {
+                    Text(label, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        selected,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    modifier = Modifier.rotate(rotation)
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .width(with(density) { chipWidthPx.toDp() })
+                .align(Alignment.BottomCenter)
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    leadingIcon = {
+                        if (option == selected)
+                            Icon(Icons.Default.Check, contentDescription = null)
+                    },
+                    onClick = {
+                        onSelectedChange(option)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,10 +241,10 @@ fun ChipDropdown(
     }
 }
 private val dateTryFormats = listOf(
-    DateTimeFormatter.ISO_LOCAL_DATE,                // 2025-09-10
-    DateTimeFormatter.ISO_DATE,                      // 2025-09-10
-    DateTimeFormatter.ISO_OFFSET_DATE_TIME,          // 2025-09-10T00:00:00Z
-    DateTimeFormatter.ISO_LOCAL_DATE_TIME,           // 2025-09-10T00:00:00
+    DateTimeFormatter.ISO_LOCAL_DATE,
+    DateTimeFormatter.ISO_DATE,
+    DateTimeFormatter.ISO_OFFSET_DATE_TIME,
+    DateTimeFormatter.ISO_LOCAL_DATE_TIME,
     DateTimeFormatter.ofPattern("yyyy-MM-dd"),
     DateTimeFormatter.ofPattern("yyyy/MM/dd"),
     DateTimeFormatter.ofPattern("dd/MM/yyyy")
@@ -145,7 +254,6 @@ private fun parseDateOrNull(raw: String?): LocalDate? {
     for (fmt in dateTryFormats) {
         try { return LocalDate.parse(raw, fmt) } catch (_: Exception) {}
     }
-    // Try extracting DATE part from a datetime
     return try { java.time.OffsetDateTime.parse(raw).toLocalDate() } catch (_: Exception) {
         try { java.time.LocalDateTime.parse(raw).toLocalDate() } catch (_: Exception) { null }
     }
@@ -164,7 +272,7 @@ fun AttendancePage(modifier: Modifier = Modifier) {
     val initialYear = if (initialSemester == "A") currentYear + 1 else currentYear
 
     var semesterState by rememberSaveable { mutableStateOf(initialSemester) }
-    var yearState by rememberSaveable { mutableStateOf(initialYear) }
+    var yearState by rememberSaveable { mutableIntStateOf(initialYear) }
 
     var sortBy by rememberSaveable { mutableStateOf("Date") }
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
@@ -212,7 +320,7 @@ fun AttendancePage(modifier: Modifier = Modifier) {
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            val platform = PlatformStorage.getAccount(context, 0)
+            val platform = PlatformStorage.getPlatform(context, 0)
             println(platform)
             println(platform)
             println(platform)
@@ -251,7 +359,7 @@ fun AttendancePage(modifier: Modifier = Modifier) {
     }
     LaunchedEffect(yearState, semesterState) {
         withContext(Dispatchers.IO) {
-            val platform = PlatformStorage.getAccount(context, 0)
+            val platform = PlatformStorage.getPlatform(context, 0)
             if (platform != null) {
                 try {
                     val json = platform.getAttendanceEvents(yearState, semesterState.lowercase())
@@ -285,9 +393,8 @@ fun AttendancePage(modifier: Modifier = Modifier) {
             .fillMaxSize()
             .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 0.dp)
     ) {
-//        Title(stringResource(R.string.attendance))
 
-        FiltersRow(
+        FiltersGrid(
             sortBy = sortBy,
             onSortChange = { sortBy = it },
             year = yearState,
@@ -297,25 +404,7 @@ fun AttendancePage(modifier: Modifier = Modifier) {
             currentYear = currentYear,
             modifier = Modifier.padding(vertical = 8.dp)
         )
-        val semesterNumber = when (semesterState.uppercase()) {
-            "A" -> "1"
-            "B" -> "2"
-            "C" -> "3"
-            else -> semesterState
-        }
 
-
-        Spacer(Modifier.height(20.dp))
-        Text(
-            text = "$yearState H$semesterNumber",
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontSize = 24.sp,          // bigger
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            ),
-            modifier = Modifier.fillMaxWidth(), // centers the text in the row
-            maxLines = 1
-        )
         Spacer(Modifier.height(20.dp))
 
         if (isLoading) {
@@ -338,16 +427,16 @@ fun AttendancePage(modifier: Modifier = Modifier) {
 
                         itemsIndexed(list) { index, event ->
                             val shape = when (index) {
-                                0 -> if (list.lastIndex == 0) RoundedCornerShape(16.dp)
-                                else RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
-                                list.lastIndex -> RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp, topStart = 4.dp, topEnd = 4.dp)
+                                0 -> if (list.lastIndex == 0) RoundedCornerShape(24.dp)
+                                else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
+                                list.lastIndex -> RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp, topStart = 4.dp, topEnd = 4.dp)
                                 else -> RoundedCornerShape(4.dp)
                             }
 
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(100.dp),
+                                    .height(80.dp),
                                 shape = shape,
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -368,12 +457,14 @@ fun AttendancePage(modifier: Modifier = Modifier) {
                                         Text(
                                             text = event.optString("type"),
                                             style = MaterialTheme.typography.titleLarge.copy(
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                                fontWeight = FontWeight.Medium
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
                                             text = event.optString("date"),
-                                            style = MaterialTheme.typography.titleMedium
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
 
@@ -390,22 +481,22 @@ fun AttendancePage(modifier: Modifier = Modifier) {
                                         Text("Notes: $remark", style = MaterialTheme.typography.bodySmall)
                                     }
 
-                                    if (event.optBoolean("enableJustified", true)) {
-                                        Text(
-                                            text = if (event.optBoolean("isJustified")) stringResource(
-                                                R.string.justified
-                                            ) else stringResource(R.string.not_justified),
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
+//                                    if (event.optBoolean("enableJustified", true)) {
+//                                        Text(
+//                                            text = if (event.optBoolean("isJustified")) stringResource(
+//                                                R.string.justified
+//                                            ) else stringResource(R.string.not_justified),
+//                                            style = MaterialTheme.typography.bodySmall
+//                                        )
+//                                    }
                                 }
                             }
 
 
-                            Spacer(Modifier.height(3.dp))
+                            Spacer(Modifier.height(2.dp))
                         }
 
-                        item { Spacer(Modifier.height(20.dp)) }
+                        item { Spacer(Modifier.height(12.dp)) }
                     }
                 }
 

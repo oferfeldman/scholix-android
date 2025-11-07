@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name" translatable="false">Scholix</string>
-    <string name="grades">Grades</string>
     <string name="average">Average</string>
     <string name="sunday">Sun</string>
     <string name="monday">Mon</string>
@@ -12,12 +11,11 @@
     <string name="original">Original</string>
     <string name="updated">Updated</string>
     <string name="course">Course</string>
-    <string name="schedule">Schedule</string>
-    <string name="locker">Locker</string>
-    <string name="home">Home</string>
     <string name="no_grades_for_semester">No grades for this semester</string>
-    <string name="attendance">Attendance</string>
     <string name="no_attendance_events_found">No attendance events found</string>
-    <string name="justified">Justified</string>
-    <string name="not_justified">Not Justified</string>
+    <string name="final_grade">Final Grade</string>
+    <string name="semester">Semester</string>
+    <string name="year">Year</string>
+    <string name="grade">Grade</string>
+    <string name="classroom">Classroom</string>
 </resources>

@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -52,20 +54,20 @@ class GradesActivity : ComponentActivity() {
         }
     }
 }
+
+@Composable
 fun gradeColor(gradeStr: String): Color {
-    return try {
-        val grade = gradeStr.toInt()
-        when {
-            grade >= 90 -> Color(0xFF3AC941) // Dark green
-            grade >= 75 -> Color(0xFF80CB24) // Green
-            grade >= 60 -> Color(0xFFFBC02D) // Yellow
-            grade >= 50 -> Color(0xFFF57C00) // Orange
-            else -> Color(0xFFDA3124) // Red
-        }
-    } catch (_: Exception) {
-        Color(0xFF2196F3)
-    }
+    val colors = MaterialTheme.colorScheme
+    val grade = gradeStr.toIntOrNull() ?: return colors.primary
+
+    // clamp the grade to 0..100
+    val clamped = grade.coerceIn(0, 100)
+    val fraction = clamped / 100f
+
+    // linearly blend between secondary (bad) → primary (good)
+    return lerp(colors.secondary, colors.primary, fraction)
 }
+
 
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -81,7 +83,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     val initialYear = if (initialSemester == "A") currentYear + 1 else currentYear
 
     var semesterState by rememberSaveable { mutableStateOf(initialSemester) }
-    var yearState by rememberSaveable { mutableStateOf(initialYear) }
+    var yearState by rememberSaveable { mutableIntStateOf(initialYear) }
 
     var courses by remember { mutableStateOf(preloadedCourses) }
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -91,13 +93,13 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     var isLoading by remember { mutableStateOf(false) }
     var requestId by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
+    var finalGrade by remember { mutableStateOf<JSONObject?>(null) }
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
 
     Log.d("GradesPage", "initial year: $initialYear | initial semester: $initialSemester")
 
-    println("$initialYear | $initialSemester")
     fun launchGradesRequest(
         context: Context,
         course: JSONObject,
@@ -121,11 +123,6 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                 )
 
                 var errorMessage: String? = null
-                println(gradesArray)
-                println(gradesArray)
-                println(gradesArray)
-                println(gradesArray)
-                // detect error responses
                 if (gradesArray.length() == 1) {
                     val first = gradesArray.optJSONObject(0)
                     if (first != null && first.has("error")) {
@@ -137,20 +134,25 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                     }
                 }
 
-                val (list, avg) =
+                // updated to capture finalGradeObj
+                val (list, avg, finalGradeObj) =
                     if (errorMessage == null) processGrades(gradesArray)
-                    else Pair(emptyList<JSONObject>(), 0)
+                    else Triple(emptyList(), 0, null)
 
                 withContext(Dispatchers.Main) {
                     if (currentId == requestId) {
                         course.put("grades", gradesArray)
                         onResult(list, avg, errorMessage)
+
+                        finalGrade = finalGradeObj
+
                         isLoading = false
                     }
                 }
             }
         }
     }
+
 
     LaunchedEffect(courses, selectedTab, semesterState, yearState) {
         val selectedCourse = courses.getOrNull(selectedTab)
@@ -276,59 +278,61 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                         val showSemesterPicker = selectedCourse?.optBoolean("semesterPicker", false) == true
 
                         if (showSemesterPicker) {
-
-
-                            ActionRow {
-                                val yearStateString = yearState.toString()
-                                addSegmentedToggleGroup(
-                                    state = remember { mutableStateOf(yearStateString) }.apply {
-                                        value = yearStateString
-                                    },
-                                    SegmentedOption((currentYear - 1).toString(), (currentYear - 1).toString()),
-                                    SegmentedOption(currentYear.toString(), currentYear.toString()),
-                                    SegmentedOption((currentYear + 1).toString(), (currentYear + 1).toString()),
-                                    onSelectedChange = { newYear ->
-                                        yearState = newYear.toInt()
-                                        val selectedCourse = courses[selectedTab]
-                                        launchGradesRequest(
-                                            context,
-                                            selectedCourse,
-                                            yearState,
-                                            semesterState.lowercase()
-                                        ) { g, avg, err ->
-                                            grades = g
-                                            average = avg
-                                            errorMessage = err
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    ChipPicker(
+                                        label = stringResource(R.string.year),
+                                        options = listOf(
+                                            (currentYear - 1).toString(),
+                                            currentYear.toString(),
+                                            (currentYear + 1).toString()
+                                        ),
+                                        selected = yearState.toString(),
+                                        onSelectedChange = { newYear ->
+                                            yearState = newYear.toInt()
+                                            val selectedCourse = courses[selectedTab]
+                                            launchGradesRequest(
+                                                context,
+                                                selectedCourse,
+                                                yearState,
+                                                semesterState.lowercase()
+                                            ) { g, avg, err ->
+                                                grades = g
+                                                average = avg
+                                                errorMessage = err
+                                            }
                                         }
-                                    }
-                                )
-                            }
-                            Spacer(Modifier.height(12.dp))
+                                    )
+                                }
 
-                            ActionRow {
-                                addSegmentedToggleGroup(
-                                    state = remember { mutableStateOf(semesterState) },
-                                    SegmentedOption("A", "A", selectedBackgroundColor = darkColors().tertiary, textColor = MaterialTheme.colorScheme.onSurfaceVariant, selectedTextColor = MaterialTheme.colorScheme.onSurface),
-                                    SegmentedOption("B", "B", selectedBackgroundColor = darkColors().secondary, textColor = MaterialTheme.colorScheme.onSurfaceVariant, selectedTextColor = MaterialTheme.colorScheme.onSurface),
-                                    onSelectedChange = { newSemester ->
-                                        semesterState = newSemester
-                                        val selectedCourse = courses[selectedTab]
 
-                                        launchGradesRequest(
-                                            context,
-                                            selectedCourse,
-                                            year = yearState,
-                                            semester = semesterState.lowercase()
-                                        ) { g, avg, err ->
-                                            grades = g
-                                            average = avg
-                                            errorMessage = err
+                                Box(modifier = Modifier.weight(1f)) {
+                                    ChipPicker(
+                                        label = stringResource(R.string.semester),
+                                        options = listOf("A", "B"),
+                                        selected = semesterState,
+                                        onSelectedChange = { newSemester ->
+                                            semesterState = newSemester
+                                            val selectedCourse = courses[selectedTab]
+                                            launchGradesRequest(
+                                                context,
+                                                selectedCourse,
+                                                year = yearState,
+                                                semester = semesterState.lowercase()
+                                            ) { g, avg, err ->
+                                                grades = g
+                                                average = avg
+                                                errorMessage = err
+                                            }
                                         }
-                                    }
-                                )
+                                    )
+                                }
                             }
-
                         }
+
                         Spacer(Modifier.height(36.dp))
 
                         when {
@@ -345,9 +349,11 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                             }
                             grades.isNotEmpty() -> {
                                 Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth(),
-                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = if (finalGrade != null)
+                                        RoundedCornerShape(16.dp, 16.dp, 4.dp, 4.dp)
+                                    else
+                                        RoundedCornerShape(16.dp),
                                     colors = CardDefaults.cardColors(
                                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                                     )
@@ -359,36 +365,68 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Box(
-                                            modifier = Modifier.fillMaxHeight(),
-                                            contentAlignment = Alignment.Center
+                                        Text(
+                                            text = stringResource(R.string.average),
+                                            style = MaterialTheme.typography.titleLarge.copy(
+                                                fontWeight = FontWeight.Medium,
+                                                fontSize = 40.sp
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+
+                                        Text(
+                                            text = average.toString(),
+                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 60.sp,
+                                                fontFamily = FontFamily.SansSerif
+                                            ),
+                                            color = gradeColor(average.toString())
+                                        )
+                                    }
+                                }
+
+                                if(finalGrade != null){
+                                    Spacer(Modifier.height(3.dp))
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = if (finalGrade != null)
+                                            RoundedCornerShape(4.dp, 4.dp, 16.dp, 16.dp)
+                                        else
+                                            RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        )
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 20.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text(
-                                                text = stringResource(R.string.average),
-                                                fontSize = 60.sp
-//                                            style = MaterialTheme.typography.bodyLarge.copy(
-//                                                fontWeight = FontWeight.Medium,
-//                                                fontSize = 50.sp,
-//                                                fontFamily = FontFamily.SansSerif
-//                                            )
+                                                text = stringResource(R.string.final_grade),
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontSize = 40.sp
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface
                                             )
-                                        }
-                                        Box(
-                                            modifier = Modifier.fillMaxHeight(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
                                             Text(
-                                                text = average.toString(),
+                                                text = finalGrade!!.optString("grade"),
                                                 style = MaterialTheme.typography.bodyLarge.copy(
                                                     fontWeight = FontWeight.Black,
                                                     fontSize = 60.sp,
                                                     fontFamily = FontFamily.SansSerif
                                                 ),
-                                                color = gradeColor(average.toString())
+                                                color = gradeColor(finalGrade.toString())
                                             )
                                         }
                                     }
                                 }
+
+
                                 Spacer(Modifier.height(12.dp))
                             }
                             else -> {
@@ -434,7 +472,12 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(start = 12.dp, top = 12.dp, end = 24.dp, bottom = 12.dp),
+                                        .padding(
+                                            start = 12.dp,
+                                            top = 12.dp,
+                                            end = 24.dp,
+                                            bottom = 12.dp
+                                        ),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -444,16 +487,14 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                         Text(
                                             text = subject,
                                             style = MaterialTheme.typography.titleLarge.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 22.sp
-                                            )
+                                                fontWeight = FontWeight.Medium
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
                                             text = name,
-                                            style = MaterialTheme.typography.bodyLarge.copy(
-                                                fontWeight = FontWeight.Medium,
-                                                fontSize = 18.sp
-                                            )
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
 
@@ -493,20 +534,29 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
 }
 
 
-fun processGrades(gradesArray: JSONArray): Pair<List<JSONObject>, Int> {
+fun processGrades(gradesArray: JSONArray): Triple<List<JSONObject>, Int, JSONObject?> {
     val list = mutableListOf<JSONObject>()
+    var finalGrade: JSONObject? = null
     var sum = 0
     var count = 0
+
     for (i in 0 until gradesArray.length()) {
-        val grade = gradesArray.optJSONObject(i)
-        if (grade != null && grade.optString("grade") != "null") {
-            try {
-                sum += grade.getInt("grade")
-                count++
-            } catch (_: Exception) {}
-            list.add(grade)
+        val grade = gradesArray.optJSONObject(i) ?: continue
+        if (grade.optString("grade") == "null") continue
+
+        if (grade.optString("type") == "final") {
+            finalGrade = grade
+            continue
         }
+
+        try {
+            sum += grade.getInt("grade")
+            count++
+        } catch (_: Exception) {}
+
+        list.add(grade)
     }
+
     val avg = if (count > 0) sum / count else 0
-    return list to avg
+    return Triple(list, avg, finalGrade)
 }

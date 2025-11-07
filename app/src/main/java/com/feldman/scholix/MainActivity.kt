@@ -1,9 +1,13 @@
 package com.feldman.scholix
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
@@ -28,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.room.Room
@@ -36,9 +41,8 @@ import com.feldman.scholix.pages.LockerRepository
 import com.feldman.lockerapp.ui.theme.AppTheme
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.navigation.Dest
-import com.feldman.scholix.navigation.NavHost
 import com.feldman.scholix.pages.LoginPage
+import com.feldman.scholix.services.GradeMonitorWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,6 +63,18 @@ fun isSmartSchoolReachable(): Boolean {
 }
 
 class MainActivity : ComponentActivity() {
+    private val requestNotificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) {
+                Log.i("MainActivity", "✅ Notification permission granted — scheduling worker")
+                GradeMonitorWorker.schedule(this)
+            } else {
+                Log.w("MainActivity", "❌ Notification permission denied by user")
+            }
+        }
+
+
+
     @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,7 +108,6 @@ class MainActivity : ComponentActivity() {
                         val valid = newPlatforms.any { it.isLoggedIn() }
                         withContext(Dispatchers.Main) {
                             platforms = newPlatforms
-                            println(platforms)
                             isLoggedIn = valid
                             sleep(120.toLong())
                             isLoading = false
@@ -202,6 +217,41 @@ class MainActivity : ComponentActivity() {
         }
 
     }
+
+    override fun onResume() {
+        super.onResume()
+        Log.i("MainActivity", "onResume() — ensuring notification permission checked")
+        checkNotificationPermissionAndStartService()
+    }
+
+    private fun checkNotificationPermissionAndStartService() {
+        val permission = Manifest.permission.POST_NOTIFICATIONS
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ActivityCompat.checkSelfPermission(this, permission) ==
+                    PackageManager.PERMISSION_GRANTED
+            when {
+                granted -> {
+                    Log.i("MainActivity", "Permission already granted — scheduling worker")
+                    GradeMonitorWorker.schedule(this)
+                }
+                shouldShowRequestPermissionRationale(permission) -> {
+                    Log.w("MainActivity", "User previously denied permission — showing rationale and re-requesting")
+                    requestNotificationPermissionLauncher.launch(permission)
+                }
+                else -> {
+                    Log.i("MainActivity", "Requesting POST_NOTIFICATIONS permission for first time")
+                    requestNotificationPermissionLauncher.launch(permission)
+                }
+            }
+        } else {
+            // On Android 12 and below, permission not required
+            Log.i("MainActivity", "Pre-Android 13 device — no permission required, scheduling worker directly")
+            GradeMonitorWorker.schedule(this)
+        }
+    }
+
+
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

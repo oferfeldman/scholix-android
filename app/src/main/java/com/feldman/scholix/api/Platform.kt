@@ -1,13 +1,11 @@
 package com.feldman.scholix.api
 
 import android.content.Context
-import com.feldman.scholix.api.UnsafeOkHttpClient
 import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
-
 
 interface Platform {
     var displayName: String?
@@ -70,7 +68,6 @@ interface Platform {
     fun getInfo(): JSONObject
 
     interface Companion {
-        val client: OkHttpClient
 
         fun generateId(): String {
             val chars = ('A'..'Z') + ('0'..'9')

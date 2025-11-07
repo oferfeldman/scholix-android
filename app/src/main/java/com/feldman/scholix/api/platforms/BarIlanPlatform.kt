@@ -6,10 +6,8 @@ import android.util.Log
 import android.widget.Toast
 import com.feldman.scholix.api.LoginFields
 import com.feldman.scholix.api.Platform
-import com.feldman.scholix.api.Type
 import com.feldman.scholix.api.UnsafeOkHttpClient
-import com.feldman.scholix.api.platforms.WebtopPlatform
-import com.feldman.scholix.api.platforms.WebtopPlatform.Companion.generateId
+import com.feldman.scholix.api.Type
 import kotlinx.coroutines.delay
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -366,7 +364,6 @@ class BarIlanPlatform() : Platform {
             .put("supportsAttendance", true)
     }
     companion object : Platform.Companion {
-        override val client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
 
         @JvmStatic
         @Throws(IOException::class, JSONException::class)
