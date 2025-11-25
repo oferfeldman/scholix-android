@@ -23,13 +23,16 @@ import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
 
 class DemoPlatform: Platform {
+    override var platformDisplayName: String = "DemoPlatform"
+
     private val loginFields = LoginFields()
 
     override var loggedIn: Boolean = false
     override var editing: Boolean = false
-    override var displayName: String? = null
-    override var _username: String? = null
-    override var _password: String? = null
+
+    var displayName: String? = null
+    var _username: String? = null
+    var _password: String? = null
 
     private val courses: ArrayList<JSONObject> = ArrayList()
     override var id: String = generateId()
@@ -38,6 +41,182 @@ class DemoPlatform: Platform {
     override val suportsGrades: Boolean = true
     override val supportsSchedule: Boolean = true
     override val supportsAttendance: Boolean = true
+    private val STATIC_SCHEDULE = JSONArray().apply {
+
+        // ===== DAY 0 =====
+        put(
+            JSONArray().apply {
+                // ORIGINAL DAY 0
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"ביולוגיה","אורי רווה",findColorClass("ביולוגיה")))
+                        put("2", hour(2,"של\"ח","נחשון שמר",findColorClass("של\"ח")))
+                        put("3", hour(3,"עברית","חגית ליבוביץ",findColorClass("עברית")))
+                        put("4", hour(4,"תנ\"ך","חי אשרי",findColorClass("תנ\"ך")))
+                        put("5", hour(5,"אנגלית א","ויקי ינאי",findColorClass("אנגלית א")))
+                        put("6", hour(6,"אנגלית א","ויקי ינאי",findColorClass("אנגלית א")))
+                        put("7", hour(7,"מתמטיקה האצה","רמי טבקה",findColorClass("מתמטיקה האצה")))
+                        put("8", hour(8,"מתמטיקה האצה","רמי טבקה",findColorClass("מתמטיקה האצה")))
+                    }
+                )
+
+                // UPDATED DAY 0
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"מתמטיקה","רון נתניהו","lightgreen-cell"))
+                        put("2", hourCanceled(2,"עברית","יעל כהן"))
+                        put("3", hourExam(3,"אנגלית","מירב שלו","lime-cell"))
+                        put("4", hourSub(4,"היסטוריה","תמר אוחנה"))
+                        put("5", hour(5,"תנ\"ך","רועי ברק","lightgrey-cell"))
+                    }
+                )
+            }
+        )
+
+        // ===== DAY 1 =====
+        put(
+            JSONArray().apply {
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"של\"ח","נחשון שמר",findColorClass("של\"ח")))
+                        put("2", hour(2,"היסטוריה","אביגיל קרפל",findColorClass("היסטוריה")))
+                        put("3", hour(3,"דוברי אנגלית","רוני אהרן","pink-cell"))
+                        put("4", hour(4,"דוברי אנגלית","רוני אהרן","pink-cell"))
+                        put("5", hour(5,"חינוך גופני","מיכה פולק",findColorClass("חינוך גופני")))
+                        put("6", hour(6,"עברית","חגית ליבוביץ",findColorClass("עברית")))
+                    }
+                )
+
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"של\"ח","נחשון שמר",findColorClass("של\"ח")))
+                        put("2", hour(2,"עברית","חגית ליבוביץ",findColorClass("עברית")))
+                        put("3", hour(3,"דוברי אנגלית - מילוי מקום","איסקוב ענבר טלי","pink-cell"))
+                        put("4", hour(4,"דוברי אנגלית - מילוי מקום","איסקוב ענבר טלי","pink-cell"))
+                    }
+                )
+            }
+        )
+
+        // ===== DAY 2 =====
+        put(
+            JSONArray().apply {
+
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"עברית","יעל כהן","lightpurple-cell"))
+                        put("2", hour(2,"אנגלית","מירב שלו","lime-cell"))
+                        put("3", hour(3,"חינוך","שרה דוד","pink-cell"))
+                        put("4", hour(4,"ערבית","אורי חן","lightblue-cell"))
+                    }
+                )
+
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"עברית","יעל כהן","lightpurple-cell"))
+                        put("2", hourExam(2,"אנגלית","מירב שלו","lime-cell"))
+                        put("3", hourSub(3,"חינוך","דנה רבין"))
+                        put("4", hour(4,"ערבית","אורי חן","lightblue-cell"))
+                    }
+                )
+            }
+        )
+
+        // ===== DAY 3 =====
+        put(
+            JSONArray().apply {
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"ספרות","מירב שלו","blue-cell"))
+                        put("2", hour(2,"עברית","יעל כהן","lightpurple-cell"))
+                        put("3", hour(3,"אנגלית","רועי ברק","lime-cell"))
+                        put("4", hour(4,"מדעים","אורי מוח","lightyellow-cell"))
+                        put("5", hour(5,"של\"ח","אורי חן","lightgreen-cell"))
+                        put("6", hour(6,"חינוך","שרה דוד","pink-cell"))
+                    }
+                )
+
+                put(
+                    JSONObject().apply {
+                        put("1", hourExam(1,"ספרות","מירב שלו","blue-cell"))
+                        put("2", hour(2,"עברית","יעל כהן","lightpurple-cell"))
+                        put("3", hourSub(3,"אנגלית","דנה דרור"))
+                        put("4", hour(4,"מדעים","אורי מוח","lightyellow-cell"))
+                        put("5", hour(5,"של\"ח","אורי חן","lightgreen-cell"))
+                        put("6", hour(6,"חינוך","שרה דוד","pink-cell"))
+                    }
+                )
+            }
+        )
+
+        // ===== DAY 4 =====
+        put(
+            JSONArray().apply {
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"היסטוריה","רון נתניהו","lightred-cell"))
+                        put("2", hour(2,"עברית","יעל כהן","lightpurple-cell"))
+                        put("3", hour(3,"אנגלית","מירב שלו","lime-cell"))
+                        put("4", hour(4,"תנ\"ך","יוסי כהן","lightgrey-cell"))
+                    }
+                )
+
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"היסטוריה","רון נתניהו","lightred-cell"))
+                        put("2", hourExam(2,"עברית","יעל כהן","lightpurple-cell"))
+                        put("3", hourSub(3,"אנגלית","שירי כהן"))
+                        put("4", hour(4,"תנ\"ך","יוסי כהן","lightgrey-cell"))
+                    }
+                )
+            }
+        )
+
+        // ===== DAY 5 =====
+        put(
+            JSONArray().apply {
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"של\"ח","רועי ברק","lightgreen-cell"))
+                        put("2", hour(2,"ספרות","שרה דוד","blue-cell"))
+                        put("3", hour(3,"עברית","יעל כהן","lightpurple-cell"))
+                        put("4", hour(4,"אנגלית","מירב שלו","lime-cell"))
+                        put("5", hour(5,"חינוך","אורי מוח","pink-cell"))
+                        put("6", hour(6,"מדעים","רון נתניהו","lightyellow-cell"))
+                    }
+                )
+
+                put(
+                    JSONObject().apply {
+                        put("1", hour(1,"של\"ח","רועי ברק","lightgreen-cell"))
+                        put("2", hourCanceled(2,"ספרות","שרה דוד"))
+                        put("3", hour(3,"עברית","יעל כהן","lightpurple-cell"))
+                        put("4", hourExam(4,"אנגלית","מירב שלו","lime-cell"))
+                        put("5", hourSub(5,"חינוך","אביב שלו"))
+                        put("6", hour(6,"מדעים","רון נתניהו","lightyellow-cell"))
+                    }
+                )
+            }
+        )
+
+    }
+    private fun hour(num: Int, subject: String, teacher: String, color: String) =
+        JSONObject().put("num", num).put("subject", subject).put("teacher", teacher)
+            .put("colorClass", color).put("changes", "").put("exams", "")
+
+    private fun hourCanceled(num: Int, subject: String, teacher: String) =
+        JSONObject().put("num", num).put("subject", subject).put("teacher", teacher)
+            .put("colorClass", "cancel-cell").put("changes", "ביטול שיעור").put("exams", "")
+
+    private fun hourExam(num: Int, subject: String, teacher: String, color: String) =
+        JSONObject().put("num", num).put("subject", subject).put("teacher", teacher)
+            .put("colorClass", color).put("changes", "").put("exams", "מבחן פתע")
+
+    private fun hourSub(num: Int, subject: String, teacher: String) =
+        JSONObject().put("num", num).put("subject", subject + " / מילוי מקום")
+            .put("teacher", teacher + " (מילוי מקום)").put("colorClass", "lightred-cell")
+            .put("changes", "מילוי מקום").put("exams", "")
+
 
     init {
         if (id.isBlank()) {
@@ -61,77 +240,19 @@ class DemoPlatform: Platform {
 
     fun getGrades(): JSONArray = getGrades("all")
 
-    private fun createHour(num: String, subject: String, teacher: String): JSONObject {
-        val colorClass = findColorClass(subject)
-        return JSONObject()
-            .put("num", num)
-            .put("subject", subject)
-            .put("teacher", teacher)
-            .put("colorClass", colorClass)
-            .put("changes", "")
-            .put("exams", "")
+    override fun getScheduleIndexes(): JSONArray {
+        return JSONArray().put(0).put(1).put(2).put(3).put(4).put(5)
     }
-
     override fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
-        val week = Array(7) { JSONObject() }
-
-        week[0].apply {
-            put("1", createHour("1", "מתמטיקה", "רון נתניהו"))
-            put("2", createHour("2", "עברית", "יעל כהן"))
-            put("3", createHour("3", "אנגלית", "מירב שלו"))
-            put("4", createHour("4", "היסטוריה", "אורי מוח"))
-            put("5", createHour("5", "תנ\"ך", "רועי ברק"))
-        }
-
-        week[1].apply {
-            put("1", createHour("1", "עברית", "יעל כהן"))
-            put("2", createHour("2", "אנגלית", "מירב שלו"))
-            put("3", createHour("3", "חינוך", "שרה דוד"))
-            put("4", createHour("4", "ערבית", "אורי חן"))
-        }
-
-        week[2].apply {
-            put("1", createHour("1", "מדעים", "רון נתניהו"))
-            put("2", createHour("2", "מתמטיקה", "רועי ברק"))
-            put("3", createHour("3", "עברית", "יעל כהן"))
-            put("4", createHour("4", "תנ\"ך", "יוסי כהן"))
-            put("5", createHour("5", "של\"ח", "אורי חן"))
-        }
-
-        week[3].apply {
-            put("1", createHour("1", "ספרות", "מירב שלו"))
-            put("2", createHour("2", "עברית", "יעל כהן"))
-            put("3", createHour("3", "אנגלית", "רועי ברק"))
-            put("4", createHour("4", "מדעים", "אורי מוח"))
-            put("5", createHour("5", "של\"ח", "אורי חן"))
-            put("6", createHour("6", "חינוך", "שרה דוד"))
-        }
-
-        week[4].apply {
-            put("1", createHour("1", "היסטוריה", "רון נתניהו"))
-            put("2", createHour("2", "עברית", "יעל כהן"))
-            put("3", createHour("3", "אנגלית", "מירב שלו"))
-            put("4", createHour("4", "תנ\"ך", "יוסי כהן"))
-        }
-
-        week[5].apply {
-            put("1", createHour("1", "של\"ח", "רועי ברק"))
-            put("2", createHour("2", "ספרות", "שרה דוד"))
-            put("3", createHour("3", "עברית", "יעל כהן"))
-            put("4", createHour("4", "אנגלית", "מירב שלו"))
-            put("5", createHour("5", "חינוך", "אורי מוח"))
-            put("6", createHour("6", "מדעים", "רון נתניהו"))
-        }
-
-        week[6].apply {
-            put("1", createHour("1", "עברית", "יעל כהן"))
-            put("2", createHour("2", "חינוך", "שרה דוד"))
-            put("3", createHour("3", "של\"ח", "יוסי כהן"))
-            put("4", createHour("4", "היסטוריה", "רון נתניהו"))
-        }
-
-        return week[dayIndex]
+        return STATIC_SCHEDULE.getJSONArray(dayIndex).getJSONObject(0)
     }
+
+    override fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
+        return STATIC_SCHEDULE.getJSONArray(dayIndex).getJSONObject(1)
+    }
+
+
+
 
     private fun createGrade(subject: String, name: String, gradeValue: Int, type: String): JSONObject {
         val date = LocalDate.of(LocalDate.now().year, 1, 1).format(DateTimeFormatter.ofPattern("dd/MM/yyyy"))
@@ -156,46 +277,124 @@ class DemoPlatform: Platform {
     }
 
     override fun getAttendanceEvents(period: String): JSONObject {
-        // Fake demo events for Bar Ilan
         val result = JSONObject()
         val eventsByType = JSONObject()
 
-        val absence = JSONObject()
-            .put("type", "חיסור")
-            .put("date", "2025-09-01T00:00:00")
-            .put("subject", "אלגברה לינארית")
-            .put("teacher", "פרופ׳ כהן")
-            .put("remark", "החסיר שיעור ללא הודעה")
+        // --- חיסורים ---
+        val absences = JSONArray().apply {
+            put(
+                JSONObject()
+                    .put("type", "חיסור")
+                    .put("date", "2025-09-02")
+                    .put("subject", "מתמטיקה")
+                    .put("teacher", "רון נתניהו")
+            )
+            put(
+                JSONObject()
+                    .put("type", "חיסור")
+                    .put("date", "2025-09-07")
+                    .put("subject", "עברית")
+                    .put("teacher", "יעל כהן")
+            )
+            put(
+                JSONObject()
+                    .put("type", "חיסור")
+                    .put("date", "2025-10-01")
+                    .put("subject", "אנגלית")
+                    .put("teacher", "מירב שלו")
+            )
+        }
 
-        val positive = JSONObject()
-            .put("type", "חיזוק חיובי")
-            .put("date", "2025-09-05T00:00:00")
-            .put("subject", "מבוא למדעי המחשב")
-            .put("teacher", "ד״ר לוי")
-            .put("remark", "תרם רבות לשיעור")
+        // --- איחורים ---
+        val late = JSONArray().apply {
+            put(
+                JSONObject()
+                    .put("type", "איחור")
+                    .put("date", "2025-09-05")
+                    .put("subject", "היסטוריה")
+                    .put("teacher", "אורי מוח")
+            )
+            put(
+                JSONObject()
+                    .put("type", "איחור")
+                    .put("date", "2025-09-14")
+                    .put("subject", "תנ\"ך")
+                    .put("teacher", "רועי ברק")
+            )
+        }
 
-        eventsByType.put("חיסור", JSONArray().put(absence))
-        eventsByType.put("חיזוק חיובי", JSONArray().put(positive))
+        // --- בעיות התנהגות ---
+        val discipline = JSONArray().apply {
+            put(
+                JSONObject()
+                    .put("type", "הערת התנהגות")
+                    .put("date", "2025-09-11")
+                    .put("subject", "ערבית")
+                    .put("teacher", "אורי חן")
+            )
+            put(
+                JSONObject()
+                    .put("type", "הערת התנהגות")
+                    .put("date", "2025-09-21")
+                    .put("subject", "מדעים")
+                    .put("teacher", "רועי ברק")
+            )
+        }
+
+        // --- חיזוקים חיוביים ---
+        val positive = JSONArray().apply {
+            put(
+                JSONObject()
+                    .put("type", "חיזוק חיובי")
+                    .put("date", "2025-09-03")
+                    .put("subject", "אנגלית")
+                    .put("teacher", "מירב שלו")
+            )
+            put(
+                JSONObject()
+                    .put("type", "חיזוק חיובי")
+                    .put("date", "2025-09-15")
+                    .put("subject", "עברית")
+                    .put("teacher", "יעל כהן")
+            )
+            put(
+                JSONObject()
+                    .put("type", "חיזוק חיובי")
+                    .put("date", "2025-10-02")
+                    .put("subject", "מתמטיקה")
+                    .put("teacher", "רון נתניהו")
+            )
+        }
+
+        // --- הוספה למבנה הראשי ---
+        eventsByType.put("חיסור", absences)
+        eventsByType.put("איחור", late)
+        eventsByType.put("הערת התנהגות", discipline)
+        eventsByType.put("חיזוק חיובי", positive)
 
         result.put("events", eventsByType)
         return result
     }
+
+
 
     override fun getAttendanceEvents(year: Int, period: String): JSONObject {
         return getAttendanceEvents(period)
     }
     fun getGrades(course: String): JSONArray {
         val grades = JSONArray()
-        grades.put(createGrade("אנגלית", "מבחן באנגלית", 98, "מועד א"))
-        grades.put(createGrade("עברית", "חיבור", 87, "מועד ב"))
-        grades.put(createGrade("מתמטיקה", "מבחן סוף", 100, "מועד א"))
-        grades.put(createGrade("תנ\"ך", "מבחן תנ\"ך", 90, "מועד א"))
-        grades.put(createGrade("ספרות", "בגרות פנימית", 85, "מועד ב"))
-        grades.put(createGrade("היסטוריה", "מבחן יחידה 2", 78, "מועד א"))
-        grades.put(createGrade("ערבית", "מבחן הבנה", 92, "מועד א"))
-        grades.put(createGrade("מדעים", "מעבדה", 95, "מועד ב"))
-        grades.put(createGrade("חינוך", "השתתפות", 100, "שנתי"))
-        grades.put(createGrade("של\"ח", "מבחן מסכם", 89, "מועד א"))
+        grades.put(createGrade("ביולוגיה", "רפלקציה לNERD", 99, "מבחן"))
+        grades.put(createGrade("היסטרויה", "עבדה", 99, "מבחן"))
+        grades.put(createGrade("עברית", "מבחן בעברית", 99, "מבחן"))
+        grades.put(createGrade("מתמטיקה האצה", "מבחן במתמטיקה", 100, "מבחן"))
+        grades.put(createGrade("אנגלית - א", "book report", 99, "מבחן"))
+        grades.put(createGrade("ביולוגיה", "בוחן בביולוגיה", 99, "מבחן"))
+        grades.put(createGrade("ערבית", "בוחן בערבית", 99, "מבחן"))
+        grades.put(createGrade("ספרות", "מבדק בספרות", 99, "מבחן"))
+        grades.put(createGrade("ביולוגיה", "הגדרה החיים", 99, "מבחן"))
+        grades.put(createGrade("אנגלית - א", "בוחן אוצר מילים מספר 2", 99, "מבחן"))
+        grades.put(createGrade("ביולוגיה", "שפה כימית אופק דיגיטלי", 99, "מבחן"))
+        grades.put(createGrade("של\"ח", "סיור מפגש טבע", 99, "מבחן"))
         return grades
     }
 
@@ -203,18 +402,36 @@ class DemoPlatform: Platform {
         return "DemoPlatform(loggedIn=$loggedIn, editing=$editing, name=$displayName, _username=$_username, password=$_password, courses=$courses)"
     }
 
+//    private fun findColorClass(subject: String): String {
+//        SUBJECT_COLORS[subject]?.let { return it }
+//        for (key in SUBJECT_COLORS.keys) {
+//            if (subject.contains(key)) return SUBJECT_COLORS[key] ?: ""
+//        }
+//
+//        val colorPool = arrayOf("red", "green", "blue", "orange", "yellow", "purple", "teal", "lime", "pink")
+//        val randomColor = "custom-${colorPool[Random().nextInt(colorPool.size)]}-cell"
+//        SUBJECT_COLORS[subject] = randomColor
+//        return randomColor
+//    }
     private fun findColorClass(subject: String): String {
-        SUBJECT_COLORS[subject]?.let { return it }
-        for (key in SUBJECT_COLORS.keys) {
-            if (subject.contains(key)) return SUBJECT_COLORS[key] ?: ""
-        }
-
-        val colorPool = arrayOf("red", "green", "blue", "orange", "yellow", "purple", "teal", "lime", "pink")
-        val randomColor = "custom-${colorPool[Random().nextInt(colorPool.size)]}-cell"
-        SUBJECT_COLORS[subject] = randomColor
-        return randomColor
+        val map = mapOf(
+            "מתמטיקה האצה" to "lightgreen-cell",
+            "מדעים" to "lightyellow-cell",
+            "של`ח" to "lightgreen-cell",
+            "חינוך" to "pink-cell",
+            "ערבית" to "lightblue-cell",
+            "היסטוריה" to "lightred-cell",
+            "עברית" to "lightpurple-cell",
+            "חינוך גופני" to "lightorange-cell",
+            "נחשון" to "lightyellow-cell",
+            "אנגלית" to "lime-cell",
+            "ספרות" to "blue-cell",
+            "תנך" to "lightgrey-cell",
+            "תנ`ך" to "lightgrey-cell",
+            "cancel" to "cancel-cell"
+        )
+        return map[subject] ?: "custom-pink-cell"
     }
-
     override fun isLoggedIn(): Boolean = loggedIn
 
     override fun refreshCookies(): Boolean {
@@ -230,12 +447,13 @@ class DemoPlatform: Platform {
             .put("name", displayName)
             .put("_username", _username)
             .put("password", _password)
+            .put("platformDisplayName", platformDisplayName)
     }
 
-    override fun getScheduleIndexes(): JSONArray {
-        return JSONArray().put(0).put(1).put(2).put(3).put(4).put(5)
-    }
-    override fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject = JSONObject()
+
+
+
+
 
     override fun isEditing(): Boolean = editing
     override fun startEditing() { editing = true }
@@ -299,6 +517,7 @@ class DemoPlatform: Platform {
             p.id = obj.optString("id", "").ifEmpty { generateId() }
             p.loggedIn = obj.optBoolean("loggedIn", false)
             p.displayName = obj.optString("name", "demo")
+            p.platformDisplayName = obj.optString("platformDisplayName")
             return p
         }
 

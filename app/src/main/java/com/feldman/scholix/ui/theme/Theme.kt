@@ -33,12 +33,31 @@ fun AppTheme(
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val colorScheme =
+
+    // Base dynamic scheme
+    val baseScheme =
         if (useDarkTheme) dynamicDarkColorScheme(context)
         else dynamicLightColorScheme(context)
 
-    MaterialTheme(
-        colorScheme = colorScheme,
+    // Your desired background override
+    val customBackground = baseScheme.surfaceContainer
+    val customSurfaceVarient = baseScheme.background
+
+    // Replace background + surface colors
+//    val colorScheme = baseScheme.copy(
+//        background = customBackground,
+////        surface = customBackground,
+//        surfaceVariant = customSurfaceVarient
+//    )
+//
+//    MaterialTheme(
+//        colorScheme = colorScheme,
+//        typography = MaterialTheme.typography,
+//        shapes = MaterialTheme.shapes,
+//        content = content
+//    )
+        MaterialTheme(
+        colorScheme = baseScheme,
         typography = MaterialTheme.typography,
         shapes = MaterialTheme.shapes,
         content = content

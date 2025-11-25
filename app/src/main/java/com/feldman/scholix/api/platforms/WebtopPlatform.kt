@@ -32,6 +32,8 @@ import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 class WebtopPlatform() : Platform {
+    override var platformDisplayName: String = "WebtopPlatform"
+
     private val loginFields = LoginFields()
         .addField(
             id = "username",
@@ -45,14 +47,13 @@ class WebtopPlatform() : Platform {
             getter = { it.getPassword() },
             setter = { platform, value -> platform.setPassword(value ?: "") }
         )
+    private var username: String? = null
+    private var password: String? = null
+    private var studentName: String? = null
+    private var studentId: String? = null
+    private var studentClass: String? = null
+    private var studentInstitution: String? = null
 
-
-    override var displayName: String? = null
-    private var _institution: String? = null
-    private var _studentId: String? = null
-    private var _classCode: String? = null
-    override var _username: String? = null
-    override var _password: String? = null
     private var _cookies: String? = null
     private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
     override var editing: Boolean = false
@@ -82,8 +83,8 @@ class WebtopPlatform() : Platform {
 
         Log.d("WebtopPlatform", "success: $loginSuccess")
         if (username != null && password != null && loginSuccess) {
-            _username = username
-            _password = password
+            this.username = username
+            this.password = password
             loggedIn = true
 
             // Add single course entry (grades fetched lazily)
@@ -125,10 +126,10 @@ class WebtopPlatform() : Platform {
                 val jsonResponse = JSONObject(body)
                 val data = jsonResponse.optJSONObject("data") ?: return false
 
-                _studentId = data.getString("userId")
-                _classCode = data.getString("classCode") + "|" + data.get("classNumber")
-                _institution = data.getString("institutionCode")
-                displayName = "${data.getString("firstName")} ${data.getString("lastName")}"
+                studentId = data.getString("userId")
+                studentClass = data.getString("classCode") + "|" + data.get("classNumber")
+                studentInstitution = data.getString("institutionCode")
+                studentName = "${data.getString("firstName")} ${data.getString("lastName")}"
                 _cookies = response.headers("Set-Cookie").joinToString("; ")
                 true
             }
@@ -138,12 +139,12 @@ class WebtopPlatform() : Platform {
         }
     }
 
-    override fun getName(): String = displayName ?: ""
-    override fun getUsername(): String = _username ?: ""
-    override fun getPassword(): String = _password ?: ""
+    override fun getName(): String = studentName ?: ""
+    override fun getUsername(): String = username ?: ""
+    override fun getPassword(): String = password ?: ""
 
     override fun toString(): String =
-        "WebtopPlatform(name=$displayName, institution=$_institution, loggedIn=$loggedIn)"
+        "WebtopPlatform(name=$studentName, institution=$studentInstitution, loggedIn=$loggedIn)"
 
     private fun encrypt(data: String): String? {
         val key = "01234567890000000150778345678901"
@@ -214,7 +215,7 @@ class WebtopPlatform() : Platform {
         Log.d("WebtopPlatform", "private getGrades(year: $year, semester: $semester, retry: $retry) called.")
 
         val grades = JSONArray()
-        if (_studentId == null) {
+        if (studentId == null) {
             grades.put(JSONObject().put("error", "login_failed"))
             return grades
         }
@@ -231,7 +232,7 @@ class WebtopPlatform() : Platform {
                 .put("studyYear", year)
                 .put("moduleID", 1)
                 .put("periodID", periodId)
-                .put("studentID", _studentId)
+                .put("studentID", studentId)
 
             val request = Request.Builder()
                 .url("https://webtopserver.smartschool.co.il/server/api/PupilCard/GetPupilGrades")
@@ -303,8 +304,8 @@ class WebtopPlatform() : Platform {
         try {
             // Prepare request payload (same as getSchedule)
             val payload = JSONObject()
-                .put("institutionCode", _institution)
-                .put("selectedValue", _classCode)
+                .put("institutionCode", studentInstitution)
+                .put("selectedValue", studentClass)
                 .put("typeView", 1)
 
             val request = Request.Builder()
@@ -361,8 +362,8 @@ class WebtopPlatform() : Platform {
     override fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
         Log.d("WebtopPlatform", "override getSchedule(dayIndex: $dayIndex, institutionCode $institutionCode, selectedValue $selectedValue) called.")
 
-        val institution = institutionCode ?: _institution
-        val classCode = selectedValue ?: _classCode
+        val institution = institutionCode ?: studentInstitution
+        val classCode = selectedValue ?: studentClass
 
         val schedule = JSONObject()
         if (dayIndex < 0) return schedule
@@ -606,8 +607,8 @@ class WebtopPlatform() : Platform {
     override fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
         val schedule = JSONObject()
         if (dayIndex < 0) return schedule
-        val institution = institutionCode ?: _institution
-        val classCode = selectedValue ?: _classCode
+        val institution = institutionCode ?: studentInstitution
+        val classCode = selectedValue ?: studentClass
 
         try {
             val payload = JSONObject()
@@ -654,9 +655,9 @@ class WebtopPlatform() : Platform {
     override fun refreshCookies(): Boolean {
         return try {
             val loginData = JSONObject()
-                .put("Data", encrypt(_username + "0"))
-                .put("username", _username)
-                .put("Password", _password)
+                .put("Data", encrypt(username + "0"))
+                .put("username", username)
+                .put("Password", password)
                 .put("deviceDataJson", "{\"isMobile\":true,\"os\":\"Android\",\"browser\":\"Chrome\",\"cookies\":true}")
 
             val request = Request.Builder()
@@ -668,9 +669,9 @@ class WebtopPlatform() : Platform {
             _client.newCall(request).execute().use { response ->
                 val jsonResponse = JSONObject(response.body.string())
                 val data = jsonResponse.optJSONObject("data") ?: return false
-                _studentId = data.getString("userId")
-                _classCode = data.getString("classCode") + "|" + data.get("classNumber")
-                _institution = data.getString("institutionCode")
+                studentId = data.getString("userId")
+                studentClass = data.getString("classCode") + "|" + data.get("classNumber")
+                studentInstitution = data.getString("institutionCode")
                 _cookies = response.headers("Set-Cookie").joinToString("; ")
                 loggedIn = true
                 true
@@ -686,15 +687,16 @@ class WebtopPlatform() : Platform {
         return JSONObject()
             .put("class", javaClass.name)
             .put("id", id)
-            .put("name", displayName)
-            .put("institution", _institution)
-            .put("studentId", _studentId)
-            .put("classCode", _classCode)
-            .put("username", _username)
-            .put("password", _password)
+            .put("name", studentName)
+            .put("institution", studentInstitution)
+            .put("studentId", studentId)
+            .put("classCode", studentClass)
+            .put("username", username)
+            .put("password", password)
             .put("cookies", _cookies)
             .put("loggedIn", loggedIn)
             .put("courses", JSONArray().apply { course?.let { put(it) } })
+            .put("platformDisplayName", platformDisplayName)
     }
     @Throws(JSONException::class, IOException::class)
     override fun getAttendanceEvents(period: String): JSONObject {
@@ -713,7 +715,7 @@ class WebtopPlatform() : Platform {
 
         try {
             val requestJson = JSONObject()
-                .put("studentID", _studentId)
+                .put("studentID", studentId)
                 .put("moduleID", 11)
                 .put("periodID", periodId)
 
@@ -793,7 +795,7 @@ class WebtopPlatform() : Platform {
 
         try {
             val requestJson = JSONObject()
-                .put("studentID", _studentId)
+                .put("studentID", studentId)
                 .put("moduleID", 4)
                 .put("periodID", periodId)
                 .put("studyYear", year)
@@ -861,9 +863,9 @@ class WebtopPlatform() : Platform {
     override fun isEditing(): Boolean = editing
     override fun startEditing() { editing = true }
     override fun stopEditing() { editing = false }
-    override fun setName(name: String) { this.displayName = name }
-    override fun setUsername(username: String) { this._username = username }
-    override fun setPassword(password: String) { this._password = password }
+    override fun setName(name: String) { this.studentName = name }
+    override fun setUsername(username: String) { this.username = username }
+    override fun setPassword(password: String) { this.password = password }
     override fun getInfo(): JSONObject {
         return JSONObject()
             .put("name", "Webtop")
@@ -885,16 +887,17 @@ class WebtopPlatform() : Platform {
         override fun fromJson(obj: JSONObject): WebtopPlatform {
             val p = WebtopPlatform()
             p.id = obj.optString("id", "").ifEmpty { generateId() }
-            p._username = obj.optString("username", "")
-            p._password = obj.optString("password", "")
-            p.displayName = obj.optString("name", "").ifEmpty { null }
-            p._institution = obj.optString("institution", "").ifEmpty { null }
-            p._studentId = obj.optString("studentId", "").ifEmpty { null }
-            p._classCode = obj.optString("classCode", "").ifEmpty { null }
+            p.username = obj.optString("username", "")
+            p.password = obj.optString("password", "")
+            p.studentName = obj.optString("name", "").ifEmpty { null }
+            p.studentInstitution = obj.optString("institution", "").ifEmpty { null }
+            p.studentId = obj.optString("studentId", "").ifEmpty { null }
+            p.studentClass = obj.optString("classCode", "").ifEmpty { null }
             p._cookies = obj.optString("cookies", "").ifEmpty { null }
             p.loggedIn = obj.optBoolean("loggedIn", false)
+            p.platformDisplayName = obj.optString("platformDisplayName")
 
-            Log.d("WebtopPlatform", "fromJson: ${p._username} ${p._password}")
+            Log.d("WebtopPlatform", "fromJson: ${p.username} ${p.password}")
             Log.d("WebtopPlatform", "fromJson obj: $obj")
 
             // Always guarantee one tab

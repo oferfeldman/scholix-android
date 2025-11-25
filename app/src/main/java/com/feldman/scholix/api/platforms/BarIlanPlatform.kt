@@ -21,6 +21,7 @@ import java.io.IOException
 import java.util.*
 
 class BarIlanPlatform() : Platform {
+    override var platformDisplayName: String = "BarIlanPlatform"
 
     private val loginFields = LoginFields()
         .addField(
@@ -36,11 +37,11 @@ class BarIlanPlatform() : Platform {
             setter = { platform, value -> platform.setPassword(value ?: "") }
         )
 
-    override var displayName: String? = null
+    var displayName: String? = null
     var _studentId: String? = null
-    override var _password: String? = null
+    var _password: String? = null
     var token: String? = null
-    override var _username: String? = null
+    var _username: String? = null
 
     private val courses: ArrayList<JSONObject> = ArrayList()
     private val client: OkHttpClient = OkHttpClient()
@@ -338,6 +339,7 @@ class BarIlanPlatform() : Platform {
             .put("token", token)
             .put("loggedIn", loggedIn)
             .put("grades", grades)
+            .put("platformDisplayName", platformDisplayName)
 
         val arr = JSONArray()
         for (course in courses) arr.put(course)
@@ -377,6 +379,7 @@ class BarIlanPlatform() : Platform {
             p._password = obj.optString("password", p._password ?: "***REMOVED***")
             p._username = obj.optString("studentId", p._username ?: "username")
             p.grades = obj.optJSONArray("grades")
+            p.platformDisplayName = obj.optString("platformDisplayName")
 
             p.courses.clear()
             obj.optJSONArray("courses")?.let { arr ->

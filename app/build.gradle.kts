@@ -112,7 +112,10 @@ dependencies {
     implementation(libs.capsule)
     implementation(libs.backdrop)
 
-
+    //credentials
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("sh.calvin.reorderable:reorderable:3.0.0")
 
     //ktor
     // Core Ktor HTTP client

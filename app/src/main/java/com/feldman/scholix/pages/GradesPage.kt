@@ -30,12 +30,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.feldman.lockerapp.ui.theme.AppTheme
-import com.feldman.lockerapp.ui.theme.darkColors
+import com.feldman.scholix.BOTTOM_BAR_SPACING
 import com.feldman.scholix.R
+import com.feldman.scholix.TOP_BAR_SPACING
 import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.ui.components.ActionRow
-import com.feldman.scholix.ui.components.SegmentedOption
-import com.feldman.scholix.ui.components.Title
+import com.feldman.scholix.ui.components.ChipPicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -200,8 +199,9 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 8.dp),
         ) {
+            Spacer(Modifier.height(TOP_BAR_SPACING))
             if (courses.size > 1) {
                 PrimaryScrollableTabRow(
                     selectedTabIndex = selectedTab,
@@ -521,10 +521,12 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                 }
                             }
 
-                            Spacer(Modifier.height(3.dp))
+                            Spacer(Modifier.height(2.dp))
                         }
                     }
-
+                    item {
+                        Spacer(Modifier.height(BOTTOM_BAR_SPACING))
+                    }
                 }
             }
 

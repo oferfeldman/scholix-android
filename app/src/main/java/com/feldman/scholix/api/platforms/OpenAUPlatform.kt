@@ -47,6 +47,7 @@ private fun mergeCookieStrings(existing: String?, newCookies: List<String>): Str
 }
 
 class OpenAUPlatform() : Platform {
+    override var platformDisplayName: String = "OpenAUPlatform"
 
     // region --- Login Fields ---
     private val loginFields = LoginFields()
@@ -71,10 +72,10 @@ class OpenAUPlatform() : Platform {
     // endregion
 
     // region --- Internal Fields ---
-    override var displayName: String? = null
+    var displayName: String? = null
     private var _studentId: String? = null
-    override var _username: String? = null
-    override var _password: String? = null
+    var _username: String? = null
+    var _password: String? = null
     private var _cookies: String? = null
     private val _client = HttpClient(OkHttp) {
         followRedirects = true
@@ -499,6 +500,7 @@ class OpenAUPlatform() : Platform {
         .put("supportsSchedule", supportsSchedule)
         .put("supportsAttendance", supportsAttendance)
         .put("courses", JSONArray(_courses))
+        .put("platformDisplayName", platformDisplayName)
     // endregion
     private fun ensureSession(): Boolean = runBlocking {
         try {
@@ -544,6 +546,7 @@ class OpenAUPlatform() : Platform {
             p._cookies = obj.optString("cookies", null)
             p.loggedIn = obj.optBoolean("loggedIn", false)
             p.editing = obj.optBoolean("editing", false)
+            p.platformDisplayName = obj.optString("platformDisplayName")
 
             // Optional: restore courses if saved
             val coursesArray = obj.optJSONArray("courses")

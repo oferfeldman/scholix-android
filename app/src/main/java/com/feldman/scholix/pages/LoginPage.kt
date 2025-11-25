@@ -3,15 +3,12 @@ package com.feldman.scholix.pages
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.LocalAutofillHighlightColor
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
@@ -20,13 +17,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.feldman.app.api.BarIlanPlatform
-import com.feldman.scholix.R
+import androidx.credentials.CreatePasswordRequest
+import androidx.credentials.CredentialManager
 import com.feldman.scholix.api.*
 import com.feldman.scholix.ui.components.ActionRow
 import com.feldman.scholix.ui.components.SegmentedOption
@@ -172,7 +173,7 @@ fun LoginPage(
                         onFieldsChanged = { loginFields = it },
                         isLoading = isLoading,
                         errorMessage = errorMessage,
-                        onLogin = {
+                        onSubmit = {
                             val missing = fields.getFields().any { it.value.isNullOrBlank() }
                             if (missing) {
                                 errorMessage = "Please fill in all fields"
@@ -209,26 +210,51 @@ fun LoginPage(
                                     val ok = withContext(Dispatchers.IO) { created.isLoggedIn() }
                                     if (ok) {
                                         PlatformStorage.savePlatforms(context, listOf(created))
+
+                                        try {
+                                            val credentialManager = CredentialManager.create(context)
+
+                                            val username = fields.getValue("username") ?: ""
+                                            val password = fields.getValue("password") ?: ""
+
+                                            if (username.isNotBlank() && password.isNotBlank()) {
+                                                val request = CreatePasswordRequest(username, password)
+                                                scope.launch {
+                                                    try {
+                                                        credentialManager.createCredential(
+                                                            request = request,
+                                                            context = context
+                                                        )
+                                                    } catch (e: Exception) {
+                                                        e.printStackTrace()
+                                                    }
+                                                }
+                                            }
+
+                                            onLoginSuccess()
+
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+
                                         onLoginSuccess()
-                                    } else errorMessage = "Invalid credentials"
+                                    }
+                                    else errorMessage = "Invalid credentials"
+
                                 } catch (e: Exception) {
                                     errorMessage = "Login failed: ${e.localizedMessage}"
                                 } finally {
                                     isLoading = false
                                 }
                             }
-                        }
+                        },
+                        buttonText = "Add",
                     )
                 }
             }
         }
     }
 }
-
-// ──────────────────────────────────────────────
-// Platform Card model and composable
-// ──────────────────────────────────────────────
-
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -237,7 +263,9 @@ fun DynamicLoginFields(
     onFieldsChanged: (LoginFields) -> Unit,
     isLoading: Boolean,
     errorMessage: String?,
-    onLogin: () -> Unit
+    buttonText: String,
+    onSubmit: () -> Unit,
+    onCancel: (() -> Unit)? = null
 ) {
     var mutableFields by remember { mutableStateOf(fields) }
 
@@ -251,38 +279,55 @@ fun DynamicLoginFields(
             var value by remember { mutableStateOf(field.value ?: "") }
             var passwordVisible by remember { mutableStateOf(false) }
 
-            OutlinedTextField(
-                value = value,
-                onValueChange = {
-                    value = it
-                    mutableFields.setValue(field.id, it)
-                    onFieldsChanged(mutableFields)
-                },
-                label = { Text(field.id.replaceFirstChar { c -> c.uppercase() }) },
-                leadingIcon = {
-                    when (field.type) {
-                        Type.Username, Type.Id -> Icon(Icons.Default.Person, null)
-                        Type.Password -> Icon(Icons.Default.Lock, null)
-                        else -> {}
-                    }
-                },
-                trailingIcon = if (field.type == Type.Password) {
-                    {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(
-                                imageVector = if (passwordVisible)
-                                    Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = null
-                            )
+            val autofillContentType = when (field.type) {
+                Type.Username, Type.Id -> ContentType.Username
+                Type.Password -> ContentType.Password
+                Type.Email -> ContentType.EmailAddress
+                else -> null
+            }
+
+            CompositionLocalProvider(LocalAutofillHighlightColor provides Color.Transparent) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = {
+                        value = it
+                        mutableFields.setValue(field.id, it)
+                        onFieldsChanged(mutableFields)
+                    },
+                    label = { Text(field.id.replaceFirstChar { c -> c.uppercase() }) },
+                    leadingIcon = {
+                        when (field.type) {
+                            Type.Username, Type.Id -> Icon(Icons.Default.Person, null)
+                            Type.Password -> Icon(Icons.Default.Lock, null)
+                            else -> {}
                         }
-                    }
-                } else null,
-                visualTransformation = if (field.type == Type.Password && !passwordVisible)
-                    PasswordVisualTransformation() else VisualTransformation.None,
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            )
+                    },
+                    trailingIcon = if (field.type == Type.Password) {
+                        {
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(
+                                    imageVector = if (passwordVisible)
+                                        Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                    contentDescription = null
+                                )
+                            }
+                        }
+                    } else null,
+                    visualTransformation = if (field.type == Type.Password && !passwordVisible)
+                        PasswordVisualTransformation() else VisualTransformation.None,
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .semantics {
+                            autofillContentType?.let { contentType = it }
+                        },
+                    keyboardOptions = KeyboardOptions.Default.copy(
+                        imeAction = if (field.type == Type.Password) ImeAction.Done else ImeAction.Next
+                    )
+                )
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -292,14 +337,29 @@ fun DynamicLoginFields(
         }
 
         AnimatedVisibility(visible = !isLoading, enter = fadeIn(), exit = fadeOut()) {
-            Button(
-                onClick = onLogin,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(16.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Sign In", style = MaterialTheme.typography.titleLarge)
+                onCancel?.let {
+                    OutlinedButton(
+                        onClick = it,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+
+                Button(
+                    onClick = onSubmit,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(buttonText, style = MaterialTheme.typography.titleMedium)
+                }
             }
         }
 

@@ -234,7 +234,8 @@ fun NavHost(
                         popUpTo(0)
                     }
                     onLogout()
-                }
+                },
+                navController = navController
             )
         }
 

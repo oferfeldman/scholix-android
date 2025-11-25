@@ -25,8 +25,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.feldman.scholix.BOTTOM_BAR_SPACING
 import com.feldman.scholix.R
+import com.feldman.scholix.TOP_BAR_SPACING
 import com.feldman.scholix.api.PlatformStorage
+import com.feldman.scholix.ui.components.ChipPicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -88,158 +91,13 @@ fun FiltersGrid(
                     onSelectedChange = onSemesterChange
                 )
             }
-            Spacer(modifier = Modifier.weight(1f)) // balances layout to keep 2-per-row
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ChipPicker(
-    label: String,
-    options: List<String>,
-    selected: String,
-    onSelectedChange: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    var chipWidthPx by remember { mutableIntStateOf(0) }
-    val density = LocalDensity.current
-
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(200),
-        label = "arrowRotation"
-    )
-
-    // Animate the bottom corners only
-    val bottomRadius by animateDpAsState(
-        targetValue = if (expanded) 12.dp else 28.dp,
-        animationSpec = tween(200),
-        label = "bottomRadius"
-    )
-
-    // Top corners stay constant
-    val chipShape = RoundedCornerShape(
-        topStart = 28.dp,
-        topEnd = 28.dp,
-        bottomStart = bottomRadius,
-        bottomEnd = bottomRadius
-    )
-
-    Box(modifier = Modifier.fillMaxWidth()) {
-        Surface(
-            shape = chipShape,
-            tonalElevation = 2.dp,
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .onGloballyPositioned { chipWidthPx = it.size.width }
-                .clickable { expanded = !expanded }
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(start = 32.dp, end = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(verticalArrangement = Arrangement.Center) {
-                    Text(label, style = MaterialTheme.typography.labelMedium)
-                    Text(
-                        selected,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                }
-                Icon(
-                    imageVector = Icons.Default.ArrowDropDown,
-                    contentDescription = null,
-                    modifier = Modifier.rotate(rotation)
-                )
-            }
-        }
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .width(with(density) { chipWidthPx.toDp() })
-                .align(Alignment.BottomCenter)
-        ) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option) },
-                    leadingIcon = {
-                        if (option == selected)
-                            Icon(Icons.Default.Check, contentDescription = null)
-                    },
-                    onClick = {
-                        onSelectedChange(option)
-                        expanded = false
-                    }
-                )
-            }
+            Spacer(modifier = Modifier.weight(1f))
         }
     }
 }
 
 
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ChipDropdown(
-    label: String,
-    icon: Painter,
-    options: List<String>,
-    selected: String,
-    onSelectedChange: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Box(modifier = Modifier.wrapContentSize()) {
-
-
-        TextButton(onClick = { expanded = true }) {
-            Icon(
-                painter = icon,
-                contentDescription = null
-            )
-            Spacer(Modifier.width(4.dp))
-            Text(
-                label,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Clip
-            )
-        }
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option) },
-                    leadingIcon = {
-                        if (option == selected) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    },
-                    onClick = {
-                        onSelectedChange(option)
-                        expanded = false
-                    }
-                )
-            }
-        }
-    }
-}
 private val dateTryFormats = listOf(
     DateTimeFormatter.ISO_LOCAL_DATE,
     DateTimeFormatter.ISO_DATE,
@@ -391,9 +249,9 @@ fun AttendancePage(modifier: Modifier = Modifier) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 0.dp)
+            .padding(horizontal = 8.dp)
     ) {
-
+        Spacer(Modifier.height(TOP_BAR_SPACING))
         FiltersGrid(
             sortBy = sortBy,
             onSortChange = { sortBy = it },
@@ -498,6 +356,8 @@ fun AttendancePage(modifier: Modifier = Modifier) {
 
                         item { Spacer(Modifier.height(12.dp)) }
                     }
+                    item { Spacer(Modifier.height(BOTTOM_BAR_SPACING)) }
+
                 }
 
             }

@@ -39,7 +39,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.room.*
 import com.feldman.lockerapp.ui.theme.darkColors
+import com.feldman.scholix.BOTTOM_BAR_SPACING
 import com.feldman.scholix.R
+import com.feldman.scholix.TOP_BAR_SPACING
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.ui.components.Title
@@ -389,7 +391,7 @@ fun LockerApp(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .offset(y = 32.dp),
+                    .offset(y = 32.dp-BOTTOM_BAR_SPACING),
                 contentAlignment = Alignment.BottomEnd
             ) {
                 FloatingActionButtonMenu(
@@ -449,9 +451,12 @@ fun LockerApp(
     ) { padding ->
 
         Column(Modifier.fillMaxSize()) {
-
+            Spacer(Modifier.height(TOP_BAR_SPACING))
             if (allTabs.isNotEmpty()) {
-                PrimaryScrollableTabRow(selectedTabIndex = selectedTabIndex) {
+                PrimaryScrollableTabRow(
+                    selectedTabIndex = selectedTabIndex,
+                    containerColor = MaterialTheme.colorScheme.background
+                ) {
                     allTabs.forEachIndexed { index, title ->
                         Tab(
                             selected = selectedTabIndex == index,
@@ -495,7 +500,7 @@ fun LockerApp(
                             LazyColumn(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 16.dp),
+                                    .padding(horizontal = 8.dp),
                             ) {
                                 val filteredItems = items.filter { it.platformId == platform.id }
 
@@ -550,12 +555,10 @@ fun LockerApp(
                                     item { Spacer(Modifier.height(100.dp)) }
                                 }
 
-                                item { Spacer(Modifier.height(100.dp)) }
+                                item { Spacer(Modifier.height(BOTTOM_BAR_SPACING)) }
                             }
                         }
-                        }
-
-
+                    }
                 }
             }
         }
@@ -631,7 +634,7 @@ fun ItemList(
 
     if (items.isEmpty()) return
 
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items.forEachIndexed { index, item ->
             val isFirst = index == 0
             val isLast = index == items.lastIndex

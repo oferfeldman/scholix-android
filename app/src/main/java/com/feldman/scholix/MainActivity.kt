@@ -14,15 +14,19 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -49,6 +53,11 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.lang.Thread.sleep
 import java.io.IOException
+
+
+
+val TOP_BAR_SPACING = 50.dp
+val BOTTOM_BAR_SPACING = 100.dp
 
 fun isSmartSchoolReachable(): Boolean {
     return try {
@@ -253,6 +262,8 @@ class MainActivity : ComponentActivity() {
 
 
 }
+private fun routeToDest(route: String?): Dest? =
+    route?.substringBefore('/')?.let { runCatching { Dest.valueOf(it) }.getOrNull() }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -327,72 +338,120 @@ fun MainScreen(
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
-            topBar = {
+//            topBar = {
+//                if (isLoggedIn == true) {
+//
+//                    FloatingTopAppBar(
+//                        title = {
+//                            Text(
+//                                text = currentDest?.label ?: "",
+//                                style = MaterialTheme.typography.titleLarge.copy(
+//                                    fontWeight = FontWeight.Bold
+//                                ),
+//                                color = MaterialTheme.colorScheme.onBackground
+//                            )
+//                        },
+//                        navigationIcon = {
+//
+//                            // If destination has a parent → show back button
+//                            if (currentDest?.parent != null) {
+//                                IconButton(onClick = { navController.navigateUp() }) {
+//                                    Icon(
+//                                        painter = painterResource(id = R.drawable.ic_back),
+//                                        contentDescription = "Back",
+//                                        tint = MaterialTheme.colorScheme.onBackground
+//                                    )
+//                                }
+//                            }
+//                            // Otherwise → show menu button (root destinations)
+//                            else {
+//                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+//                                    Icon(
+//                                        painter = painterResource(id = R.drawable.ic_menu),
+//                                        contentDescription = "Menu",
+//                                        tint = MaterialTheme.colorScheme.onBackground
+//                                    )
+//                                }
+//                            }
+//                        },
+//                        actions = {
+//                            // You have no actionIcon / onAction in Dest
+//                            // so actions remain empty for now.
+//                        }
+//                    )
+//                }
+//            },
+            bottomBar = {
                 if (isLoggedIn == true) {
-                    CenterAlignedTopAppBar(
-                        title = {
-                            Text(
-                                text = currentTitle,
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        },
-                        navigationIcon = {
-                            if (currentDest?.parent != null) {
-                                IconButton(onClick = { navController.navigateUp() }) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_back),
-                                        contentDescription = "Back"
-                                    )
-                                }
-                            } else {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_menu),
-                                        contentDescription = "Menu"
+
+                    // בוחר אילו טאבים להציג
+                    val rootTabs = visibleDests
+
+                    // בדיקה מי דסטיניישן פעיל
+                    val currentDest = remember(currentRoute) { routeToDest(currentRoute) }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 24.dp)
+                    ) {
+
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            tonalElevation = NavigationBarDefaults.Elevation,
+                            modifier = Modifier.height(76.dp)
+                        ) {
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+
+                                rootTabs.forEach { dest ->
+
+                                    val selected =
+                                        currentDest == dest || currentDest?.parent == dest
+
+                                    NavigationBarItem(
+                                        selected = selected,
+                                        onClick = {
+                                            if (!selected || currentDest?.parent == dest) {
+                                                navController.navigate(dest.name) {
+                                                    launchSingleTop = true
+                                                    restoreState = true
+                                                }
+                                            }
+                                        },
+                                        icon = {
+
+                                            Icon(
+                                                painter = painterResource(
+                                                    if (selected) dest.filledIcon else dest.outlineIcon
+                                                ),
+                                                contentDescription = dest.label,
+                                                tint = if (selected)
+                                                    MaterialTheme.colorScheme.primary
+                                                else
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        },
+                                        label = { Text(dest.label) }
                                     )
                                 }
                             }
                         }
-                    )
-                }
-            },
-            bottomBar = {
-                if (isLoggedIn == true) {
-                    NavigationBar {
-                        visibleDests.forEach { dest ->
-                            val selected = currentDest == dest || currentDest?.parent == dest
-                            NavigationBarItem(
-                                selected = selected,
-                                onClick = {
-                                    if (!selected || currentDest.parent == dest) {
-                                        navController.navigate(dest.name) {
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
-                                    }
-                                },
-                                icon = {
-                                    Icon(
-                                        painterResource(
-                                            id = if (selected) dest.filledIcon else dest.outlineIcon
-                                        ),
-                                        contentDescription = dest.label
-                                    )
-                                },
-                                label = { Text(dest.label) },
-                                alwaysShowLabel = true
-                            )
-                        }
                     }
                 }
+
             }
         ) { innerPadding ->
             NavHost(
                 navController = navController,
-                modifier = Modifier.padding(innerPadding),
+                modifier = Modifier.fillMaxSize(), //.padding(innerPadding)
                 preloadedCourses = preloadedCourses,
                 repository = repository,
                 platforms = platforms,

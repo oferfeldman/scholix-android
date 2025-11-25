@@ -8,9 +8,8 @@ import org.json.JSONObject
 import java.io.IOException
 
 interface Platform {
-    var displayName: String?
-    var _username: String?
-    var _password: String?
+    var platformDisplayName: String
+
     var editing: Boolean
     var loggedIn: Boolean
     val id: String

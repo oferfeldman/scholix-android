@@ -5,8 +5,10 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,8 +27,10 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import com.feldman.scholix.R
 import androidx.compose.ui.text.intl.LocaleList
+import com.feldman.scholix.BOTTOM_BAR_SPACING
+import com.feldman.scholix.TOP_BAR_SPACING
 import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.pages.ChipPicker
+import com.feldman.scholix.ui.components.ChipPicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Calendar
@@ -47,7 +51,7 @@ fun ClassFiltersRow(
     ) {
         Box(modifier = Modifier.weight(1f)) {
             ChipPicker(
-                label = stringResource(R.string.grade), // "שכבה"
+                label = stringResource(R.string.grade),
                 options = listOf("7", "8", "9"),
                 selected = grade,
                 onSelectedChange = onGradeChange
@@ -56,7 +60,7 @@ fun ClassFiltersRow(
 
         Box(modifier = Modifier.weight(1f)) {
             ChipPicker(
-                label = stringResource(R.string.classroom), // "כיתה"
+                label = stringResource(R.string.classroom),
                 options = (1..9).map { it.toString() },
                 selected = clazz,
                 onSelectedChange = onClassChange
@@ -100,60 +104,104 @@ fun SchedulePage(
     val context = LocalContext.current
 
     LaunchedEffect(pagerState.currentPage, selectedValue) {
+        val page = pagerState.currentPage
+
+        // 1. Check if we already have the data for the current page and selected filters.
+        // If the data is already present, skip the network request.
+        val isUpdatedDataPresent = allSchedulesUpdated.containsKey(page) && allSchedulesUpdated[page]?.isNotEmpty() == true
+        val isOriginalDataPresent = allSchedulesOriginal.containsKey(page) && allSchedulesOriginal.get(page) != null
+
+        if (isUpdatedDataPresent && isOriginalDataPresent) {
+            // Data is already cached and loaded for this page/filter combination.
+            // If you want to force a refresh when switching, remove this block.
+            // For now, let's keep it to prevent unnecessary fetches.
+            isLoading = false
+            return@LaunchedEffect
+        }
+
+        // 2. Start loading and clear any previous error for this page
         isLoading = true
-        errorMessages[pagerState.currentPage] = null
+        errorMessages[page] = null
+
         try {
-            Log.d("SchedulePage", "Fetching schedule for $selectedValue")
+            Log.d("SchedulePage", "Fetching schedule for $selectedValue and page $page")
 
             val platform = PlatformStorage.getPlatform(context, 0)
+
             if (platform != null) {
+                // Check if the page is STILL the current page before starting.
+                // This is a minimal guard, but the cancellation handling is more important.
+
                 // --- Updated schedule ---
+                // Use Dispatchers.Default for the blocking network call instead of IO,
+                // but the original IO is fine if the function handles IO internally.
+                // The main thing is that the LaunchedEffect's coroutine is still prone to cancellation.
+
                 val updated = withContext(Dispatchers.IO) {
-                    val schedule = platform.getSchedule(pagerState.currentPage, null, selectedValue)
+                    // IMPORTANT: The fetch function itself must be cancellable
+                    // (e.g., using coroutineScope.ensureActive() inside the low-level logic,
+                    // or using a cancellable HTTP client). Assuming the `platform.getSchedule` is blocking:
+
+                    val schedule = platform.getSchedule(page, null, selectedValue)
 
                     // detect if an error object is returned
                     if (schedule.has("error")) {
+                        // ... (error handling logic remains the same)
                         val err = when (schedule.optString("error")) {
                             "server_unreachable" -> "Cannot reach the server.\nCheck your internet connection."
                             "login_failed" -> "Login failed.\nPlease re-login."
                             else -> "Unknown error occurred while loading schedule."
                         }
-                        errorMessages[pagerState.currentPage] = err
+                        errorMessages[page] = err // Note: updating state in IO is usually fine if it's a MutableStateMap or similar thread-safe structure, but it's safer to do it after withContext. For now, let's keep it clean.
                         emptyList()
                     } else {
                         schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                     }
                 }
-                allSchedulesUpdated[pagerState.currentPage] = updated
+                // Update the state *after* the blocking call, back on the main thread (which LaunchedEffect runs on).
+                allSchedulesUpdated[page] = updated
 
                 // --- Original schedule ---
                 val original = withContext(Dispatchers.IO) {
-                    val schedule = platform.getOriginalSchedule(pagerState.currentPage, null, selectedValue)
+                    val schedule = platform.getOriginalSchedule(page, null, selectedValue)
                     schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                 }
-                allSchedulesOriginal[pagerState.currentPage] = original
+                allSchedulesOriginal[page] = original
+
             } else {
-                errorMessages[pagerState.currentPage] = "No platform account found."
+                errorMessages[page] = "No platform account found."
             }
         } catch (e: Exception) {
+        // 1. Check for the standard Kotlin Coroutines CancellationException.
+        // LeftCompositionCancellationException inherits from CancellationException.
+        if (e is kotlinx.coroutines.CancellationException) {
+            // This is an expected signal from Compose/Coroutines when the tab is switched.
+            // Ignore this and do not log it as a critical error or show a message to the user.
+            Log.d("SchedulePage", "Coroutine cancelled (expected on tab switch)")
+        } else {
+            // 2. Handle all other unexpected errors
             Log.e("SchedulePage", "Error fetching schedule", e)
             errorMessages[pagerState.currentPage] = "Unknown error occurred while loading schedule."
-        } finally {
-            isLoading = false
         }
+    } finally {
+        // This finally block always executes, whether cancelled or not,
+        // ensuring the loading state is reset.
+        isLoading = false
+    }
     }
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 0.dp)
     ) {
-
+        Spacer(Modifier.height(TOP_BAR_SPACING+40.dp))
         val scheduleMode = remember { mutableStateOf(ScheduleMode.Updated) }
 
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
         ) {
             Box(modifier = Modifier.weight(1f)) {
                 val original = stringResource(R.string.original)
@@ -200,7 +248,10 @@ fun SchedulePage(
 
         PrimaryTabRow(
             selectedTabIndex = pagerState.currentPage,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .padding(horizontal = 8.dp)
+                .fillMaxWidth(),
+            containerColor = MaterialTheme.colorScheme.background
         ) {
             dayNames.forEachIndexed { index, day ->
                 Tab(
@@ -261,11 +312,35 @@ fun SchedulePage(
                 }
                 else -> {
                     LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .padding(horizontal = 8.dp)
+                            .fillMaxSize(),
+//                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(scheduleItems) { item ->
-                            ScheduleCard(item)
+//                        items(scheduleItems) { item ->
+//                            ScheduleCard(item)
+//                        }
+                        itemsIndexed(scheduleItems) { index, item ->
+                            val isFirst = index == 0
+                            val isLast = index == scheduleItems.lastIndex
+
+                            val shape = when {
+                                isFirst && isLast -> RoundedCornerShape(16.dp)
+                                isFirst -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
+                                isLast -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+                                else -> RoundedCornerShape(4.dp)
+                            }
+
+                            ScheduleCardConnected(
+                                item = item,
+                                shape = shape
+                            )
+
+                            Spacer(Modifier.height(2.dp))
+                        }
+
+                        item {
+                            Spacer(Modifier.height(BOTTOM_BAR_SPACING))
                         }
                     }
                 }
@@ -274,6 +349,90 @@ fun SchedulePage(
     }
 }
 
+@Composable
+fun ScheduleCardConnected(
+    item: JSONObject,
+    shape: RoundedCornerShape
+) {
+    val colors = getColorFromClass(item.optString("colorClass"))
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = colors.background)
+
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalAlignment = Alignment.End   // Hebrew natural right side
+        ) {
+
+            val subjectRaw = item.optString("subject")
+            val subjectFormatted = remember(subjectRaw) {
+                val locale = java.util.Locale.forLanguageTag("he")
+                BidiFormatter.getInstance(locale).unicodeWrap(subjectRaw)
+            }
+            val onSurface = MaterialTheme.colorScheme.onSurface
+
+            val reversedColor = Color(
+                red = 1f - onSurface.red,
+                green = 1f - onSurface.green,
+                blue = 1f - onSurface.blue,
+                alpha = onSurface.alpha
+            )
+
+            Text(
+                text = subjectFormatted,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Start,   // Hebrew RTL makes this RIGHT
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    textDirection = TextDirection.ContentOrRtl,
+                    localeList = LocaleList(Locale("he"), Locale("en"))
+                ),
+                color = colors.content
+            )
+
+            Text(
+                text = item.optString("teacher"),
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Start,
+                fontSize = 14.sp,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    textDirection = TextDirection.ContentOrRtl,
+                    localeList = LocaleList(Locale("he"), Locale("en"))
+                ),
+                color = colors.content
+            )
+
+            val changes = item.optString("changes")
+            val exams = item.optString("exams")
+
+            val extraText = when {
+                changes.isNotEmpty() -> changes
+                exams.isNotEmpty() -> exams
+                else -> null
+            }
+
+            if (extraText != null) {
+                Text(
+                    text = extraText,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Start,
+                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        textDirection = TextDirection.ContentOrRtl,
+                        localeList = LocaleList(Locale("he"), Locale("en"))
+                    ),
+                    color = colors.content
+                )
+            }
+        }
+    }
+}
 
 @Composable
 fun ScheduleCard(item: JSONObject) {
@@ -346,72 +505,20 @@ data class ThemedColor(val background: Color, val content: Color)
 
 @Composable
 fun getColorFromClass(colorClass: String): ThemedColor {
-    val darkTheme = !isSystemInDarkTheme()
+
     return when (colorClass) {
-        "pink-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFFD81B60), Color.White)     // dark bg, light text
-        } else {
-            ThemedColor(Color(0xFFFFCCFB), Color.Black)     // light bg, dark text
-        }
-        "lightgreen-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFF2E7D32), Color.White)
-        } else {
-            ThemedColor(Color(0xFFC3FFC1), Color.Black)
-        }
-        "lightyellow-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFFF9A825), Color.Black)    // yellow is bright → dark text
-        } else {
-            ThemedColor(Color(0xFFFAFFB8), Color.Black)
-        }
-        "lightblue-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFF0277BD), Color.White)
-        } else {
-            ThemedColor(Color(0xFFB6E1EE), Color.Black)
-        }
-        "lightred-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFFC62828), Color.White)
-        } else {
-            ThemedColor(Color(0xFFFFBAB3), Color.Black)
-        }
-        "lightpurple-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFF6A1B9A), Color.White)
-        } else {
-            ThemedColor(Color(0xFFDBC2FF), Color.Black)
-        }
-        "lightorange-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFFEF6C00), Color.White)
-        } else {
-            ThemedColor(Color(0xFFFFCFA6), Color.Black)
-        }
-        "blue-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFF303F9F), Color.White)
-        } else {
-            ThemedColor(Color(0xFFB5C2FF), Color.Black)
-        }
-        "lime-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFF827717), Color.White)
-        } else {
-            ThemedColor(Color(0xFFEBFFBC), Color.Black)
-        }
-        "lightgrey-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFF37474F), Color.White)
-        } else {
-            ThemedColor(Color(0xFFCFD5D9), Color.Black)
-        }
-        "custom-pink-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFFAD1457), Color.White)
-        } else {
-            ThemedColor(Color(0xFFF8C8FA), Color.Black)
-        }
-        "cancel-cell" -> if (darkTheme) {
-            ThemedColor(Color(0xFF4E342E), Color.White)
-        } else {
-            ThemedColor(Color(0xFF7D5B5D), Color.White) // keep white text even in light
-        }
-        else -> if (darkTheme) {
-            ThemedColor(Color.DarkGray, Color.White)
-        } else {
-            ThemedColor(Color.White, Color.Black)
-        }
+        "pink-cell" -> ThemedColor(Color(0xFFFFCCFB), Color.Black)
+        "lightgreen-cell" -> ThemedColor(Color(0xffb5ffb4), Color.Black)
+        "lightyellow-cell" -> ThemedColor(Color(0xfffaffae), Color.Black)
+        "lightblue-cell" -> ThemedColor(Color(0xffaeeaff), Color.Black)
+        "lightred-cell" -> ThemedColor(Color(0xffffc1b9), Color.Black)
+        "lightpurple-cell" -> ThemedColor(Color(0xffd3b3ff), Color.Black)
+        "lightorange-cell" -> ThemedColor(Color(0xffffd1b0), Color.Black)
+        "blue-cell" -> ThemedColor(Color(0xffb0bdff), Color.Black)
+        "lime-cell" -> ThemedColor(Color(0xffe7ffb1), Color.Black)
+        "lightgrey-cell" -> ThemedColor(Color(0xff98d4ff), Color.Black)
+        "custom-pink-cell" -> ThemedColor(Color(0xfffdbaff), Color.Black)
+        "cancel-cell" -> ThemedColor(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
+        else -> ThemedColor(Color.White, Color.Black)
     }
 }
