@@ -27,31 +27,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.room.*
-import com.feldman.lockerapp.ui.theme.darkColors
-import com.feldman.scholix.BOTTOM_BAR_SPACING
+import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.R
 import com.feldman.scholix.TOP_BAR_SPACING
 import com.feldman.scholix.api.Platform
-import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.ui.components.Title
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 @Entity(tableName = "locker_items")
 data class LockerItemEntity(
@@ -391,7 +383,7 @@ fun LockerApp(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .offset(y = 32.dp-BOTTOM_BAR_SPACING),
+                    .offset(y = 32.dp- BottomBarSpacing()),
                 contentAlignment = Alignment.BottomEnd
             ) {
                 FloatingActionButtonMenu(
@@ -555,7 +547,7 @@ fun LockerApp(
                                     item { Spacer(Modifier.height(100.dp)) }
                                 }
 
-                                item { Spacer(Modifier.height(BOTTOM_BAR_SPACING)) }
+                                item { Spacer(Modifier.height(BottomBarSpacing())) }
                             }
                         }
                     }

@@ -33,20 +33,15 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.feldman.app.api.BarIlanPlatform
-import com.feldman.scholix.BOTTOM_BAR_SPACING
+import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.api.LoginFields
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformInfo
 import com.feldman.scholix.api.PlatformStorage
-import com.feldman.scholix.api.Type
 import com.feldman.scholix.api.applyLoginFields
 import com.feldman.scholix.api.platformOptions
-import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.Dest
 import com.feldman.scholix.TOP_BAR_SPACING
 import com.feldman.scholix.ui.components.ActionRow
@@ -89,7 +84,7 @@ fun PlatformsPage(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .offset(y = 32.dp-BOTTOM_BAR_SPACING),
+                    .offset(y = 32.dp- BottomBarSpacing()),
                 contentAlignment = Alignment.BottomEnd
             ) {
                 FloatingActionButtonMenu(
@@ -656,7 +651,7 @@ fun ReorderablePlatformsList(
             }
         }
         item {
-            Spacer(Modifier.height(BOTTOM_BAR_SPACING))
+            Spacer(Modifier.height(BottomBarSpacing()))
         }
     }
 }
@@ -694,7 +689,7 @@ fun SettingsPage(
             )
 
         }
-        Spacer(Modifier.height(BOTTOM_BAR_SPACING))
+        Spacer(Modifier.height(BottomBarSpacing()))
     }
 
 }

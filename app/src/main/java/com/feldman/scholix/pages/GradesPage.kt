@@ -30,7 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.feldman.lockerapp.ui.theme.AppTheme
-import com.feldman.scholix.BOTTOM_BAR_SPACING
+import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.R
 import com.feldman.scholix.TOP_BAR_SPACING
 import com.feldman.scholix.api.PlatformStorage
@@ -38,6 +38,7 @@ import com.feldman.scholix.ui.components.ChipPicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.checkerframework.common.subtyping.qual.Bottom
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -525,7 +526,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                         }
                     }
                     item {
-                        Spacer(Modifier.height(BOTTOM_BAR_SPACING))
+                        Spacer(Modifier.height(BottomBarSpacing()))
                     }
                 }
             }

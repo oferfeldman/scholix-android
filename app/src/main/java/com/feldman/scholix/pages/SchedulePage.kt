@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import com.feldman.scholix.R
 import androidx.compose.ui.text.intl.LocaleList
-import com.feldman.scholix.BOTTOM_BAR_SPACING
+import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.TOP_BAR_SPACING
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.ui.components.ChipPicker
@@ -340,7 +340,7 @@ fun SchedulePage(
                         }
 
                         item {
-                            Spacer(Modifier.height(BOTTOM_BAR_SPACING))
+                            Spacer(Modifier.height(BottomBarSpacing()))
                         }
                     }
                 }
@@ -510,10 +510,10 @@ fun getColorFromClass(colorClass: String): ThemedColor {
         "pink-cell" -> ThemedColor(Color(0xffd5a7d1), Color.Black)
         "lightgreen-cell" -> ThemedColor(Color(0xff8bc58a), Color.Black)
         "lightyellow-cell" -> ThemedColor(Color(0xffd5da94), Color.Black)
-        "lightblue-cell" -> ThemedColor(Color(0xff92bac8), Color.Black)
-        "lightred-cell" -> ThemedColor(Color(0xffcd9189), Color.Black)
+        "lightblue-cell" -> ThemedColor(Color(0xff8ec3d8), Color.Black)
+        "lightred-cell" -> ThemedColor(Color(0xffe4958b), Color.Black)
         "lightpurple-cell" -> ThemedColor(Color(0xffb198d3), Color.Black)
-        "lightorange-cell" -> ThemedColor(Color(0xffffd1b0), Color.Black)
+        "lightorange-cell" -> ThemedColor(Color(0xffdaba90), Color.Black)
         "blue-cell" -> ThemedColor(Color(0xffb0bdff), Color.Black)
         "lime-cell" -> ThemedColor(Color(0xffaacd8d), Color.Black)
         "lightgrey-cell" -> ThemedColor(Color(0xff93999e), Color.Black)

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -38,6 +39,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -60,7 +62,13 @@ import java.io.IOException
 
 
 val TOP_BAR_SPACING = 50.dp
-val BOTTOM_BAR_SPACING = 100.dp
+@Composable
+fun BottomBarSpacing(): Dp {
+    return WindowInsets.navigationBars
+        .asPaddingValues()
+        .calculateBottomPadding() + 100.dp
+}
+
 
 fun isSmartSchoolReachable(): Boolean {
     return try {
