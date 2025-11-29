@@ -37,7 +37,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.room.*
 import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.R
-import com.feldman.scholix.TOP_BAR_SPACING
+import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.api.Platform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -443,7 +443,7 @@ fun LockerApp(
     ) { padding ->
 
         Column(Modifier.fillMaxSize()) {
-            Spacer(Modifier.height(TOP_BAR_SPACING))
+            Spacer(Modifier.height(TopBarSpacing()))
             if (allTabs.isNotEmpty()) {
                 PrimaryScrollableTabRow(
                     selectedTabIndex = selectedTabIndex,

@@ -19,7 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.R
-import com.feldman.scholix.TOP_BAR_SPACING
+import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.ui.components.ChipPicker
 import kotlinx.coroutines.Dispatchers
@@ -243,7 +243,7 @@ fun AttendancePage(modifier: Modifier = Modifier) {
             .fillMaxSize()
             .padding(horizontal = 8.dp)
     ) {
-        Spacer(Modifier.height(TOP_BAR_SPACING))
+        Spacer(Modifier.height(TopBarSpacing()))
         FiltersGrid(
             sortBy = sortBy,
             onSortChange = { sortBy = it },

@@ -43,7 +43,7 @@ import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.applyLoginFields
 import com.feldman.scholix.api.platformOptions
 import com.feldman.scholix.Dest
-import com.feldman.scholix.TOP_BAR_SPACING
+import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.ui.components.ActionRow
 import com.feldman.scholix.ui.components.FloatingTopAppBar
 import com.feldman.scholix.ui.components.SegmentedOption
@@ -557,7 +557,7 @@ fun ReorderablePlatformsList(
             .fillMaxHeight()
     ) {
         item {
-            Spacer(Modifier.height(TOP_BAR_SPACING+12.dp))
+            Spacer(Modifier.height(TopBarSpacing() +12.dp))
         }
         itemsIndexed(platforms, key = { _, platform -> platform.hashCode() }) { index, platform ->
             val isPrimary = index == 0
@@ -673,7 +673,7 @@ fun SettingsPage(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        Spacer(Modifier.height(TOP_BAR_SPACING))
+        Spacer(Modifier.height(TopBarSpacing()))
         ActionRow {
             addVerticalActionList(
                 options = listOf(

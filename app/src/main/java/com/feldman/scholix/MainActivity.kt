@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,7 +62,12 @@ import java.io.IOException
 
 
 
-val TOP_BAR_SPACING = 50.dp
+@Composable
+fun TopBarSpacing(): Dp {
+    return WindowInsets.statusBars
+        .asPaddingValues()
+        .calculateTopPadding()
+}
 @Composable
 fun BottomBarSpacing(): Dp {
     return WindowInsets.navigationBars
@@ -464,13 +470,13 @@ fun MainScreen(
         ) { innerPadding ->
             NavHost(
                 navController = navController,
-                modifier = Modifier.fillMaxSize(), //.padding(innerPadding)
+                modifier = Modifier.fillMaxSize(),
                 preloadedCourses = preloadedCourses,
                 repository = repository,
                 platforms = platforms,
                 onPlatformsChanged = onPlatformsChanged,
-                onLogout = { isLoggedIn = false }, // 👈 internal state changes
-                onLoginSuccess = { onLoginSuccess(); isLoggedIn = true } // 👈 update internal state
+                onLogout = { isLoggedIn = false },
+                onLoginSuccess = { onLoginSuccess(); isLoggedIn = true }
             )
         }
 

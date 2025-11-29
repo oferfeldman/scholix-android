@@ -490,11 +490,45 @@ class WebtopPlatform() : Platform {
         }
 
         // --- Changes handling ---
-        val changesArray = scheduleItem.optJSONArray("changes") ?: JSONArray()
+        val changesArray = JSONArray().apply {
+            val c1 = hourRaw.optJSONArray("changes")
+            val c2 = scheduleItem.optJSONArray("changes")
+            if (c1 != null) for (i in 0 until c1.length()) put(c1.getJSONObject(i))
+            if (c2 != null) for (i in 0 until c2.length()) put(c2.getJSONObject(i))
+        }
         var cancel = false
 
         for (j in 0 until changesArray.length()) {
             val itemObj = changesArray.getJSONObject(j)
+            println(itemObj)
+            println("def: ${itemObj.optString("definition")} ${itemObj.optBoolean("isAddition")} ${itemObj.optString("type")}")
+
+            if (
+                itemObj.optBoolean("isAddition") ||
+                itemObj.optString("definition").contains("תוספת שיעור") ||
+                itemObj.optString("type") == "תוספת שיעור"
+            ) {
+                val addTeacher = itemObj.optString("privateName", "") + " " +
+                        itemObj.optString("lastName", "")
+
+                var addSubject = "תוספת שיעור"
+                for (key in hoursOriginal.keys()) {
+                    val existing = hoursOriginal.getJSONObject(key)
+                    if (existing.getString("teacher") == addTeacher) {
+                        addSubject = existing.getString("subject")
+                        break
+                    }
+                }
+
+                hour.put("subject", addSubject)
+                hour.put("teacher", addTeacher)
+                hour.put("colorClass", "yellow-cell")
+                hour.put("changes", "תוספת שיעור")
+                hour.put("exams", "")
+
+                hours.put(hourNum.toString(), hour)
+                return
+            }
 
             // ביטול שיעור
             if (itemObj.optString("definition", "לא זמין") == "ביטול שיעור" &&
@@ -552,10 +586,12 @@ class WebtopPlatform() : Platform {
                 }
 
 
+
                 if (!found) {
                     hour.put("teacher", fillTeacher)
                 }
             }
+
         }
 
         // --- Events handling ---

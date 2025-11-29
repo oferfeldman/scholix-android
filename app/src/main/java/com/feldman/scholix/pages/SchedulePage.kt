@@ -28,7 +28,7 @@ import org.json.JSONObject
 import com.feldman.scholix.R
 import androidx.compose.ui.text.intl.LocaleList
 import com.feldman.scholix.BottomBarSpacing
-import com.feldman.scholix.TOP_BAR_SPACING
+import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.ui.components.ChipPicker
 import kotlinx.coroutines.Dispatchers
@@ -194,7 +194,7 @@ fun SchedulePage(
         modifier = modifier
             .fillMaxSize()
     ) {
-        Spacer(Modifier.height(TOP_BAR_SPACING+40.dp))
+        Spacer(Modifier.height(TopBarSpacing()+40.dp))
         val scheduleMode = remember { mutableStateOf(ScheduleMode.Updated) }
 
         Row(
@@ -505,20 +505,41 @@ data class ThemedColor(val background: Color, val content: Color)
 
 @Composable
 fun getColorFromClass(colorClass: String): ThemedColor {
+    val isDark = isSystemInDarkTheme()
+    if (isDark) {
 
-    return when (colorClass) {
-        "pink-cell" -> ThemedColor(Color(0xffd5a7d1), Color.Black)
-        "lightgreen-cell" -> ThemedColor(Color(0xff8bc58a), Color.Black)
-        "lightyellow-cell" -> ThemedColor(Color(0xffd5da94), Color.Black)
-        "lightblue-cell" -> ThemedColor(Color(0xff8ec3d8), Color.Black)
-        "lightred-cell" -> ThemedColor(Color(0xffe4958b), Color.Black)
-        "lightpurple-cell" -> ThemedColor(Color(0xffb198d3), Color.Black)
-        "lightorange-cell" -> ThemedColor(Color(0xffdaba90), Color.Black)
-        "blue-cell" -> ThemedColor(Color(0xffb0bdff), Color.Black)
-        "lime-cell" -> ThemedColor(Color(0xffaacd8d), Color.Black)
-        "lightgrey-cell" -> ThemedColor(Color(0xff93999e), Color.Black)
-        "custom-pink-cell" -> ThemedColor(Color(0xffc294c5), Color.Black)
-        "cancel-cell" -> ThemedColor(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
-        else -> ThemedColor(Color.White, Color.Black)
+        return when (colorClass) {
+            "pink-cell" -> ThemedColor(Color(0xffd5a7d1), Color.Black)
+            "lightgreen-cell" -> ThemedColor(Color(0xff8bc58a), Color.Black)
+            "lightyellow-cell" -> ThemedColor(Color(0xffd5da94), Color.Black)
+            "lightblue-cell" -> ThemedColor(Color(0xff8ec3d8), Color.Black)
+            "lightred-cell" -> ThemedColor(Color(0xffe4958b), Color.Black)
+            "lightpurple-cell" -> ThemedColor(Color(0xffb198d3), Color.Black)
+            "lightorange-cell" -> ThemedColor(Color(0xffdaba90), Color.Black)
+            "blue-cell" -> ThemedColor(Color(0xffb0bdff), Color.Black)
+            "lime-cell" -> ThemedColor(Color(0xffaacd8d), Color.Black)
+            "lightgrey-cell" -> ThemedColor(Color(0xff93999e), Color.Black)
+            "custom-pink-cell" -> ThemedColor(Color(0xffd791dc), Color.Black)
+            "cancel-cell" -> ThemedColor(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
+            else -> ThemedColor(Color.White, Color.Black)
+        }
+    }
+    else {
+
+        return when (colorClass) {
+            "pink-cell" -> ThemedColor(Color(0xffffc7fa), Color.Black)
+            "lightgreen-cell" -> ThemedColor(Color(0xffb8ffb4), Color.Black)
+            "lightyellow-cell" -> ThemedColor(Color(0xffe1e880), Color.Black)
+            "lightblue-cell" -> ThemedColor(Color(0xffbaeaff), Color.Black)
+            "lightred-cell" -> ThemedColor(Color(0xffffaaa0), Color.Black)
+            "lightpurple-cell" -> ThemedColor(Color(0xffd2afff), Color.Black)
+            "lightorange-cell" -> ThemedColor(Color(0xffffd599), Color.Black)
+            "blue-cell" -> ThemedColor(Color(0xffb0bdff), Color.Black)
+            "lime-cell" -> ThemedColor(Color(0xffd8ffa9), Color.Black)
+            "lightgrey-cell" -> ThemedColor(Color(0xffb6bcc1), Color.Black)
+            "custom-pink-cell" -> ThemedColor(Color(0xfffab5ff), Color.Black)
+            "cancel-cell" -> ThemedColor(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
+            else -> ThemedColor(Color.White, Color.Black)
+        }
     }
 }
