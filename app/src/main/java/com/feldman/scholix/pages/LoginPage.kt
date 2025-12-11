@@ -17,15 +17,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.AutofillManager
+import androidx.compose.ui.autofill.AutofillType
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat.getSystemService
 import androidx.credentials.CreatePasswordRequest
 import androidx.credentials.CredentialManager
 import com.feldman.scholix.api.*
@@ -207,7 +212,11 @@ fun LoginPage(
                                         instance
                                     }
 
-                                    val ok = withContext(Dispatchers.IO) { created.isLoggedIn() }
+                                    val ok = withContext(Dispatchers.IO) {
+                                        // Try login once
+                                        created.refreshCookies()
+                                        created.isLoggedIn()
+                                    }
                                     if (ok) {
                                         PlatformStorage.savePlatforms(context, listOf(created))
 
@@ -249,6 +258,7 @@ fun LoginPage(
                             }
                         },
                         buttonText = "Add",
+
                     )
                 }
             }
@@ -268,6 +278,7 @@ fun DynamicLoginFields(
     onCancel: (() -> Unit)? = null
 ) {
     var mutableFields by remember { mutableStateOf(fields) }
+    val autofillManager = LocalAutofillManager.current
 
     Column(
         modifier = Modifier
@@ -325,7 +336,8 @@ fun DynamicLoginFields(
                         },
                     keyboardOptions = KeyboardOptions.Default.copy(
                         imeAction = if (field.type == Type.Password) ImeAction.Done else ImeAction.Next
-                    )
+                    ),
+
                 )
             }
         }
@@ -352,7 +364,10 @@ fun DynamicLoginFields(
                 }
 
                 Button(
-                    onClick = onSubmit,
+                    onClick =  {
+                        autofillManager?.commit()
+                        onSubmit()
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .height(56.dp),

@@ -16,6 +16,7 @@ import androidx.core.content.edit
 import com.feldman.scholix.R
 import com.feldman.scholix.api.platforms.DemoPlatform
 import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.api.platforms.ScholixPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
 
 data class PlatformInfo(
@@ -28,7 +29,8 @@ val platformOptions = listOf(
     PlatformInfo("Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
     PlatformInfo("Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
     PlatformInfo("Open University", R.drawable.ic_open_au) { OpenAUPlatform() as Platform },
-    PlatformInfo("Demo", R.drawable.ic_account_circle) { DemoPlatform() as Platform }
+    PlatformInfo("Demo", R.drawable.ic_account_circle) { DemoPlatform() as Platform },
+    PlatformInfo("Scholix", R.drawable.ic_account_circle) { ScholixPlatform() as Platform }
 )
 
 
@@ -74,6 +76,8 @@ object PlatformStorage {
                 try {
                     val className = obj.getString("class")
                     val cls = Class.forName(className)
+                    Log.e(TAG, "DESERIALIZING: raw class=$className, json=$obj")
+
                     val method = cls.getMethod("fromJson", JSONObject::class.java)
                     val p = method.invoke(null, obj) as Platform
                     platforms.add(p)
@@ -128,6 +132,22 @@ object PlatformStorage {
         }
 
         try {
+            // Try OpenAU platform - use username as student ID as well
+            val openAUFields = LoginFields()
+                .addField("username", Type.Username, username)
+                .addField("password", Type.Password, password)
+                .addField("id", Type.Id, username) // Use username as student ID
+
+            val openAU = OpenAUPlatform(openAUFields)
+            if (openAU.loggedIn) {
+                platforms.add(openAU)
+                newPlatforms.add(openAU)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "OpenAU login failed", e)
+        }
+
+        try {
             val demo = DemoPlatform()
             if (demo.loggedIn) {
                 platforms.add(demo)
@@ -142,7 +162,7 @@ object PlatformStorage {
     }
 
     fun checkPlatform(context: Context, username: String, password: String): Boolean {
-        val executor = Executors.newFixedThreadPool(3)
+        val executor = Executors.newFixedThreadPool(4) // Increased to 4 for OpenAU
         val webtopFields = LoginFields()
             .addField("username", Type.Username, username)
             .addField("password", Type.Password, password)
@@ -151,9 +171,15 @@ object PlatformStorage {
             .addField("id", Type.Id, username)
             .addField("password", Type.Password, password)
 
+        val openAUFields = LoginFields()
+            .addField("username", Type.Username, username)
+            .addField("password", Type.Password, password)
+            .addField("id", Type.Id, username) // Use username as student ID
+
         val tasks = listOf(
             Callable { BarIlanPlatform(barIlanFields).loggedIn },
             Callable { WebtopPlatform(webtopFields).loggedIn },
+            Callable { OpenAUPlatform(openAUFields).loggedIn },
             Callable { DemoPlatform().loggedIn }
         )
 

@@ -9,6 +9,7 @@ import com.feldman.scholix.api.LoginFields
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.UnsafeOkHttpClient
 import com.feldman.scholix.api.Type
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -96,6 +97,27 @@ class WebtopPlatform() : Platform {
                     .put("semesterPicker", true)
                     .put("year", Year.now().value)
             )
+            
+            // Register FCM token after successful login
+            try {
+                FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                    if (!task.isSuccessful) {
+                        Log.w("WebtopPlatform", "Fetching FCM registration token failed", task.exception)
+                        return@addOnCompleteListener
+                    }
+                    
+                    // Get new FCM registration token
+                    val token = task.result
+                    Log.d("WebtopPlatform", "Got FCM token after login: ${token?.take(30)}...")
+                    
+                    if (token != null) {
+                        val success = registerFCMToken(token)
+                        Log.d("WebtopPlatform", "FCM token registration after login: $success")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("WebtopPlatform", "Error registering FCM token after login", e)
+            }
         } else {
             Log.e("WebtopPlatform", "Missing username or password in LoginFields")
         }
@@ -914,6 +936,65 @@ class WebtopPlatform() : Platform {
 
 
     override fun getLoginFields(): LoginFields = loginFields
+
+    /**
+     * Register FCM token with the webtop server for push notifications
+     */
+    fun registerFCMToken(fcmToken: String): Boolean {
+        if (!isLoggedIn() || _cookies.isNullOrEmpty()) {
+            Log.w("WebtopPlatform", "Cannot register FCM token - not logged in or no cookies")
+            return false
+        }
+
+        return try {
+            val payload = JSONObject()
+                .put("param1", "android")
+                .put("param2", fcmToken)
+
+            val request = Request.Builder()
+                .url("https://webtopserver.smartschool.co.il/server/api/user/setRegistrationId")
+                .addHeader("Cookie", _cookies ?: "")
+                .addHeader("User-Agent", "Android-WebView/1.0")
+                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            Log.d("WebtopPlatform", "Registering FCM token: ${fcmToken.take(30)}...")
+
+            _client.newCall(request).execute().use { response ->
+                val body = response.body.string()
+                
+                Log.d("WebtopPlatform", "FCM Registration Status: ${response.code}")
+                Log.d("WebtopPlatform", "FCM Response: $body")
+
+                if (!response.isSuccessful) {
+                    Log.e("WebtopPlatform", "FCM registration failed: HTTP ${response.code}")
+                    return false
+                }
+
+                if (body.isNotEmpty()) {
+                    try {
+                        val jsonResponse = JSONObject(body)
+                        val success = jsonResponse.optBoolean("status", false)
+                        if (success) {
+                            Log.i("WebtopPlatform", "✅ FCM token registered successfully!")
+                            return true
+                        } else {
+                            Log.w("WebtopPlatform", "❌ FCM token registration failed - server returned false")
+                            return false
+                        }
+                    } catch (e: JSONException) {
+                        Log.w("WebtopPlatform", "⚠️ Could not parse FCM response as JSON, assuming success")
+                        return response.isSuccessful
+                    }
+                }
+
+                return response.isSuccessful
+            }
+        } catch (e: Exception) {
+            Log.e("WebtopPlatform", "❌ FCM registration error", e)
+            false
+        }
+    }
 
 
     companion object : Platform.Companion {

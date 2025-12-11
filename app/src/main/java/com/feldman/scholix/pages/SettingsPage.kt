@@ -203,16 +203,7 @@ fun PlatformsPage(
                         }
                     },
                     onEdit = { editIndex = it },
-                    onDelete = { confirmDeleteIndex = it },
-                    onMakePrimary = { index ->
-                        scope.launch(Dispatchers.IO) {
-                            val mutable = currentPlatforms.toMutableList()
-                            val item = mutable.removeAt(index)
-                            mutable.add(0, item)
-                            PlatformStorage.savePlatforms(context, mutable)
-                            withContext(Dispatchers.Main) { refreshKey++ }
-                        }
-                    }
+                    onDelete = { confirmDeleteIndex = it }
                 )
             }
         }
@@ -466,7 +457,7 @@ fun PlatformsPage(
                                         }
 
                                         withContext(Dispatchers.Main) {
-                                            refreshKey++   // force recomposition + reload
+                                            refreshKey++
                                             showAddSheet = false
                                             Log.d("AddPlatform", "Platform added successfully")
                                         }
@@ -488,7 +479,8 @@ fun PlatformsPage(
             }
         }
     }
-// --- Delete confirmation ---
+
+    // --- Delete confirmation ---
     if (confirmDeleteIndex != null) {
         val idx = confirmDeleteIndex!!
         val platform = PlatformStorage.loadPlatforms(context).getOrNull(idx)
@@ -537,7 +529,6 @@ fun ReorderablePlatformsList(
     onReorder: (List<Platform>) -> Unit,
     onEdit: (Int) -> Unit,
     onDelete: (Int) -> Unit,
-    onMakePrimary: (Int) -> Unit
 ) {
     val lazyListState = rememberLazyListState()
     val reorderState = rememberReorderableLazyListState(
@@ -588,13 +579,13 @@ fun ReorderablePlatformsList(
                     RoundedCornerShape(4.dp)
             }
 
-            ReorderableItem(reorderState, key = platform.hashCode()) { isDragging ->
+            ReorderableItem(reorderState, key = platform.hashCode()) { _ ->
                 Card(
                     shape = shape,
                     modifier = Modifier
                         .fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 ) {
                     Row(

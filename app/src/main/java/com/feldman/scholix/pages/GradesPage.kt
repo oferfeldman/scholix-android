@@ -88,7 +88,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     var courses by remember { mutableStateOf(preloadedCourses) }
     var selectedTab by remember { mutableIntStateOf(0) }
     var grades by remember { mutableStateOf(listOf<JSONObject>()) }
-    var average by remember { mutableIntStateOf(0) }
+    var average by remember { mutableFloatStateOf(0f) }
     var isRefreshing by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var requestId by remember { mutableIntStateOf(0) }
@@ -105,12 +105,12 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
         course: JSONObject,
         year: Int = initialYear,
         semester: String = initialSemester,
-        onResult: (List<JSONObject>, Int, String?) -> Unit
+        onResult: (List<JSONObject>, Float, String?) -> Unit
     ) {
         val currentId = ++requestId
         isLoading = true
         grades = emptyList()
-        average = 0
+        average = 0f
 
         scope.launch {
             withContext(Dispatchers.IO) {
@@ -142,7 +142,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                 withContext(Dispatchers.Main) {
                     if (currentId == requestId) {
                         course.put("grades", gradesArray)
-                        onResult(list, avg, errorMessage)
+                        onResult(list, avg.toFloat(), errorMessage)
 
                         finalGrade = finalGradeObj
 
@@ -376,7 +376,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                         )
 
                                         Text(
-                                            text = average.toString(),
+                                            text = String.format("%.1f", average),
                                             style = MaterialTheme.typography.bodyLarge.copy(
                                                 fontWeight = FontWeight.Black,
                                                 fontSize = 60.sp,
@@ -536,11 +536,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
 
 }
 
-
-fun processGrades(gradesArray: JSONArray): Triple<List<JSONObject>, Int, JSONObject?> {
+fun processGrades(gradesArray: JSONArray): Triple<List<JSONObject>, Float, JSONObject?> {
     val list = mutableListOf<JSONObject>()
     var finalGrade: JSONObject? = null
-    var sum = 0
+    var sum = 0f
     var count = 0
 
     for (i in 0 until gradesArray.length()) {
@@ -552,14 +551,15 @@ fun processGrades(gradesArray: JSONArray): Triple<List<JSONObject>, Int, JSONObj
             continue
         }
 
-        try {
-            sum += grade.getInt("grade")
+        val g = grade.optDouble("grade", Double.NaN)
+        if (!g.isNaN()) {
+            sum += g.toFloat()
             count++
-        } catch (_: Exception) {}
+        }
 
         list.add(grade)
     }
 
-    val avg = if (count > 0) sum / count else 0
+    val avg = if (count > 0) sum / count else 0f
     return Triple(list, avg, finalGrade)
 }

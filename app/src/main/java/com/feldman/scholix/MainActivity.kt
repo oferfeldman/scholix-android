@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.room.Room
@@ -53,6 +54,7 @@ import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.pages.LoginPage
 import com.feldman.scholix.services.GradeMonitorWorker
+import com.feldman.scholix.services.FCMTokenManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -94,16 +96,36 @@ class MainActivity : ComponentActivity() {
             if (isGranted) {
                 Log.i("MainActivity", "✅ Notification permission granted — scheduling worker")
                 GradeMonitorWorker.schedule(this)
+                // Register FCM token when permission is granted
+                FCMTokenManager.registerTokenWithAllPlatforms(this)
             } else {
                 Log.w("MainActivity", "❌ Notification permission denied by user")
             }
         }
 
 
+    suspend fun isGoogleReachable(): Boolean {
+        return try {
+            val client = okhttp3.OkHttpClient()
+            val request = okhttp3.Request.Builder()
+                .url("https://www.google.com")
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     @OptIn(ExperimentalMaterial3ExpressiveApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        lifecycleScope.launch(Dispatchers.IO) {
+            val reachable = isGoogleReachable()
+            Log.i("MainActivity", "Google reachable: $reachable")
+        }
+
         val db = Room.databaseBuilder(
             applicationContext,
             LockerDatabase::class.java,
@@ -137,7 +159,11 @@ class MainActivity : ComponentActivity() {
                             isLoggedIn = valid
                             sleep(120.toLong())
                             isLoading = false
-
+                            
+                            // Register FCM token with all platforms after login
+                            if (valid) {
+                                FCMTokenManager.registerTokenWithAllPlatforms(ctx)
+                            }
                         }
                     }
                 }
@@ -216,6 +242,8 @@ class MainActivity : ComponentActivity() {
                                 isLoading = true
                                 reloadPlatforms()
                                 isLoggedIn = true
+                                // Register FCM token after successful login
+                                FCMTokenManager.registerTokenWithAllPlatforms(context)
                             },
                             modifier = Modifier.fillMaxSize()
                         )
@@ -235,6 +263,8 @@ class MainActivity : ComponentActivity() {
                                 reloadPlatforms()
                                 reloadPreloads(snackbarHostState)
                                 isLoggedIn = true
+                                // Register FCM token after successful login
+                                FCMTokenManager.registerTokenWithAllPlatforms(context)
                             }
                         )
                     }
@@ -260,6 +290,8 @@ class MainActivity : ComponentActivity() {
                 granted -> {
                     Log.i("MainActivity", "Permission already granted — scheduling worker")
                     GradeMonitorWorker.schedule(this)
+                    // Also register FCM token when permission is granted
+                    FCMTokenManager.registerTokenWithAllPlatforms(this)
                 }
                 shouldShowRequestPermissionRationale(permission) -> {
                     Log.w("MainActivity", "User previously denied permission — showing rationale and re-requesting")
@@ -274,7 +306,17 @@ class MainActivity : ComponentActivity() {
             // On Android 12 and below, permission not required
             Log.i("MainActivity", "Pre-Android 13 device — no permission required, scheduling worker directly")
             GradeMonitorWorker.schedule(this)
+            // Also register FCM token
+            FCMTokenManager.registerTokenWithAllPlatforms(this)
         }
+    }
+    
+    /**
+     * Test method for FCM token registration - can be called for debugging
+     */
+    private fun testFCMRegistration() {
+        Log.d("MainActivity", "Testing FCM registration...")
+        FCMTokenManager.registerTokenWithAllPlatforms(this)
     }
 
 

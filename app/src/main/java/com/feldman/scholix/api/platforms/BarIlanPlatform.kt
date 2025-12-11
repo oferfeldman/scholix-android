@@ -372,12 +372,12 @@ class BarIlanPlatform() : Platform {
         override fun fromJson(obj: JSONObject): Platform {
             val p = BarIlanPlatform()
             p.id = obj.optString("id", "").ifEmpty { generateId() }
-            p.displayName = obj.optString("name", p.displayName ?: "name")
-            p.token = obj.optString("token", p.token ?: "")
-            p.loggedIn = obj.optBoolean("loggedIn", p.loggedIn)
-            p._studentId = obj.optString("studentId", p._studentId ?: "001")
-            p._password = obj.optString("password", p._password ?: "***REMOVED***")
-            p._username = obj.optString("studentId", p._username ?: "username")
+            p.displayName = obj.optString("name", p.displayName)
+            p.token = obj.optString("token")
+            p.loggedIn = obj.optBoolean("loggedIn", false)
+            p._studentId = obj.optString("studentId")
+            p._password = obj.optString("password")
+            p._username = obj.optString("studentId")
             p.grades = obj.optJSONArray("grades")
             p.platformDisplayName = obj.optString("platformDisplayName")
 
@@ -387,18 +387,11 @@ class BarIlanPlatform() : Platform {
                     p.courses.add(arr.getJSONObject(i))
                 }
             }
+
             return p
         }
-        override fun checkCredentials(loginFields: LoginFields): Boolean {
-            return try {
-                val p = BarIlanPlatform(loginFields)
-                p.isLoggedIn()
-            } catch (e: Exception) {
-                Log.e("BarIlanPlatform", "checkCredentials failed", e)
-                false
-            }
-        }
     }
+
 
     @Throws(JSONException::class, IOException::class)
     override fun getMessages(page: Int): JSONArray {
