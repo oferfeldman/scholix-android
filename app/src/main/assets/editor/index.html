@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="he"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src https: data: blob:; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="suneditor.min.css"><link rel="stylesheet" href="editor.css">
+</head><body>
+<div class="tools" aria-label="Extra formatting tools">
+  <button id="format" aria-expanded="false">Formatting ▾</button>
+  <button id="image">Image</button><button id="more" aria-expanded="false" aria-controls="extra-tools">More ▾</button>
+</div>
+<div id="extra-tools" class="tools" hidden>
+  <button id="ltr">LTR</button><button id="rtl">RTL</button>
+  <button id="symbols">Ω Symbols</button><button id="emoji">☺ Emoji</button><button id="find">Find / replace</button>
+</div>
+<div id="editor-shell" class="compact"><textarea id="editor" aria-label="Message body"></textarea></div>
+<dialog id="characters"><h3 id="characters-title"></h3><div id="characters-list"></div><button class="close">Close</button></dialog>
+<dialog id="search"><h3>Find and replace</h3><label>Find<input id="query" type="text"></label><label>Replace with<input id="replacement" type="text"></label><label class="inline"><input id="match-case" type="checkbox">Match case</label><p id="search-status" role="status"></p><button id="find-next">Find next</button><button id="replace">Replace</button><button id="replace-all">Replace all</button><button class="close">Close</button></dialog>
+<script src="suneditor.min.js"></script><script src="suneditor-he.js"></script><script src="katex.min.js"></script><script src="editor.js"></script>
+</body></html>

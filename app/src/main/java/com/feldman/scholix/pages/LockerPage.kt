@@ -492,7 +492,7 @@ fun LockerApp(
                             LazyColumn(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 8.dp),
+                                    .padding(horizontal = 16.dp),
                             ) {
                                 val filteredItems = items.filter { it.platformId == platform.id }
 
@@ -655,8 +655,7 @@ fun ItemList(
                             .height(100.dp)
                             .sharedBounds(
                                 rememberSharedContentState(key = item.id),
-                                animatedVisibilityScope = this,
-                                resizeMode = SharedTransitionScope.ResizeMode.ScaleToBounds()
+                                animatedVisibilityScope = this
                             )
                             .combinedClickable(
                                 onClick = { viewModel.moveItem(item) },

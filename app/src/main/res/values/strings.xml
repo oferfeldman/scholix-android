@@ -8,6 +8,14 @@
     <string name="thursday">Thur</string>
     <string name="friday">Fri</string>
     <string name="noSchedule">No schedule for today</string>
+    <string name="noScheduleForDay">No schedule for %1$s</string>
+    <string name="room">Room</string>
+    <string name="sunday_full">Sunday</string>
+    <string name="monday_full">Monday</string>
+    <string name="tuesday_full">Tuesday</string>
+    <string name="wednesday_full">Wednesday</string>
+    <string name="thursday_full">Thursday</string>
+    <string name="friday_full">Friday</string>
     <string name="original">Original</string>
     <string name="updated">Updated</string>
     <string name="course">Course</string>
@@ -18,4 +26,16 @@
     <string name="year">Year</string>
     <string name="grade">Grade</string>
     <string name="classroom">Classroom</string>
+    <string name="sort_by">Sort By</string>
+    <string name="no_courses_available">No courses available</string>
+    <string name="free_period">חלון</string>
+    <string name="parallel_lessons">%1$d parallel lessons</string>
+    <string name="customize_navigation">Customize navigation</string>
+    <string name="crash_logs">Crash logs</string>
+    <string name="crash_logs_description">View recorded crash reports and diagnostics</string>
+    <string name="no_crashes">No crashes recorded</string>
+    <string name="clear_logs">Clear logs</string>
+    <string name="copy_log">Copy report</string>
+    <string name="crash_detected">Scholix stopped unexpectedly</string>
+    <string name="crash_tap_details">Tap to view crash details</string>
 </resources>

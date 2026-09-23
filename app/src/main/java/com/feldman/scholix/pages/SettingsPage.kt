@@ -1,59 +1,101 @@
 package com.feldman.scholix.pages
+
+import androidx.compose.ui.res.stringResource
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import com.feldman.scholix.R
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
-import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavController
+import androidx.compose.ui.unit.lerp
+import com.feldman.scholix.AppDest
 import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.api.LoginFields
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformInfo
 import com.feldman.scholix.api.PlatformStorage
+import com.feldman.scholix.api.ProviderCourseOverrides
 import com.feldman.scholix.api.applyLoginFields
 import com.feldman.scholix.api.platformOptions
-import com.feldman.scholix.Dest
-import com.feldman.scholix.TopBarSpacing
-import com.feldman.scholix.ui.components.ActionRow
-import com.feldman.scholix.ui.components.FloatingTopAppBar
-import com.feldman.scholix.ui.components.SegmentedOption
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionCard
+import com.feldman.motion.MotionScaffold
+import com.feldman.motion.MotionSymbols
+import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionButtonState
+import com.feldman.motion.isDarkTheme
+import com.feldman.motion.motionBottomSheetAnchor
+import com.feldman.motion.rememberSymbolPainter
+import android.app.Activity
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.feldman.scholix.api.platforms.StudentsPortalPlatform
+import com.feldman.scholix.ui.HiddenMoeLogin
+import com.feldman.scholix.ui.HiddenWebtopMoeLogin
+import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.ui.components.ProviderPickerList
+import com.feldman.scholix.ui.components.AccountIconColor
+import com.feldman.scholix.ui.components.WebtopLoginMethodPicker
+import com.feldman.scholix.ui.components.SettingsCategoryColor
+import com.feldman.scholix.ui.components.SettingsTopBar
+import com.feldman.scholix.ui.components.SubjectIcon
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.rememberReorderableLazyListState
+import org.json.JSONObject
+import java.util.Locale
 import kotlin.reflect.full.companionObjectInstance
+
+private fun platformAccountColorSeed(platform: Platform): String =
+    "${platform.javaClass.name}|${platform.getUsername().trim().lowercase(Locale.ROOT)}"
+
+private fun assignPlatformAccountColors(platforms: List<Platform>): Map<String, AccountIconColor> {
+    val palette = AccountIconColor.entries
+    val usedIndices = mutableSetOf<Int>()
+
+    return platforms
+        .sortedWith(compareBy({ platformAccountColorSeed(it) }, { it.id }))
+        .associate { platform ->
+            val preferredIndex = Math.floorMod(platformAccountColorSeed(platform).hashCode(), palette.size)
+            var colorIndex = preferredIndex
+            if (usedIndices.size < palette.size) {
+                while (colorIndex in usedIndices) {
+                    colorIndex = (colorIndex + 1) % palette.size
+                }
+                usedIndices += colorIndex
+            }
+            platform.id to palette[colorIndex]
+        }
+}
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -61,425 +103,153 @@ fun PlatformsPage(
     modifier: Modifier = Modifier,
     onPlatformsChanged: () -> Unit,
     onLogout: () -> Unit,
-    navController: NavController
+    onAddPlatform: () -> Unit,
+    onEditProvider: (String) -> Unit,
+    platforms: List<Platform>,
+    onBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var refreshKey by remember { mutableIntStateOf(0) }
-    val currentPlatforms by remember(refreshKey) { mutableStateOf(PlatformStorage.loadPlatforms(context)) }
+    var currentPlatforms by remember(platforms) {
+        mutableStateOf(platforms)
+    }
+    val reorderSaveMutex = remember { Mutex() }
 
-    var reorderMode by rememberSaveable { mutableStateOf(false) }
-    var showAddSheet by rememberSaveable { mutableStateOf(false) }
-    var editIndex by remember { mutableStateOf<Int?>(null) }
     var confirmDeleteIndex by remember { mutableStateOf<Int?>(null) }
 
-    val backdrop = rememberLayerBackdrop()
+    val useDark = isDarkTheme()
+    val accountColors = remember(currentPlatforms) {
+        assignPlatformAccountColors(currentPlatforms)
+    }
 
-    Scaffold(
+    MotionScaffold(
+        scaffoldModifier = modifier.fillMaxSize(),
+        topBar = {
+            SettingsTopBar(
+                title = "Providers",
+                onBack = onBack,
+                chromeColor = SettingsCategoryColor.PLATFORMS.container(useDark)
+            )
+        },
         floatingActionButton = {
             var fabMenuExpanded by rememberSaveable { mutableStateOf(false) }
             BackHandler(fabMenuExpanded) { fabMenuExpanded = false }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset(y = 32.dp- BottomBarSpacing()),
-                contentAlignment = Alignment.BottomEnd
-            ) {
-                FloatingActionButtonMenu(
-                    expanded = fabMenuExpanded,
-                    modifier = Modifier.align(Alignment.BottomEnd),
-                    button = {
-                        ToggleFloatingActionButton(
-                            checked = fabMenuExpanded,
-                            onCheckedChange = { fabMenuExpanded = !fabMenuExpanded },
-                            modifier = Modifier.animateFloatingActionButton(
-                                visible = true,
-                                alignment = Alignment.BottomEnd
-                            )
-                        ) {
-                            val imageVector by remember {
-                                derivedStateOf {
-                                    if (checkedProgress > 0.5f) Icons.Filled.Close else Icons.Filled.Add
-                                }
-                            }
-                            Icon(
-                                painter = rememberVectorPainter(imageVector),
-                                contentDescription = null,
-                                modifier = Modifier.animateIcon({ checkedProgress })
-                            )
+            FloatingActionButtonMenu(
+                expanded = fabMenuExpanded,
+                button = {
+                    val largeFabSize =
+                        ToggleFloatingActionButtonDefaults.containerSizeLarge()(0f)
+                    val largeFabCornerRadius =
+                        ToggleFloatingActionButtonDefaults.containerCornerRadiusLarge()(0f)
+                    val largeIconSize =
+                        ToggleFloatingActionButtonDefaults.iconSizeLarge()(0f)
+                    val fabContainerColor =
+                        ToggleFloatingActionButtonDefaults.containerColor()(0f)
+                    val fabIconColor = ToggleFloatingActionButtonDefaults.iconColor()(0f)
+                    ToggleFloatingActionButton(
+                        checked = fabMenuExpanded,
+                        onCheckedChange = { fabMenuExpanded = !fabMenuExpanded },
+                        contentAlignment = Alignment.BottomEnd,
+                        modifier = Modifier.animateFloatingActionButton(
+                            visible = true,
+                            alignment = Alignment.BottomEnd
+                        ),
+                        containerSize = { largeFabSize },
+                        containerColor = { fabContainerColor },
+                        containerCornerRadius = { progress ->
+                            lerp(largeFabCornerRadius, largeFabSize / 2, progress)
                         }
-                    }
-                ) {
-                    // 🟦 Add Platform
-                    FloatingActionButtonMenuItem(
-                        onClick = {
-                            fabMenuExpanded = false
-                            showAddSheet = true
-                        },
-                        icon = { Icon(painterResource(R.drawable.ic_add), contentDescription = "Add Platform") },
-                        text = { Text("Add Platform") }
-                    )
-
-                    // 🟨 Toggle Reorder Mode
-                    FloatingActionButtonMenuItem(
-                        onClick = {
-                            fabMenuExpanded = false
-                            reorderMode = !reorderMode
-                            Log.d("FAB", "Reorder mode: $reorderMode")
-                        },
-                        icon = {
-                            Icon(
-                                painterResource(R.drawable.ic_drag_indicator),
-                                contentDescription = "Reorder Platforms"
-                            )
-                        },
-                        text = {
-                            Text(if (reorderMode) "Done Reordering" else "Reorder Platforms")
-                        }
-                    )
-
-                    // 🟥 Logout
-                    FloatingActionButtonMenuItem(
-                        onClick = {
-                            fabMenuExpanded = false
-                            onLogout()
-                        },
-                        icon = {
-                            Icon(
-                                painterResource(R.drawable.ic_logout),
-                                contentDescription = "Logout"
-                            )
-                        },
-                        text = { Text("Logout") },
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                }
-            }
-        },
-        modifier = modifier
-            .fillMaxSize()
-            .navigationBarsPadding()
-    ) { innerPadding ->
-        FloatingTopAppBar(
-            title = {
-                Text(
-                    text = "Platforms",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-            },
-            navigationIcon = {
-                IconButton(onClick = { navController.navigateUp() }) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onBackground
-                    )
-                }
-            }
-        )
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 8.dp)
-        ) {
-            if (currentPlatforms.isEmpty()) {
-                Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-                    Text("No platforms yet")
-                }
-            } else {
-                // 🟩 Pass reorderMode into the list
-                ReorderablePlatformsList(
-                    platforms = currentPlatforms,
-                    reorderEnabled = reorderMode,
-                    onReorder = { newList ->
-                        refreshKey++
-                        scope.launch(Dispatchers.IO) {
-                            PlatformStorage.savePlatforms(context, newList)
-                        }
-                    },
-                    onEdit = { editIndex = it },
-                    onDelete = { confirmDeleteIndex = it }
-                )
-            }
-        }
-    }
-
-
-    // --- Edit Modal ---
-    if (editIndex != null) {
-        val idx = editIndex!!
-        val current = currentPlatforms.getOrNull(idx)
-        val context = LocalContext.current
-        val scope = rememberCoroutineScope()
-        val backdrop = rememberLayerBackdrop()
-
-        if (current != null) {
-            val infoByClassName = remember {
-                platformOptions.associateBy { it.factory()::class.java.name }
-            }
-            val selectedPlatformInfo = infoByClassName[current.javaClass.name]
-
-            if (selectedPlatformInfo != null) {
-                var loginFields by remember {
-                    mutableStateOf(selectedPlatformInfo.factory().getLoginFields().apply {
-                        loadFrom(current)
-                    })
-                }
-                var busy by remember { mutableStateOf(false) }
-                var errorMessage by remember { mutableStateOf<String?>(null) }
-
-                ModalBottomSheet(
-                    onDismissRequest = { editIndex = null },
-                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
                     ) {
-                        Text(
-                            text = "Edit ${selectedPlatformInfo.name} Account",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        var name by remember { mutableStateOf(current.platformDisplayName.ifBlank { selectedPlatformInfo.name }) }
-
-                        OutlinedTextField(
-                            value = name,
-                            onValueChange = { name = it },
-                            label = { Text("Account name") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        DynamicLoginFields(
-                            fields = loginFields,
-                            onFieldsChanged = { loginFields = it },
-                            isLoading = busy,
-                            errorMessage = errorMessage,
-                            onSubmit = {
-                                busy = true
-                                errorMessage = null
-
-                                scope.launch {
-                                    try {
-                                        busy = true
-                                        errorMessage = null
-
-                                        val platformClass = current.javaClass
-                                        val companion = platformClass.kotlin.companionObjectInstance
-
-                                        val isCorrect = withContext(Dispatchers.IO) {
-                                            if (companion is Platform.Companion) {
-                                                // call static credential checker
-                                                companion.checkCredentials(loginFields)
-                                            } else {
-                                                Log.w("EditPlatform", "No credential checker for ${platformClass.simpleName}")
-                                                false
-                                            }
-                                        }
-
-                                        if (isCorrect) {
-                                            withContext(Dispatchers.IO) {
-                                                current.applyLoginFields(loginFields)
-                                                PlatformStorage.updatePlatform(context, idx, current)
-                                            }
-
-                                            withContext(Dispatchers.Main) {
-                                                busy = false
-                                                editIndex = null
-                                                refreshKey++
-                                                Log.d("EditPlatform", "Credentials verified and updated for ${platformClass.simpleName}")
-                                            }
-
-                                        } else {
-                                            withContext(Dispatchers.Main) {
-                                                busy = false
-                                                errorMessage = "Invalid username or password"
-                                                Log.w("EditPlatform", "Credential check failed for ${platformClass.simpleName}")
-                                            }
-                                        }
-                                    } catch (e: Exception) {
-                                        busy = false
-                                        errorMessage = "Error checking credentials: ${e.localizedMessage}"
-                                        Log.e("EditPlatform", "Error updating credentials", e)
-                                    }
-                                }
-
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = if (fabMenuExpanded) {
+                                "Close provider actions"
+                            } else {
+                                "Open provider actions"
                             },
-                            onCancel = { editIndex = null },
-                            buttonText = "Update"
+                            tint = fabIconColor,
+                            modifier = Modifier
+                                .size(largeIconSize)
+                                .graphicsLayer { rotationZ = checkedProgress * 45f }
                         )
                     }
                 }
+            ) {
+                FloatingActionButtonMenuItem(
+                    modifier = Modifier.motionBottomSheetAnchor(),
+                    onClick = {
+                        fabMenuExpanded = false
+                        onAddPlatform()
+                    },
+                    icon = { Icon(painterResource(R.drawable.ic_add), contentDescription = "Add provider") },
+                    text = { Text("Add provider") },
+                    containerColor = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary
+                )
+                FloatingActionButtonMenuItem(
+                    onClick = {
+                        fabMenuExpanded = false
+                        onLogout()
+                    },
+                    icon = {
+                        Icon(painterResource(R.drawable.ic_logout), contentDescription = "Log out")
+                    },
+                    text = { Text("Log out") },
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
             }
         }
-    }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    if (showAddSheet) {
-        var selectedPlatform by remember { mutableStateOf<PlatformInfo?>(null) }
-        var loginFields by remember { mutableStateOf<LoginFields?>(null) }
-        var isLoading by remember { mutableStateOf(false) }
-        var errorMessage by remember { mutableStateOf<String?>(null) }
-
-        ModalBottomSheet(
-            onDismissRequest = { showAddSheet = false },
-            sheetState = sheetState
-        ) {
-            if (selectedPlatform == null) {
-                // 🟦 Step 1: platform selection
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        "Choose a platform",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.height(12.dp))
-
-                    ActionRow {
-                        addVerticalActionList(
-                            options = platformOptions.map { option ->
-                                SegmentedOption(
-                                    option,
-                                    text = option.name,
-                                    iconRes = option.iconRes
-                                )
-                            },
-                            onClick = { option ->
-                                selectedPlatform = option
-                                loginFields = option.factory().getLoginFields()
-                                errorMessage = null
-                            },
-                            isGlass = false,
-                            backdrop = backdrop
-                        )
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = { showAddSheet = false }) {
-                        Text("Cancel")
-                    }
+    ) {
+        if (currentPlatforms.isEmpty()) {
+            item {
+                Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                    Text("No providers yet")
                 }
-            } else {
-                // 🟩 Step 2: login fields for the chosen platform
-                val fields = loginFields ?: selectedPlatform!!.factory().getLoginFields()
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        IconButton(
-                            onClick = {
-                                selectedPlatform = null
-                                errorMessage = null
-                            },
-                            modifier = Modifier.align(Alignment.CenterStart)
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+        } else {
+            reorderableSection(
+                items = currentPlatforms,
+                key = { platform -> platform.id },
+                onReorder = { fromIndex, toIndex ->
+                    if (
+                        fromIndex in currentPlatforms.indices &&
+                        toIndex in currentPlatforms.indices &&
+                        fromIndex != toIndex
+                    ) {
+                        val reordered = currentPlatforms.toMutableList().apply {
+                            add(toIndex, removeAt(fromIndex))
                         }
-                        Text(
-                            text = selectedPlatform!!.name,
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
-                    }
+                        currentPlatforms = reordered
 
-                    Spacer(Modifier.height(16.dp))
-
-                    DynamicLoginFields(
-                        fields = fields,
-                        onFieldsChanged = { loginFields = it },
-                        isLoading = isLoading,
-                        errorMessage = errorMessage,
-                        onSubmit = {
-                            val missing = fields.getFields().any { it.value.isNullOrBlank() }
-                            if (missing) {
-                                errorMessage = "Please fill in all fields"
-                                return@DynamicLoginFields
-                            }
-
-                            isLoading = true
-                            errorMessage = null
-
-                            scope.launch {
-                                try {
-                                    val created = withContext(Dispatchers.IO) {
-                                        val info = selectedPlatform!!
-                                        val platformClass = info.factory()::class.java
-
-                                        // Try to find a constructor that accepts LoginFields
-                                        val constructor = platformClass.constructors.find { ctor ->
-                                            ctor.parameterTypes.size == 1 && ctor.parameterTypes[0] == LoginFields::class.java
-                                        }
-
-                                        val instance = if (constructor != null) {
-                                            // Platform supports direct LoginFields constructor — will auto-login
-                                            constructor.newInstance(fields) as Platform
-                                        } else {
-                                            // Fallback: create blank, then apply fields manually
-                                            info.factory().apply {
-                                                applyLoginFields(fields)
-                                            }
-                                        }
-
-                                        instance
-                                    }
-
-                                    val ok = withContext(Dispatchers.IO) {
-                                        try {
-                                            created.isLoggedIn()
-                                        } catch (e: Exception) {
-                                            Log.e("AddPlatform", "Login check failed", e)
-                                            false
-                                        }
-                                    }
-
-
-                                    if (ok) {
-                                        withContext(Dispatchers.IO) {
-                                            val list = PlatformStorage.loadPlatforms(context).toMutableList()
-                                            list.add(created)
-                                            PlatformStorage.savePlatforms(context, list)
-                                        }
-
-                                        withContext(Dispatchers.Main) {
-                                            refreshKey++
-                                            showAddSheet = false
-                                            Log.d("AddPlatform", "Platform added successfully")
-                                        }
-
-                                    } else {
-                                        errorMessage = "Invalid credentials"
-                                    }
-                                } catch (e: Exception) {
-                                    errorMessage = "Error: ${e.localizedMessage}"
-                                } finally {
-                                    isLoading = false
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                reorderSaveMutex.withLock {
+                                    PlatformStorage.savePlatforms(context, reordered)
                                 }
                             }
-                        },
-                        onCancel = { showAddSheet = false },
-                        buttonText = "Add"
-                    )
-                }
+                            onPlatformsChanged()
+                        }
+                    }
+                },
+                title = "Providers"
+            ) { platform, _ ->
+                val index = currentPlatforms.indexOfFirst { it.id == platform.id }
+                PlatformSettingsItem(
+                    platform = platform,
+                    accountColor = accountColors.getValue(platform.id),
+                    useDark = useDark,
+                    onEdit = { onEditProvider(platform.id) },
+                    onDelete = { if (index >= 0) confirmDeleteIndex = index }
+                )
             }
         }
-    }
 
+        item {
+            Spacer(Modifier.height(120.dp))
+        }
+    }
     // --- Delete confirmation ---
     if (confirmDeleteIndex != null) {
         val idx = confirmDeleteIndex!!
@@ -488,8 +258,8 @@ fun PlatformsPage(
         if (platform != null) {
             AlertDialog(
                 onDismissRequest = { confirmDeleteIndex = null },
-                title = { Text("Remove Platform") },
-                text = { Text("Are you sure you want to delete ${platform.javaClass.simpleName}?") },
+                title = { Text("Remove provider") },
+                text = { Text("Are you sure you want to remove this provider?") },
                 confirmButton = {
                     TextButton(
                         onClick = {
@@ -497,19 +267,21 @@ fun PlatformsPage(
                                 withContext(Dispatchers.IO) {
                                     val list = PlatformStorage.loadPlatforms(context).toMutableList()
                                     if (idx in list.indices) {
-                                        list.removeAt(idx)
+                                        val removed = list.removeAt(idx)
                                         PlatformStorage.savePlatforms(context, list)
+                                        PlatformStorage.clearProviderCourseOverrides(context, removed.id)
                                     }
                                 }
                                 withContext(Dispatchers.Main) {
                                     confirmDeleteIndex = null
-                                    refreshKey++  // force refresh of UI
-                                    Log.d("PlatformsPage", "Deleted ${platform.javaClass.simpleName}")
+                                    currentPlatforms = PlatformStorage.loadPlatforms(context)
+                                    onPlatformsChanged()
+                                    Log.d("ProvidersPage", "Deleted ${platform.javaClass.simpleName}")
                                 }
                             }
                         }
                     ) {
-                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                        Text("Remove", color = MaterialTheme.colorScheme.error)
                     }
                 },
                 dismissButton = {
@@ -522,127 +294,1129 @@ fun PlatformsPage(
     }
 }
 
+/**
+ * A section heading with the explanation tucked behind an info button.
+ *
+ * Keeps the sheet short: the description is a tap away in a rich tooltip rather
+ * than a paragraph every reader has to scroll past once they know what it does.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReorderablePlatformsList(
-    platforms: List<Platform>,
-    reorderEnabled: Boolean,
-    onReorder: (List<Platform>) -> Unit,
-    onEdit: (Int) -> Unit,
-    onDelete: (Int) -> Unit,
+private fun SectionHeaderWithHelp(
+    title: String,
+    helpTitle: String,
+    helpText: String
 ) {
-    val lazyListState = rememberLazyListState()
-    val reorderState = rememberReorderableLazyListState(
-        lazyListState = lazyListState,
-        onMove = { from, to ->
-            val mutable = platforms.toMutableList().apply {
-                add(to.index, removeAt(from.index))
+    val tooltipState = rememberTooltipState(isPersistent = true)
+    val scope = rememberCoroutineScope()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(Modifier.width(4.dp))
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberRichTooltipPositionProvider(),
+            tooltip = {
+                RichTooltip(
+                    title = { Text(helpTitle) },
+                    action = {
+                        TextButton(onClick = { tooltipState.dismiss() }) { Text("Got it") }
+                    }
+                ) { Text(helpText) }
+            },
+            state = tooltipState
+        ) {
+            IconButton(
+                onClick = { scope.launch { tooltipState.show() } },
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    painter = rememberSymbolPainter(MotionSymbols.ic_info),
+                    contentDescription = "About $title",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
             }
-            onReorder(mutable)
         }
-    )
+    }
+}
 
-    LazyColumn(
-        state = lazyListState,
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight()
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun AddPlatformSheet(
+    onAdded: () -> Unit,
+    onClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var selectedPlatform by remember { mutableStateOf<PlatformInfo?>(null) }
+    var loginFields by remember { mutableStateOf<LoginFields?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // Credentials for the off-screen MOE sign-in (set when the user submits).
+    var portalCreds by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var webtopMoeCreds by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // Webtop can be added with its own username/password or via MOE SSO.
+    val webtopLoginMethod = remember { mutableStateOf("password") }
+    // For rendering only -- see submitAdd(), which reads the state directly.
+    val webtopMoe = webtopLoginMethod.value == "moe"
+    // What the busy screen says while an off-screen sign-in runs.
+    val addStatus = when {
+        webtopMoeCreds != null || portalCreds != null -> "Signing in with the Ministry of Education"
+        else -> "Signing in"
+    }
+
+    // Off-screen MOE sign-in: the user types into this sheet's own fields and no
+    // browser UI is shown (the IdP is bot-protected, so a real engine must run).
+    // Webtop via MOE, driven off-screen (accept cookies -> MOE button ->
+    // credentials -> adopt the SPA's LoginMoe session).
+    webtopMoeCreds?.let { (user, pass) ->
+        HiddenWebtopMoeLogin(username = user, password = pass) { key, error ->
+            webtopMoeCreds = null
+            if (key == null) {
+                errorMessage = error ?: "Ministry of Education login failed"
+                isLoading = false
+                return@HiddenWebtopMoeLogin
+            }
+            scope.launch {
+                try {
+                    val created = withContext(Dispatchers.IO) {
+                        WebtopPlatform.loginWithMoe(key, user, pass)
+                    }
+                    if (created.isLoggedIn()) {
+                        withContext(Dispatchers.IO) {
+                            val platforms = PlatformStorage.loadPlatforms(context).toMutableList()
+                            platforms += created
+                            PlatformStorage.savePlatforms(context, platforms)
+                        }
+                        onAdded()
+                        onClose()
+                    } else {
+                        errorMessage = "Could not start the Webtop session"
+                    }
+                } catch (e: Exception) {
+                    errorMessage = "Error: ${e.localizedMessage}"
+                } finally {
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    portalCreds?.let { (user, pass) ->
+        HiddenMoeLogin(username = user, password = pass) { cookies, csrt, error ->
+            portalCreds = null
+            if (cookies == null) {
+                errorMessage = error ?: "Ministry of Education login failed"
+                isLoading = false
+                return@HiddenMoeLogin
+            }
+            scope.launch {
+                try {
+                    val created = withContext(Dispatchers.IO) {
+                        StudentsPortalPlatform.loginWithCookies(cookies, csrt, user, pass)
+                    }
+                    val ok = withContext(Dispatchers.IO) {
+                        runCatching { created.isLoggedIn() }.getOrElse { false }
+                    }
+                    if (ok) {
+                        withContext(Dispatchers.IO) {
+                            val platforms = PlatformStorage.loadPlatforms(context).toMutableList()
+                            platforms += created
+                            PlatformStorage.savePlatforms(context, platforms)
+                        }
+                        onAdded()
+                        onClose()
+                    } else {
+                        errorMessage = "Ministry of Education login failed"
+                    }
+                } catch (e: Exception) {
+                    errorMessage = "Error: ${e.localizedMessage}"
+                } finally {
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    // Extracted so the sheet's action button and the keyboard's Done key
+    // trigger the same submit.
+    fun submitAdd() {
+        val fields = loginFields ?: selectedPlatform?.factory()?.getLoginFields() ?: return
+        if (fields.getFields().any { it.value.isNullOrBlank() }) {
+            errorMessage = "Please fill in all fields"
+            return
+        }
+        isLoading = true
+        errorMessage = null
+        // Read the picker's state here, not a value captured when this function was
+        // created: onSubmit outlives the composition that built it, so a snapshot
+        // would send Ministry-of-Education credentials down the Webtop password
+        // path and fail as "invalid credentials".
+        if (selectedPlatform!!.name == "Webtop" && webtopLoginMethod.value == "moe") {
+            // Webtop via MOE, driven off-screen.
+            webtopMoeCreds = Pair(
+                fields.getValue("username").orEmpty(),
+                fields.getValue("password").orEmpty()
+            )
+            return
+        }
+        if (selectedPlatform!!.name == "Education Portal") {
+            // Relayed to the MOE page off-screen; no browser UI.
+            portalCreds = Pair(
+                fields.getValue("username").orEmpty(),
+                fields.getValue("password").orEmpty()
+            )
+            return
+        }
+        scope.launch {
+            try {
+                val info = selectedPlatform!!
+                val created = withContext(Dispatchers.IO) {
+                    val platformClass = info.factory()::class.java
+                    val constructor = platformClass.constructors.find { constructor ->
+                        constructor.parameterTypes.size == 1 &&
+                            constructor.parameterTypes[0] == LoginFields::class.java
+                    }
+                    if (constructor != null) {
+                        constructor.newInstance(fields) as Platform
+                    } else {
+                        info.factory().apply { applyLoginFields(fields) }
+                    }
+                }
+                val isLoggedIn = withContext(Dispatchers.IO) {
+                    runCatching { created.isLoggedIn() }.getOrElse {
+                        Log.e("AddPlatform", "Login check failed", it)
+                        false
+                    }
+                }
+                if (isLoggedIn) {
+                    withContext(Dispatchers.IO) {
+                        val platforms = PlatformStorage.loadPlatforms(context).toMutableList()
+                        platforms += created
+                        PlatformStorage.savePlatforms(context, platforms)
+                    }
+                    onAdded()
+                    onClose()
+                } else {
+                    errorMessage = "Invalid credentials"
+                }
+            } catch (exception: Exception) {
+                errorMessage = "Error: ${exception.localizedMessage}"
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    if (isLoading) {
+        MotionScaffold(
+            scaffoldModifier = Modifier.fillMaxWidth(),
+            contentModifier = Modifier.padding(horizontal = 16.dp),
+            containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = WindowInsets(0),
+            fitContentHeight = true
+        ) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 220.dp)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    ContainedLoadingIndicator(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        indicatorColor = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = addStatus,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    MotionScaffold(
+        scaffoldModifier = Modifier.fillMaxWidth(),
+        // Keyboard insets are handled once, by MotionBottomSheetScene.
+        contentModifier = Modifier,
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0),
+        fitContentHeight = true
     ) {
         item {
-            Spacer(Modifier.height(TopBarSpacing() +12.dp))
+            if (selectedPlatform == null) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "Choose a provider",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(12.dp))
+            ProviderPickerList(
+                providers = platformOptions,
+                onSelect = { option ->
+                    selectedPlatform = option
+                    loginFields = option.factory().getLoginFields()
+                    errorMessage = null
+                }
+            )
+            Spacer(Modifier.height(16.dp))
+            MotionButton(
+                icon = MotionSymbols.ic_close,
+                onClick = onClose,
+                modifier = Modifier.semantics { contentDescription = "Cancel" },
+                width = ProviderSheetActionButtonWidth,
+                height = ProviderSheetActionButtonHeight,
+                iconSize = 22.dp,
+                defaultState = MotionButtonState(
+                    backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            )
         }
-        itemsIndexed(platforms, key = { _, platform -> platform.hashCode() }) { index, platform ->
-            val isPrimary = index == 0
-            val infoByClassName = remember {
-                platformOptions.associateBy { it.factory()::class.java.name }
-            }
-            val selectedPlatformInfo = infoByClassName[platform.javaClass.name]
-
-            val shape = when (index) {
-                0 ->
-                    if (platforms.lastIndex == 0)
-                        RoundedCornerShape(16.dp)
-                    else
-                        RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = 4.dp,
-                            bottomEnd = 4.dp
-                        )
-                platforms.lastIndex ->
-                    RoundedCornerShape(
-                        bottomStart = 16.dp,
-                        bottomEnd = 16.dp,
-                        topStart = 4.dp,
-                        topEnd = 4.dp
-                    )
-                else ->
-                    RoundedCornerShape(4.dp)
-            }
-
-            ReorderableItem(reorderState, key = platform.hashCode()) { _ ->
-                Card(
-                    shape = shape,
-                    modifier = Modifier
-                        .fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
+            } else {
+                Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = platform.platformDisplayName.ifBlank { selectedPlatformInfo?.name ?: platform.javaClass.name },
-                                style = MaterialTheme.typography.titleLarge
-                            )
-                            Text(
-                                if (isPrimary) "Primary" else if (reorderEnabled) "Drag to reorder" else "",
-                                style = MaterialTheme.typography.bodySmall
-                            )
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                IconButton(
+                    onClick = {
+                        selectedPlatform = null
+                        errorMessage = null
+                    },
+                    modifier = Modifier.align(Alignment.CenterStart)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+                Text(
+                    text = selectedPlatform!!.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            if (selectedPlatform!!.name == "Webtop") {
+                WebtopLoginMethodPicker(
+                    state = webtopLoginMethod,
+                    onSelectedChange = { errorMessage = null }
+                )
+                if (webtopMoe) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Enter your Ministry of Education username and password. " +
+                            "Signing in happens in the background.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            DynamicLoginFields(
+                fields = loginFields ?: selectedPlatform!!.factory().getLoginFields(),
+                onFieldsChanged = { loginFields = it },
+                isLoading = isLoading,
+                errorMessage = errorMessage,
+                onSubmit = ::submitAdd,
+                onCancel = onClose,
+                buttonText = "Add provider",
+                useMotionButtons = true
+            )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun EditProviderSheet(
+    provider: Platform,
+    onChanged: () -> Unit,
+    onClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val saveMutex = remember { Mutex() }
+    val providerInfo = remember(provider.javaClass.name) {
+        platformOptions.associateBy { it.factory()::class.java.name }[provider.javaClass.name]
+    }
+    var providerName by remember(provider.id) {
+        mutableStateOf(provider.getName())
+    }
+    var loginFields by remember(provider.id) {
+        mutableStateOf(
+            (providerInfo?.factory()?.getLoginFields() ?: provider.getLoginFields()).apply {
+                loadFrom(provider)
+            }
+        )
+    }
+    var busy by remember { mutableStateOf(false) }
+    val webtopLoginMethod = remember(provider.id) {
+        val platform = provider as? WebtopPlatform
+        val method = platform?.loginMethod
+        val initialMethod = if (!method.isNullOrBlank() && method != "password") {
+            method
+        } else {
+            val user = platform?.getUsername().orEmpty()
+            if (user.any { it.isLetter() }) "moe" else (method ?: "password")
+        }
+        mutableStateOf<String>(initialMethod ?: "password")
+    }
+    var webtopRelogin by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // Editing the portal's password must also re-establish its SSO session:
+    // the stored cookie is what actually authenticates, and new credentials
+    // alone would leave grades failing until the next manual re-add.
+    var portalRelogin by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var savingStatus by remember { mutableStateOf("Verifying changes") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var coursesLoading by remember { mutableStateOf(true) }
+    val orderedCoursesState = remember(provider.id) {
+        mutableStateOf<List<JSONObject>>(emptyList())
+    }
+    val courseNamesState = remember(provider.id) {
+        mutableStateOf(
+            PlatformStorage.loadProviderCourseOverrides(context, provider.id).courseNames
+        )
+    }
+    var renamingCourseKey by remember(provider.id) { mutableStateOf<String?>(null) }
+    val hiddenCourseKeysState = remember(provider.id) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    var courseOverridesChanged by remember { mutableStateOf(false) }
+
+    LaunchedEffect(provider.id) {
+        val loaded = withContext(Dispatchers.IO) {
+            PlatformStorage.getProviderCourses(context, provider, includeHidden = true)
+        }
+        val overrides = PlatformStorage.loadProviderCourseOverrides(context, provider.id)
+        orderedCoursesState.value = loaded
+        hiddenCourseKeysState.value = loaded
+            .filter { PlatformStorage.isCourseHidden(it, overrides.hiddenCourseKeys) }
+            .mapTo(mutableSetOf(), PlatformStorage::courseOverrideKey)
+        coursesLoading = false
+    }
+
+    DisposableEffect(provider.id) {
+        onDispose {
+            if (courseOverridesChanged) onChanged()
+        }
+    }
+
+    fun saveCourseOverrides(
+        nextHidden: Set<String>,
+        nextCourses: List<JSONObject>,
+        nextNames: Map<String, String> = courseNamesState.value
+    ) {
+        val indexed = nextCourses.withIndex().toList()
+        val normalized = indexed.sortedWith(
+            compareBy<IndexedValue<JSONObject>> { it.value.optInt("courseStatusRank", 1) }
+                .thenBy { it.index }
+        ).map { it.value }
+        orderedCoursesState.value = normalized
+        hiddenCourseKeysState.value = nextHidden.toSet()
+        courseNamesState.value = nextNames
+        courseOverridesChanged = true
+        PlatformStorage.saveProviderCourseOverrides(
+            context = context,
+            providerId = provider.id,
+            overrides = ProviderCourseOverrides(
+                hiddenCourseKeys = nextHidden,
+                courseOrder = normalized.map(PlatformStorage::courseOverrideKey),
+                courseNames = nextNames
+            )
+        )
+    }
+
+    /** Apply (or, for a blank name, clear) the user's name for one course. */
+    fun renameCourse(course: JSONObject, newName: String) {
+        val key = PlatformStorage.courseOverrideKey(course)
+        val trimmed = newName.trim()
+        val nextNames = courseNamesState.value.toMutableMap().apply {
+            if (trimmed.isBlank()) remove(key) else put(key, trimmed)
+        }
+        // Re-apply to the in-memory copy so the row updates without a reload.
+        val renamed = orderedCoursesState.value.map { existing ->
+            if (PlatformStorage.courseOverrideKey(existing) != key) {
+                existing
+            } else {
+                JSONObject(existing.toString())
+                    .put(
+                        PlatformStorage.SOURCE_NAME,
+                        existing.optString(PlatformStorage.SOURCE_NAME)
+                            .ifBlank { existing.optString("name") }
+                    )
+                    .put(
+                        "name",
+                        trimmed.ifBlank {
+                            existing.optString(PlatformStorage.SOURCE_NAME)
+                                .ifBlank { existing.optString("name") }
                         }
+                    )
+            }
+        }
+        saveCourseOverrides(hiddenCourseKeysState.value, renamed, nextNames)
+    }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            IconButton(onClick = { onEdit(index) }) {
-                                Icon(painterResource(R.drawable.ic_edit), contentDescription = "Edit")
+    fun setCourseHidden(course: JSONObject, hidden: Boolean) {
+        val key = PlatformStorage.courseOverrideKey(course)
+        val nextHidden = hiddenCourseKeysState.value.toMutableSet().apply {
+            if (hidden) add(key) else remove(key)
+        }
+        saveCourseOverrides(nextHidden, orderedCoursesState.value)
+    }
+
+    // --- free periods ("חלונות") -----------------------------------------
+    // Subjects the user no longer attends are shown in the schedule as gaps.
+    val windowSubjectsState = remember(provider.id) {
+        mutableStateOf(PlatformStorage.loadWindowSubjects(context, provider.id))
+    }
+    val subjectOptionsState = remember(provider.id) { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(provider.id) {
+        subjectOptionsState.value = withContext(Dispatchers.IO) {
+            runCatching { provider.getSubjectList() }.getOrDefault(emptyList())
+        }
+    }
+    fun toggleWindowSubject(subject: String) {
+        val next = windowSubjectsState.value.toMutableSet()
+        if (!next.remove(subject)) next.add(subject)
+        windowSubjectsState.value = next
+        PlatformStorage.saveWindowSubjects(context, provider.id, next)
+    }
+
+    portalRelogin?.let { (user, pass) ->
+        HiddenMoeLogin(username = user, password = pass) { cookies, csrt, error ->
+            portalRelogin = null
+            if (cookies == null) {
+                errorMessage = error ?: "Ministry of Education login failed"
+                busy = false
+                return@HiddenMoeLogin
+            }
+            scope.launch {
+                try {
+                    savingStatus = "Saving changes"
+                    val ok = withContext(Dispatchers.IO) {
+                        val refreshed = StudentsPortalPlatform
+                            .loginWithCookies(cookies, csrt, user, pass)
+                        if (!refreshed.isLoggedIn()) return@withContext false
+                        // Keep the existing id so course overrides and free-period
+                        // settings stay attached to this provider.
+                        refreshed.setName(providerName)
+                        saveMutex.withLock {
+                            val providers = PlatformStorage.loadPlatforms(context)
+                            val index = providers.indexOfFirst { it.id == provider.id }
+                            if (index >= 0) {
+                                providers[index] = refreshed.withId(provider.id)
+                                PlatformStorage.savePlatforms(context, providers)
                             }
+                        }
+                        true
+                    }
+                    if (ok) {
+                        onChanged()
+                        courseOverridesChanged = false
+                        onClose()
+                    } else {
+                        errorMessage = "Invalid provider credentials"
+                    }
+                } catch (e: Exception) {
+                    errorMessage = "Error updating provider: ${e.localizedMessage}"
+                } finally {
+                    busy = false
+                }
+            }
+        }
+    }
 
-                            IconButton(onClick = { onDelete(index) }) {
-                                Icon(
-                                    painterResource(R.drawable.ic_delete),
-                                    contentDescription = "Remove",
-                                    tint = MaterialTheme.colorScheme.error
-                                )
+    webtopRelogin?.let { (user, pass) ->
+        HiddenWebtopMoeLogin(username = user, password = pass) { key, error ->
+            webtopRelogin = null
+            if (key == null) {
+                errorMessage = error ?: "Ministry of Education login failed"
+                busy = false
+                return@HiddenWebtopMoeLogin
+            }
+            scope.launch {
+                try {
+                    savingStatus = "Saving changes"
+                    val ok = withContext(Dispatchers.IO) {
+                        val refreshed = WebtopPlatform.loginWithMoe(key, user, pass)
+                        if (!refreshed.isLoggedIn()) return@withContext false
+                        // Keep the existing id so course overrides and free-period
+                        // settings stay attached to this provider.
+                        if (providerName.isNotBlank()) {
+                            refreshed.setName(providerName)
+                        }
+                        refreshed.loginMethod = "moe"
+                        refreshed.setUsername(user)
+                        refreshed.setPassword(pass)
+                        if (provider is WebtopPlatform) {
+                            if (refreshed.studentId.isNullOrBlank()) refreshed.studentId = provider.studentId
+                            if (refreshed.studentClass.isNullOrBlank()) refreshed.studentClass = provider.studentClass
+                            if (refreshed.studentInstitution.isNullOrBlank()) refreshed.studentInstitution = provider.studentInstitution
+                            if (providerName.isBlank()) refreshed.studentName = provider.studentName
+                            if (refreshed.userStudentId.isNullOrBlank()) refreshed.userStudentId = provider.userStudentId
+                            if (refreshed.userType == null) refreshed.userType = provider.userType
+                            if (refreshed.schoolName.isNullOrBlank()) refreshed.schoolName = provider.schoolName
+                            refreshed.platformDisplayName = provider.platformDisplayName
+                        }
+                        saveMutex.withLock {
+                            val providers = PlatformStorage.loadPlatforms(context)
+                            val index = providers.indexOfFirst { it.id == provider.id }
+                            if (index >= 0) {
+                                providers[index] = refreshed.withId(provider.id)
+                                PlatformStorage.savePlatforms(context, providers)
                             }
+                        }
+                        true
+                    }
+                    if (ok) {
+                        onChanged()
+                        courseOverridesChanged = false
+                        onClose()
+                    } else {
+                        errorMessage = "Could not start the Webtop session"
+                    }
+                } catch (e: Exception) {
+                    errorMessage = "Error updating provider: ${e.localizedMessage}"
+                } finally {
+                    busy = false
+                }
+            }
+        }
+    }
 
-                            if (reorderEnabled) {
-                                IconButton(
-                                    onClick = {},
-                                    modifier = Modifier.draggableHandle()
-                                ) {
-                                    Icon(
-                                        painterResource(R.drawable.ic_drag_indicator),
-                                        contentDescription = "Drag handle"
-                                    )
+    val orderedCourses = orderedCoursesState.value
+    val hiddenCourseKeys = hiddenCourseKeysState.value
+    val visibleCourses = orderedCourses.filter {
+        PlatformStorage.courseOverrideKey(it) !in hiddenCourseKeys
+    }
+    val removedCourses = orderedCourses.filter {
+        PlatformStorage.courseOverrideKey(it) in hiddenCourseKeys
+    }
+
+    if (busy) {
+        MotionScaffold(
+            scaffoldModifier = Modifier.fillMaxWidth(),
+            contentModifier = Modifier.padding(horizontal = 16.dp),
+            containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = WindowInsets(0),
+            fitContentHeight = true
+        ) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 220.dp)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    ContainedLoadingIndicator(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        indicatorColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = savingStatus,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    // Extracted so the sheet's action button and the keyboard's Done key
+    // trigger the same submit.
+    fun submitEdit() {
+        val user = loginFields.getValue("username").orEmpty()
+        val pass = loginFields.getValue("password").orEmpty()
+        if (loginFields.getFields().isNotEmpty() && (user.isBlank() || pass.isBlank())) {
+            errorMessage = "Please fill in all fields"
+            return
+        }
+
+        savingStatus = "Verifying changes"
+        busy = true
+        errorMessage = null
+
+        val currentMethod = (provider as? WebtopPlatform)?.let { webtopLoginMethod.value }
+        val savedMethod = (provider as? WebtopPlatform)?.loginMethod
+        val credsChanged = user != provider.getUsername() || pass != provider.getPassword()
+
+        if (!credsChanged && provider.isLoggedIn()) {
+            scope.launch {
+                var dismissing = false
+                try {
+                    savingStatus = "Saving changes"
+                    withContext(Dispatchers.IO) {
+                        saveMutex.withLock {
+                            val providers = PlatformStorage.loadPlatforms(context)
+                            val index = providers.indexOfFirst { it.id == provider.id }
+                            if (index >= 0) {
+                                val updated = providers[index]
+                                if (providerName.isNotBlank()) {
+                                    updated.setName(providerName)
+                                }
+                                if (updated is WebtopPlatform) {
+                                    currentMethod?.let { updated.loginMethod = it }
+                                    updated.setUsername(user)
+                                    updated.setPassword(pass)
+                                } else {
+                                    updated.applyLoginFields(loginFields)
+                                }
+                                providers[index] = updated
+                                PlatformStorage.savePlatforms(context, providers)
+                            }
+                        }
+                    }
+                    onChanged()
+                    courseOverridesChanged = false
+                    dismissing = true
+                    onClose()
+                } catch (e: Exception) {
+                    errorMessage = "Error updating provider: ${e.localizedMessage}"
+                } finally {
+                    if (!dismissing) busy = false
+                }
+            }
+            return
+        }
+
+        if (provider is StudentsPortalPlatform) {
+            savingStatus = "Signing in"
+            portalRelogin = Pair(user, pass)
+            return
+        }
+
+        if (provider is WebtopPlatform && webtopLoginMethod.value == "moe") {
+            savingStatus = "Signing in with the Ministry of Education"
+            webtopRelogin = Pair(user, pass)
+            return
+        }
+
+        scope.launch {
+            var dismissing = false
+            try {
+                if (provider is WebtopPlatform && webtopLoginMethod.value == "password") {
+                    savingStatus = "Signing in"
+                    val refreshed = withContext(Dispatchers.IO) {
+                        WebtopPlatform(loginFields)
+                    }
+                    if (refreshed.isLoggedIn()) {
+                        savingStatus = "Saving changes"
+                        withContext(Dispatchers.IO) {
+                            saveMutex.withLock {
+                                val providers = PlatformStorage.loadPlatforms(context)
+                                val index = providers.indexOfFirst { it.id == provider.id }
+                                if (index >= 0) {
+                                    if (providerName.isNotBlank()) {
+                                        refreshed.setName(providerName)
+                                    }
+                                    refreshed.loginMethod = "password"
+                                    refreshed.setUsername(user)
+                                    refreshed.setPassword(pass)
+                                    if (provider is WebtopPlatform) {
+                                        if (refreshed.studentId.isNullOrBlank()) refreshed.studentId = provider.studentId
+                                        if (refreshed.studentClass.isNullOrBlank()) refreshed.studentClass = provider.studentClass
+                                        if (refreshed.studentInstitution.isNullOrBlank()) refreshed.studentInstitution = provider.studentInstitution
+                                        if (providerName.isBlank()) refreshed.studentName = provider.studentName
+                                        if (refreshed.userStudentId.isNullOrBlank()) refreshed.userStudentId = provider.userStudentId
+                                        if (refreshed.userType == null) refreshed.userType = provider.userType
+                                        if (refreshed.schoolName.isNullOrBlank()) refreshed.schoolName = provider.schoolName
+                                        refreshed.platformDisplayName = provider.platformDisplayName
+                                    }
+                                    providers[index] = refreshed.withId(provider.id)
+                                    PlatformStorage.savePlatforms(context, providers)
                                 }
                             }
+                        }
+                        onChanged()
+                        courseOverridesChanged = false
+                        dismissing = true
+                        onClose()
+                    } else {
+                        errorMessage = "Invalid provider credentials"
+                    }
+                    return@launch
+                }
 
+                val companion = provider.javaClass.kotlin.companionObjectInstance
+                val isCorrect = withContext(Dispatchers.IO) {
+                    companion !is Platform.Companion || companion.checkCredentials(loginFields)
+                }
+                if (isCorrect) {
+                    savingStatus = "Saving changes"
+                    withContext(Dispatchers.IO) {
+                        saveMutex.withLock {
+                            val providers = PlatformStorage.loadPlatforms(context)
+                            val index = providers.indexOfFirst { it.id == provider.id }
+                            if (index >= 0) {
+                                val updated = providers[index]
+                                updated.setName(providerName)
+                                updated.applyLoginFields(loginFields)
+                                providers[index] = updated
+                                PlatformStorage.savePlatforms(context, providers)
+                            }
+                        }
+                    }
+                    onChanged()
+                    courseOverridesChanged = false
+                    dismissing = true
+                    onClose()
+                } else {
+                    errorMessage = "Invalid provider credentials"
+                }
+            } catch (exception: Exception) {
+                errorMessage = "Error updating provider: ${exception.localizedMessage}"
+            } finally {
+                if (!dismissing) busy = false
+            }
+        }
+    }
+
+    MotionScaffold(
+        scaffoldModifier = Modifier.fillMaxWidth(),
+        contentModifier = Modifier.padding(horizontal = 16.dp),
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0),
+        fitContentHeight = true
+    ) {
+        item {
+            Column(modifier = Modifier.padding(top = 8.dp)) {
+                Text(
+                    text = "Edit provider",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = providerName,
+                    onValueChange = { providerName = it },
+                    label = { Text("Provider name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
+        }
+
+        // Nothing to choose from means no section at all, rather than a heading
+        // over a "nothing here yet" line.
+        if (provider.supportsSchedule && subjectOptionsState.value.isNotEmpty()) {
+            item {
+                Column(modifier = Modifier.padding(top = 20.dp)) {
+                    SectionHeaderWithHelp(
+                        title = "Dropped subjects",
+                        helpTitle = "Dropped subjects",
+                        helpText = "Subjects you no longer attend. Pick one and it " +
+                            "shows in the schedule as a free period instead of a lesson."
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        subjectOptionsState.value.forEach { subject ->
+                            val selected = PlatformStorage.isWindowSubject(
+                                subject, windowSubjectsState.value
+                            )
+                            FilterChip(
+                                selected = selected,
+                                onClick = { toggleWindowSubject(subject) },
+                                label = { Text(subject) }
+                            )
                         }
                     }
                 }
             }
+        }
 
-            // small spacing between cards
-            if (index != platforms.lastIndex) {
-                Spacer(Modifier.height(2.dp))
+        if (coursesLoading) {
+            item {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+        } else {
+            reorderableSection(
+                items = visibleCourses,
+                key = { course -> "visible:${PlatformStorage.courseOverrideKey(course)}" },
+                title = "Courses",
+                onReorder = { fromIndex, toIndex ->
+                    val currentCourses = orderedCoursesState.value
+                    val currentHidden = hiddenCourseKeysState.value
+                    val currentVisible = currentCourses.filter {
+                        PlatformStorage.courseOverrideKey(it) !in currentHidden
+                    }
+                    if (fromIndex !in currentVisible.indices || toIndex !in currentVisible.indices) {
+                        return@reorderableSection
+                    }
+                    val reorderedVisible = currentVisible.toMutableList().apply {
+                        add(toIndex, removeAt(fromIndex))
+                    }
+                    val visibleKeys = currentVisible
+                        .map(PlatformStorage::courseOverrideKey)
+                        .toSet()
+                    var visibleIndex = 0
+                    val merged = currentCourses.map { course ->
+                        if (PlatformStorage.courseOverrideKey(course) in visibleKeys) {
+                            reorderedVisible[visibleIndex++]
+                        } else {
+                            course
+                        }
+                    }
+                    saveCourseOverrides(currentHidden, merged)
+                }
+            ) { course, _ ->
+                val courseKey = PlatformStorage.courseOverrideKey(course)
+                ProviderCourseRow(
+                    course = course,
+                    actionIcon = MotionSymbols.ic_visibility_off,
+                    actionDescription = "Remove course",
+                    onAction = {
+                        setCourseHidden(course, hidden = true)
+                    },
+                    renaming = renamingCourseKey == courseKey,
+                    onRenameStart = { renamingCourseKey = courseKey },
+                    onRenameDone = { newName ->
+                        renameCourse(course, newName)
+                        renamingCourseKey = null
+                    }
+                )
+            }
+
+            if (removedCourses.isNotEmpty()) {
+                title("Removed courses")
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        removedCourses.forEachIndexed { index, course ->
+                            key("removed:${PlatformStorage.courseOverrideKey(course)}") {
+                                MotionCard(
+                                    position = when {
+                                        removedCourses.size == 1 -> ItemPosition.Alone
+                                        index == 0 -> ItemPosition.Start
+                                        index == removedCourses.lastIndex -> ItemPosition.End
+                                        else -> ItemPosition.Middle
+                                    },
+                                    contentPadding = 0.dp
+                                ) {
+                                    ProviderCourseRow(
+                                        course = course,
+                                        actionIcon = MotionSymbols.ic_add,
+                                        actionDescription = "Add course back",
+                                        onAction = {
+                                            setCourseHidden(course, hidden = false)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        if (loginFields.getFields().isNotEmpty()) title("Provider credentials")
         item {
-            Spacer(Modifier.height(BottomBarSpacing()))
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (provider is WebtopPlatform) {
+                    WebtopLoginMethodPicker(
+                        state = webtopLoginMethod,
+                        onSelectedChange = { errorMessage = null }
+                    )
+                    if (webtopLoginMethod.value == "moe") {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Enter your Ministry of Education username and password. " +
+                                "Signing in happens in the background.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+                DynamicLoginFields(
+                    fields = loginFields,
+                    onFieldsChanged = { loginFields = it },
+                    isLoading = busy,
+                    errorMessage = errorMessage,
+                    onSubmit = ::submitEdit,
+                    onCancel = onClose,
+                    buttonText = "Update provider",
+                    useMotionButtons = true
+                )
+            }
+        }
+        item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+@Composable
+private fun ProviderCourseRow(
+    course: JSONObject,
+    actionIcon: String,
+    actionDescription: String,
+    onAction: () -> Unit,
+    renaming: Boolean = false,
+    onRenameStart: (() -> Unit)? = null,
+    onRenameDone: ((String) -> Unit)? = null
+) {
+    val courseName = course.optString("name")
+    val startsWithHebrew = courseName.firstOrNull { !it.isWhitespace() }
+        ?.let { it in '\u0590'..'\u05FF' } == true
+    CompositionLocalProvider(
+        LocalLayoutDirection provides if (startsWithHebrew) LayoutDirection.Rtl else LayoutDirection.Ltr
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SubjectIcon(subject = courseName, assignment = "course")
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                if (renaming && onRenameDone != null) {
+                    var draft by remember(courseName) { mutableStateOf(courseName) }
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = {
+                            Text(course.optString(PlatformStorage.SOURCE_NAME).ifBlank { courseName })
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = { onRenameDone(draft) }) {
+                                Icon(
+                                    painter = rememberSymbolPainter(MotionSymbols.ic_check),
+                                    contentDescription = "Save name"
+                                )
+                            }
+                        }
+                    )
+                } else {
+                    Text(
+                        text = courseName,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Start
+                    )
+                }
+                val supportingText = course.optString("status").ifBlank { course.optString("term") }
+                if (supportingText.isNotBlank()) {
+                    Text(
+                        text = supportingText,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Start
+                    )
+                }
+            }
+            if (onRenameStart != null && !renaming) {
+                IconButton(onClick = onRenameStart) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_edit),
+                        contentDescription = "Rename course"
+                    )
+                }
+            }
+            IconButton(onClick = onAction) {
+                Icon(
+                    painter = rememberSymbolPainter(actionIcon),
+                    contentDescription = actionDescription
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlatformSettingsItem(
+    platform: Platform,
+    accountColor: AccountIconColor,
+    useDark: Boolean,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val platformInfo = remember(platform.javaClass.name) {
+        platformOptions.associateBy { it.factory()::class.java.name }[platform.javaClass.name]
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val providerName = platformInfo?.name
+            ?: platform.javaClass.simpleName.removeSuffix("Platform")
+        val providerPainter = platformInfo?.iconSymbol?.let {
+            rememberSymbolPainter(name = it, fill = 1f)
+        } ?: platformInfo?.let { painterResource(it.iconRes) }
+
+        SubjectIcon(
+            subject = providerName,
+            painter = providerPainter,
+            containerColor = accountColor.container(useDark),
+            iconColor = accountColor.content(useDark)
+        )
+        Spacer(Modifier.width(12.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = providerName,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = platform.getName(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.motionBottomSheetAnchor()
+            ) {
+                Icon(painterResource(R.drawable.ic_edit), contentDescription = "Edit provider")
+            }
+
+            IconButton(onClick = onDelete) {
+                Icon(
+                    painterResource(R.drawable.ic_delete),
+                    contentDescription = "Remove provider",
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
         }
     }
 }
@@ -651,36 +1425,64 @@ fun ReorderablePlatformsList(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsPage(
-    navController: NavController,
+    onOpenPlatforms: () -> Unit,
+    onOpenAppearance: () -> Unit,
+    onOpenNavigation: () -> Unit,
+    onOpenCrashLogs: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
+    val useDark = isDarkTheme()
 
-    val backdrop = rememberLayerBackdrop()
-
-    Column(
-        modifier = modifier
-            .verticalScroll(rememberScrollState())
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
+    MotionScaffold(
+        scaffoldModifier = modifier.fillMaxSize(),
+        topBar = { SettingsTopBar("Settings") }
     ) {
-        Spacer(Modifier.height(TopBarSpacing()))
-        ActionRow {
-            addVerticalActionList(
-                options = listOf(
-                    SegmentedOption("platforms", text = "Platforms", desc = "Add, Remove Or Edit Platforms", iconRes = R.drawable.ic_account),
-                ),
-                onClick = { option ->
-                    when (option) {
-                        "platforms" -> navController.navigate(Dest.Platforms.name)
-                    }
-                },
-                isGlass = false,
-                backdrop = backdrop
+        title("App")
+        section {
+            pageItem(
+                title = "Appearance",
+                description = "Theme, colors, motion, and orientation",
+                icon = painterResource(R.drawable.ic_settings),
+                backgroundColor = SettingsCategoryColor.APPEARANCE.container(useDark),
+                iconColor = SettingsCategoryColor.APPEARANCE.content(useDark),
+                onClick = onOpenAppearance,
+                paneDestination = AppDest.Appearance
             )
-
+            pageItem(
+                title = "Navigation",
+                description = "Choose the pages in your navbar",
+                icon = painterResource(R.drawable.ic_menu),
+                backgroundColor = SettingsCategoryColor.NAVIGATION.container(useDark),
+                iconColor = SettingsCategoryColor.NAVIGATION.content(useDark),
+                onClick = onOpenNavigation,
+                paneDestination = AppDest.NavigationSettings
+            )
+            pageItem(
+                title = stringResource(R.string.crash_logs),
+                description = stringResource(R.string.crash_logs_description),
+                icon = painterResource(R.drawable.ic_bug_report),
+                backgroundColor = SettingsCategoryColor.SYSTEM.container(useDark),
+                iconColor = SettingsCategoryColor.SYSTEM.content(useDark),
+                onClick = onOpenCrashLogs,
+                paneDestination = AppDest.CrashLogs
+            )
         }
-        Spacer(Modifier.height(BottomBarSpacing()))
-    }
 
+        title("Providers")
+        section {
+            pageItem(
+                title = "Providers",
+                description = "Add, remove, edit, and reorder providers",
+                icon = painterResource(R.drawable.ic_account),
+                backgroundColor = SettingsCategoryColor.PLATFORMS.container(useDark),
+                iconColor = SettingsCategoryColor.PLATFORMS.content(useDark),
+                onClick = onOpenPlatforms,
+                paneDestination = AppDest.Platforms
+            )
+        }
+
+        item {
+            Spacer(Modifier.height(BottomBarSpacing()))
+        }
+    }
 }

@@ -1,9 +1,7 @@
 package com.feldman.app.api
 
 import android.content.Context
-import android.os.Environment
 import android.util.Log
-import android.widget.Toast
 import com.feldman.scholix.api.LoginFields
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.UnsafeOkHttpClient
@@ -16,7 +14,6 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.util.*
 
@@ -54,7 +51,7 @@ class BarIlanPlatform() : Platform {
 
     override val suportsGrades: Boolean = true
     override val supportsSchedule: Boolean = false
-    override val supportsAttendance: Boolean = true
+    override val supportsAttendance: Boolean = false
 
     init {
         if (id.isBlank()) {
@@ -260,35 +257,13 @@ class BarIlanPlatform() : Platform {
     }
 
 
-    override fun getAttendanceEvents(period: String): JSONObject {
-        // Fake demo events for Bar Ilan
-        val result = JSONObject()
-        val eventsByType = JSONObject()
+    // Bar-Ilan publishes no attendance data through this API. It used to return
+    // two invented events, which read as real ones -- better to report nothing.
+    override fun getAttendanceEvents(period: String): JSONObject = JSONObject()
 
-        val absence = JSONObject()
-            .put("type", "חיסור")
-            .put("date", "2025-09-01T00:00:00")
-            .put("subject", "אלגברה לינארית")
-            .put("teacher", "פרופ׳ כהן")
-            .put("remark", "החסיר שיעור ללא הודעה")
+    override fun getAttendanceEvents(year: Int, period: String): JSONObject =
+        getAttendanceEvents(period)
 
-        val positive = JSONObject()
-            .put("type", "חיזוק חיובי")
-            .put("date", "2025-09-05T00:00:00")
-            .put("subject", "מבוא למדעי המחשב")
-            .put("teacher", "ד״ר לוי")
-            .put("remark", "תרם רבות לשיעור")
-
-        eventsByType.put("חיסור", JSONArray().put(absence))
-        eventsByType.put("חיזוק חיובי", JSONArray().put(positive))
-
-        result.put("events", eventsByType)
-        return result
-    }
-
-    override fun getAttendanceEvents(year: Int, period: String): JSONObject {
-        return getAttendanceEvents(period)
-    }
     override fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject = JSONObject()
     override fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject = getSchedule(dayIndex, 5374, "")
 
@@ -363,7 +338,7 @@ class BarIlanPlatform() : Platform {
             .put("loginVariables", JSONArray(listOf("username", "password")))
             .put("supportsSchedule", true)
             .put("supportsGrades", true)
-            .put("supportsAttendance", true)
+            .put("supportsAttendance", false)
     }
     companion object : Platform.Companion {
 
@@ -394,117 +369,14 @@ class BarIlanPlatform() : Platform {
 
 
     @Throws(JSONException::class, IOException::class)
-    override fun getMessages(page: Int): JSONArray {
-        val messages = JSONArray()
+    // No messages endpoint is implemented for Bar-Ilan. These used to return
+    // invented messages, an invented body, and a placeholder file written into
+    // the user's Downloads folder.
+    override fun getMessages(page: Int): JSONArray = JSONArray()
 
-        // Mocked sample inbox messages
-        val msg1 = JSONObject()
-            .put("messageId", "MSG001")
-            .put("subject", "ברוך הבא לסמסטר א׳!")
-            .put("from", "דיקן הסטודנטים")
-            .put("date", "2025-09-01T08:45:00")
-            .put("hasRead", 0)
-            .put("filesAttached", false)
+    override fun getMessageDetails(messageId: String): JSONObject = JSONObject()
 
-        val msg2 = JSONObject()
-            .put("messageId", "MSG002")
-            .put("subject", "תזכורת להרצאה מוקלטת - מבוא לאלגברה")
-            .put("from", "פרופ׳ כהן")
-            .put("date", "2025-09-05T11:00:00")
-            .put("hasRead", 1)
-            .put("filesAttached", true)
-
-        val msg3 = JSONObject()
-            .put("messageId", "MSG003")
-            .put("subject", "הודעה חשובה לגבי מערכת השעות")
-            .put("from", "מזכירות הפקולטה")
-            .put("date", "2025-09-10T09:30:00")
-            .put("hasRead", 0)
-            .put("filesAttached", false)
-
-        messages.put(msg1).put(msg2).put(msg3)
-
-        Log.d("BarIlanPlatform", "Demo messages loaded: ${messages.length()} items")
-        return messages
-    }
-
-    @Throws(JSONException::class, IOException::class)
-    override fun getMessageDetails(messageId: String): JSONObject {
-        val message = JSONObject()
-
-        when (messageId) {
-            "MSG001" -> {
-                message.put("subject", "ברוך הבא לסמסטר א׳!")
-                    .put("from", "דיקן הסטודנטים")
-                    .put("date", "2025-09-01T08:45:00")
-                    .put("contentHtml", "<p>סטודנטים יקרים,<br>ברוכים הבאים לסמסטר החדש. אנו מאחלים לכם הצלחה רבה!</p>")
-                    .put("attachments", JSONArray())
-            }
-
-            "MSG002" -> {
-                val attachments = JSONArray().put(
-                    JSONObject()
-                        .put("name", "lecture1-recording.mp4")
-                        .put("url", "https://example.com/lecture1-recording.mp4")
-                        .put("size", 120.5)
-                        .put("sizeUnit", "MB")
-                )
-                message.put("subject", "תזכורת להרצאה מוקלטת - מבוא לאלגברה")
-                    .put("from", "פרופ׳ כהן")
-                    .put("date", "2025-09-05T11:00:00")
-                    .put("contentHtml", "<p>שלום לכולם,<br>הרצאה מוקלטת זמינה כעת במערכת. מומלץ לעבור עליה לפני השיעור הבא.</p>")
-                    .put("attachments", attachments)
-            }
-
-            "MSG003" -> {
-                message.put("subject", "הודעה חשובה לגבי מערכת השעות")
-                    .put("from", "מזכירות הפקולטה")
-                    .put("date", "2025-09-10T09:30:00")
-                    .put("contentHtml", "<p>שלום,<br>אנא שימו לב כי מערכת השעות עודכנה. בדקו את זמני השיעורים באתר.</p>")
-                    .put("attachments", JSONArray())
-            }
-
-            else -> {
-                message.put("error", "Message not found")
-            }
-        }
-
-        Log.d("BarIlanPlatform", "Demo message details loaded for ID: $messageId")
-        return message
-    }
-    override suspend fun downloadAttachment(context: Context, attachment: JSONObject): Boolean {
-        val name = attachment.optString("name", "DemoFile.txt")
-        val type = attachment.optString("type", "text/plain")
-
-        return try {
-            // 🕒 simulate network delay
-            delay(1500)
-
-            // 🎯 Create fake file path in Downloads folder
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val file = File(downloadsDir, name)
-
-            // 📝 Write fake content
-            val demoText = "This is a demo attachment.\nFile name: $name\nType: $type\nGenerated by Scholix Demo Platform."
-            FileOutputStream(file).use { it.write(demoText.toByteArray()) }
-
-            // ✅ Notify user
-            with(android.os.Handler(context.mainLooper)) {
-                post {
-                    Toast.makeText(context, "הקובץ נשמר בתיקיית ההורדות: ${file.name}", Toast.LENGTH_LONG).show()
-                }
-            }
-            true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            with(android.os.Handler(context.mainLooper)) {
-                post {
-                    Toast.makeText(context, "שגיאה בהורדת קובץ ההדגמה.", Toast.LENGTH_SHORT).show()
-                }
-            }
-            false
-        }
-    }
+    override suspend fun downloadAttachment(context: Context, attachment: JSONObject): Boolean = false
 
     override fun getLoginFields(): LoginFields = loginFields
 }

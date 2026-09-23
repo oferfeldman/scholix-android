@@ -232,10 +232,11 @@ class DemoPlatform: Platform {
         this._password = "demo"
         courses.add(
             JSONObject()
-                .put("name", "demo")
+                .put("name", "Demo")
+                .put("courseKey", "Demo")
+                .put("platformId", id)
                 .put("year", Year.now().value)
         )
-
     }
 
     fun getGrades(): JSONArray = getGrades("all")
@@ -383,18 +384,27 @@ class DemoPlatform: Platform {
     }
     fun getGrades(course: String): JSONArray {
         val grades = JSONArray()
-        grades.put(createGrade("ביולוגיה", "רפלקציה לNERD", 99, "מבחן"))
-        grades.put(createGrade("היסטרויה", "עבדה", 99, "מבחן"))
-        grades.put(createGrade("עברית", "מבחן בעברית", 99, "מבחן"))
+        grades.put(createGrade("ביולוגיה", "רפלקציה לNERD", 100, "מבחן"))
+        grades.put(createGrade("היסטוריה", "עבדה", 100, "מבחן"))
+        grades.put(createGrade("עברית", "מבחן בעברית", 94, "מבחן"))
         grades.put(createGrade("מתמטיקה האצה", "מבחן במתמטיקה", 100, "מבחן"))
-        grades.put(createGrade("אנגלית - א", "book report", 99, "מבחן"))
-        grades.put(createGrade("ביולוגיה", "בוחן בביולוגיה", 99, "מבחן"))
-        grades.put(createGrade("ערבית", "בוחן בערבית", 99, "מבחן"))
-        grades.put(createGrade("ספרות", "מבדק בספרות", 99, "מבחן"))
-        grades.put(createGrade("ביולוגיה", "הגדרה החיים", 99, "מבחן"))
+        grades.put(createGrade("אנגלית - א", "book report", 93, "מבחן"))
+        grades.put(createGrade("ביולוגיה", "בוחן בביולוגיה", 98, "מבחן"))
+        grades.put(createGrade("תנ\"ך", "תנ\"ךמבחן ב", 103, "מבחן"))
+        grades.put(createGrade("ספרות", "מבחן בספרות", 93, "מבחן"))
+        grades.put(createGrade("מתמטיקה האצה", "מבחן במתמטיקה", 82, "מבחן"))
+        grades.put(createGrade("ערבית", "בוחן בערבית", 100, "מבחן"))
+        grades.put(createGrade("ספרות", "מבדק בספרות", 82, "מבחן"))
+        grades.put(createGrade("ביולוגיה", "הגדרה החיים", 90, "מבחן"))
         grades.put(createGrade("אנגלית - א", "בוחן אוצר מילים מספר 2", 99, "מבחן"))
-        grades.put(createGrade("ביולוגיה", "שפה כימית אופק דיגיטלי", 99, "מבחן"))
-        grades.put(createGrade("של\"ח", "סיור מפגש טבע", 99, "מבחן"))
+        grades.put(createGrade("ביולוגיה", "שפה כימית אופק דיגיטלי", 100, "מבחן"))
+        grades.put(createGrade("של\"ח", "סיור מפגש טבע", 100, "מבחן"))
+        grades.put(createGrade("של\"ח", "עבודה טבע בישראל", 100, "מבחן"))
+        grades.put(createGrade("ערבית", "מבחן בערבית", 100, "מבחן"))
+        grades.put(createGrade("אנגלית - א", "מבחן באנגלית", 100, "מבחן"))
+        grades.put(createGrade("היסטוריה", "מטלה", 100, "מבחן"))
+        grades.put(createGrade("ביולוגיה", "עבודה יום מקוון", 100, "מבחן"))
+        grades.put(createGrade("עברית", "מבדק בתחביר", 100, "מבחן"))
         return grades
     }
 
@@ -485,10 +495,13 @@ class DemoPlatform: Platform {
 
     override fun getInfo(): JSONObject {
         return JSONObject()
-            .put("name", "Webtop")
+            .put("name", "Demo")
             .put("supportsEndpoints", JSONArray(listOf("grades", "schedule", "disciplineEvents")))
             .put("loginVariables", JSONArray(listOf("username", "password")))
             .put("supportsSchedule", true)
+        .put("supportsOriginalSchedule", true)
+        .put("supportsScheduleSelection", false)
+        .put("scheduleKind", "weekly")
             .put("supportsGrades", true)
             .put("supportsAttendance", true)
     }
@@ -518,6 +531,14 @@ class DemoPlatform: Platform {
             p.loggedIn = obj.optBoolean("loggedIn", false)
             p.displayName = obj.optString("name", "demo")
             p.platformDisplayName = obj.optString("platformDisplayName")
+            p.courses.clear()
+            p.courses.add(
+                JSONObject()
+                    .put("name", "Demo")
+                    .put("courseKey", "Demo")
+                    .put("platformId", p.id)
+                    .put("year", Year.now().value)
+            )
             return p
         }
 

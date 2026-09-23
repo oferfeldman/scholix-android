@@ -9,7 +9,6 @@ import com.feldman.scholix.api.LoginFields
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.UnsafeOkHttpClient
 import com.feldman.scholix.api.Type
-import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -50,13 +49,79 @@ class WebtopPlatform() : Platform {
         )
     private var username: String? = null
     private var password: String? = null
-    private var studentName: String? = null
-    private var studentId: String? = null
-    private var studentClass: String? = null
-    private var studentInstitution: String? = null
+    var studentName: String? = null
+    var studentId: String? = null
+    var studentClass: String? = null
+    var studentInstitution: String? = null
+    var userStudentId: String? = null
+    var userType: Int? = null
+    var schoolName: String? = null
+    var loginMethod: String? = null
 
     private var _cookies: String? = null
+    @Volatile
+    private var cachedShotefKey: String? = null
+    @Volatile
+    private var cachedShotefDays: JSONArray? = null
+    @Volatile
+    private var cachedShotefTime: Long = 0
     private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
+    val mailbox: WebtopMailbox = WebtopMailbox(
+        cookie = { _cookies ?: "" },
+        refreshSession = { refreshCookies() },
+        client = _client
+    )
+
+    fun withId(newId: String): WebtopPlatform = apply { id = newId }
+
+    fun isMoe(): Boolean =
+        loginMethod == "moe" || (loginMethod.isNullOrBlank() && (username?.any { it.isLetter() } == true || !userStudentId.isNullOrBlank()))
+
+    fun needsInteractiveRelogin(): Boolean =
+        isMoe() && !loggedIn && !username.isNullOrBlank() && !password.isNullOrBlank()
+
+    fun adoptSession(key: String): Boolean {
+        val payload = JSONObject()
+            .put("rememberMe", false)
+            .put("key", key)
+            .put("UniqueId", UUID.randomUUID().toString())
+            .put("deviceDataJson", "{\"isMobile\":false,\"isTablet\":false,\"isDesktop\":true}")
+
+        val request = Request.Builder()
+            .url("https://webtopserver.smartschool.co.il/server/api/user/LoginMoe")
+            .header("Origin", "https://webtop.smartschool.co.il")
+            .header("Referer", "https://webtop.smartschool.co.il/")
+            .header("language", "he")
+            .header("rememberMe", "0")
+            .header("X-XSRF-TOKEN", "")
+            .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+            .build()
+
+        return try {
+            _client.newCall(request).execute().use { response ->
+                val body = response.body.string()
+                val jsonResponse = JSONObject(body)
+                if (!jsonResponse.optBoolean("status", false)) return false
+                val data = jsonResponse.optJSONObject("data") ?: return false
+                studentId = data.optString("userId")
+                studentClass = "${data.optString("classCode")}|${data.opt("classNumber")}"
+                studentInstitution = data.optString("institutionCode")
+                studentName = "${data.optString("firstName")} ${data.optString("lastName")}".trim()
+                userStudentId = data.optString("studentId").ifEmpty { null }
+                userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
+                schoolName = data.optString("institutionName").ifEmpty { null }
+                loginMethod = "moe"
+                _cookies = response.headers("Set-Cookie").joinToString("; ")
+                cachedShotefKey = null
+                cachedShotefDays = null
+                loggedIn = true
+                true
+            }
+        } catch (e: Exception) {
+            Log.e("WebtopPlatform", "Failed to adopt MOE session", e)
+            false
+        }
+    }
     override var editing: Boolean = false
     override var loggedIn: Boolean = false
     private val _courses: ArrayList<JSONObject> = ArrayList()
@@ -92,32 +157,13 @@ class WebtopPlatform() : Platform {
             _courses.add(
                 JSONObject()
                     .put("name", "Webtop")
+                    .put("courseKey", "Webtop")
+                    .put("platformId", id)
                     .put("index", 0)
                     .put("semester", getCurrentSemester())
                     .put("semesterPicker", true)
                     .put("year", Year.now().value)
             )
-            
-            // Register FCM token after successful login
-            try {
-                FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                    if (!task.isSuccessful) {
-                        Log.w("WebtopPlatform", "Fetching FCM registration token failed", task.exception)
-                        return@addOnCompleteListener
-                    }
-                    
-                    // Get new FCM registration token
-                    val token = task.result
-                    Log.d("WebtopPlatform", "Got FCM token after login: ${token?.take(30)}...")
-                    
-                    if (token != null) {
-                        val success = registerFCMToken(token)
-                        Log.d("WebtopPlatform", "FCM token registration after login: $success")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("WebtopPlatform", "Error registering FCM token after login", e)
-            }
         } else {
             Log.e("WebtopPlatform", "Missing username or password in LoginFields")
         }
@@ -126,6 +172,14 @@ class WebtopPlatform() : Platform {
 
     /** Perform login once, keep cookies */
     private fun login(username: String, password: String): Boolean {
+        val u = username
+        val p = password
+        if (u.isNullOrBlank() || p.isNullOrBlank()) {
+            Log.w("WebtopPlatform", "Cannot refresh cookies: credentials missing")
+            loggedIn = false
+            return false
+        }
+
         return try {
             val loginData = JSONObject()
                 .put("Data", encrypt(username + "0"))
@@ -152,6 +206,10 @@ class WebtopPlatform() : Platform {
                 studentClass = data.getString("classCode") + "|" + data.get("classNumber")
                 studentInstitution = data.getString("institutionCode")
                 studentName = "${data.getString("firstName")} ${data.getString("lastName")}"
+                userStudentId = data.optString("studentId").ifEmpty { null }
+                userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
+                schoolName = data.optString("institutionName").ifEmpty { null }
+                loginMethod = "password"
                 _cookies = response.headers("Set-Cookie").joinToString("; ")
                 true
             }
@@ -198,6 +256,8 @@ class WebtopPlatform() : Platform {
             _courses.add(
                 JSONObject()
                     .put("name", "Webtop")
+                    .put("courseKey", "Webtop")
+                    .put("platformId", id)
                     .put("index", 0)
                     .put("semester", getCurrentSemester())
                     .put("semesterPicker", true)
@@ -385,73 +445,95 @@ class WebtopPlatform() : Platform {
         Log.d("WebtopPlatform", "override getSchedule(dayIndex: $dayIndex, institutionCode $institutionCode, selectedValue $selectedValue) called.")
 
         val institution = institutionCode ?: studentInstitution
-        val classCode = selectedValue ?: studentClass
+        val classCode = selectedValue?.takeIf { it.isNotBlank() } ?: studentClass
 
         val schedule = JSONObject()
         if (dayIndex < 0) return schedule
 
         try {
-            val payload = JSONObject()
-                .put("institutionCode", institution)
-                .put("selectedValue", classCode)
-                .put("typeView", 1)
+            val cacheKey = "$institution|$classCode"
+            val now = System.currentTimeMillis()
+            val days: JSONArray = if (cachedShotefKey == cacheKey &&
+                now - cachedShotefTime < 60_000 &&
+                cachedShotefDays != null
+            ) {
+                cachedShotefDays!!
+            } else {
+                val payload = JSONObject()
+                    .put("institutionCode", institution)
+                    .put("selectedValue", classCode)
+                    .put("typeView", 1)
 
-            Log.d("WebtopPlatform", "Requesting schedule for class=$classCode, inst=$institution, day=$dayIndex")
+                Log.d("WebtopPlatform", "Requesting schedule for class=$classCode, inst=$institution, day=$dayIndex")
 
-            val request = Request.Builder()
-                .url("https://webtopserver.smartschool.co.il/server/api/shotef/ShotefSchedualeData")
-                .addHeader("Cookie", _cookies ?: "")
-                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
+                val request = Request.Builder()
+                    .url("https://webtopserver.smartschool.co.il/server/api/shotef/ShotefSchedualeData")
+                    .addHeader("Cookie", _cookies ?: "")
+                    .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
 
-            _client.newCall(request).execute().use { response ->
-                val body = response.body.string()
-                Log.v("WebtopPlatform", "Schedule body (len=${body.length}): $body")
+                _client.newCall(request).execute().use { response ->
+                    val body = response.body.string()
+                    Log.v("WebtopPlatform", "Schedule body (len=${body.length}): $body")
 
-                if (response.code == 401 || response.code == 403 || body.isEmpty()) {
-                    Log.d("WebtopPlatform", "Schedule fetch unauthorized/empty → refreshing cookies")
-                    if (refreshCookies()) {
-                        // Retry once with same parameters after refreshing cookies
-                        return getSchedule(dayIndex, institutionCode, classCode)
+                    if (response.code == 401 || response.code == 403 || body.isEmpty()) {
+                        Log.d("WebtopPlatform", "Schedule fetch unauthorized/empty → refreshing cookies")
+                        if (refreshCookies()) {
+                            // Retry once with same parameters after refreshing cookies
+                            return getSchedule(dayIndex, institutionCode, classCode)
+                        }
+                        return JSONObject().put("error", "login_failed")
                     }
-                    return JSONObject().put("error", "login_failed")
-                }
 
-                if (!response.isSuccessful) {
-                    return JSONObject().put("error", "server_unreachable")
-                }
-
-                val json = JSONObject(body)
-                val days = json.optJSONArray("data") ?: JSONArray()
-                if (dayIndex >= days.length()) return schedule
-
-                val day = days.getJSONObject(dayIndex)
-                Log.v("WebtopPlatform", "Schedule day: $day")
-
-                val hoursRaw = day.optJSONArray("hoursData") ?: JSONArray()
-
-                // --- STEP 1: Build original schedule ---
-                val hoursOriginal = JSONObject()
-                for (i in 0 until hoursRaw.length()) {
-                    val hour = hoursRaw.optJSONObject(i) ?: continue
-                    val lessons = hour.optJSONArray("scheduale") ?: continue
-                    if (lessons.length() > 0) {
-                        processScheduleOriginal(hour, hoursOriginal)
+                    if (!response.isSuccessful) {
+                        return JSONObject().put("error", "server_unreachable")
                     }
-                }
 
-                // --- STEP 2: Build updated schedule ---
-                val hours = JSONObject()
-                for (i in 0 until hoursRaw.length()) {
-                    val hour = hoursRaw.optJSONObject(i) ?: continue
-                    val lessons = hour.optJSONArray("scheduale") ?: continue
-                    if (lessons.length() > 0) {
-                        processScheduleUpdated(hour, hours, hoursOriginal)
-                    }
+                    val json = JSONObject(body)
+                    val fetchedDays = json.optJSONArray("data") ?: JSONArray()
+                    cachedShotefKey = cacheKey
+                    cachedShotefDays = fetchedDays
+                    cachedShotefTime = now
+                    fetchedDays
                 }
-
-                return hours
             }
+
+            var day: JSONObject? = null
+            for (i in 0 until days.length()) {
+                val d = days.optJSONObject(i) ?: continue
+                val dIndex = if (d.has("dayIndex")) d.optInt("dayIndex", -1) else d.optInt("day", d.optInt("dayId", -1))
+                if (dIndex == dayIndex + 1) {
+                    day = d
+                    break
+                }
+            }
+            if (day == null) return schedule
+            Log.v("WebtopPlatform", "Schedule day: $day")
+
+            val hoursRaw = day.optJSONArray("hoursData") ?: JSONArray()
+
+            // --- STEP 1: Build original schedule ---
+            val hoursOriginal = JSONObject()
+            for (i in 0 until hoursRaw.length()) {
+                val hour = hoursRaw.optJSONObject(i) ?: continue
+                val lessons = hour.optJSONArray("scheduale") ?: continue
+                if (lessons.length() > 0) {
+                    processScheduleOriginal(hour, hoursOriginal)
+                }
+            }
+
+            // --- STEP 2: Build updated schedule ---
+            val hours = JSONObject()
+            for (i in 0 until hoursRaw.length()) {
+                val hour = hoursRaw.optJSONObject(i) ?: continue
+                val lessons = hour.optJSONArray("scheduale") ?: JSONArray()
+                val changes = hour.optJSONArray("changes") ?: JSONArray()
+                if (lessons.length() > 0 || changes.length() > 0) {
+                    processScheduleUpdated(hour, hours, hoursOriginal)
+                }
+            }
+
+            return hours
         } catch (e: IOException) {
             Log.e("WebtopPlatform", "Server unreachable", e)
             return JSONObject().put("error", "server_unreachable")
@@ -461,178 +543,240 @@ class WebtopPlatform() : Platform {
         }
     }
 
+    private fun parseHourTime(hourName: String?): String {
+        if (hourName.isNullOrBlank()) return ""
+        val matches = Regex("""\d{1,2}:\d{2}""").findAll(hourName).map { it.value }.toList()
+        if (matches.size >= 2) {
+            val t1 = matches[0]
+            val t2 = matches[1]
+            fun toMins(t: String): Int {
+                val parts = t.split(":")
+                return (parts.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (parts.getOrNull(1)?.toIntOrNull() ?: 0)
+            }
+            return if (toMins(t1) <= toMins(t2)) "$t1 - $t2" else "$t2 - $t1"
+        }
+        return matches.firstOrNull() ?: ""
+    }
 
     @Throws(Exception::class)
     private fun processScheduleOriginal(hourRaw: JSONObject, hours: JSONObject) {
-        val scheduleArray = hourRaw.getJSONArray("scheduale")
-        val scheduleItem = scheduleArray.getJSONObject(0)
+        val scheduleArray = hourRaw.optJSONArray("scheduale") ?: return
+        val hourNum = hourRaw.optInt("hour", -1)
+        val time = parseHourTime(hourRaw.optString("hourName"))
 
-        val subject = cleanSubject(scheduleItem.optString("subject", "לא זמין"))
-        val teacher = scheduleItem.optString("teacherPrivateName", "לא זמין") + " " +
-                scheduleItem.optString("teacherLastName", "לא זמין")
-        val hourNum = scheduleItem.optInt("hour", -1)
-        val colorClass = findColorClass(subject)
+        for (k in 0 until scheduleArray.length()) {
+            val scheduleItem = scheduleArray.optJSONObject(k) ?: continue
+            val subject = cleanSubject(scheduleItem.optString("subject", "לא זמין"))
+            val teacher = (scheduleItem.optString("teacherPrivateName", "") + " " +
+                    scheduleItem.optString("teacherLastName", "")).trim().ifEmpty { "לא זמין" }
+            val itemHourNum = scheduleItem.optInt("hour", hourNum)
+            val colorClass = findColorClass(subject)
+            val room = scheduleItem.optString("room", "").takeIf { it != "null" } ?: ""
+            val subjectLevel = scheduleItem.optString("subjectLevel", "").takeIf { it != "null" } ?: ""
 
-        val hour = JSONObject()
-            .put("num", hourNum)
-            .put("subject", subject)
-            .put("teacher", teacher)
-            .put("colorClass", colorClass)
-            .put("changes", "")
-            .put("exams", "")
-        hours.put(hourNum.toString(), hour)
+            val hour = JSONObject()
+                .put("num", itemHourNum)
+                .put("hour", itemHourNum)
+                .put("subject", subject)
+                .put("subjectLevel", subjectLevel)
+                .put("teacher", teacher)
+                .put("room", room)
+                .put("time", time)
+                .put("colorClass", colorClass)
+                .put("changes", "")
+                .put("exams", "")
+            hours.put("${itemHourNum}_$k", hour)
+        }
     }
 
     @Throws(Exception::class)
     private fun processScheduleUpdated(hourRaw: JSONObject, hours: JSONObject, hoursOriginal: JSONObject) {
-        val scheduleArray = hourRaw.getJSONArray("scheduale")
-        val scheduleItem = scheduleArray.getJSONObject(0)
-
-        val subject = cleanSubject(scheduleItem.optString("subject", "לא זמין"))
-        val teacher = scheduleItem.optString("teacherPrivateName", "לא זמין") + " " +
-                scheduleItem.optString("teacherLastName", "לא זמין")
-        val hourNum = scheduleItem.optInt("hour", -1)
-        val colorClass = findColorClass(subject)
-
-        val hour = JSONObject()
-            .put("num", hourNum)
-            .put("subject", subject)
-            .put("teacher", teacher)
-            .put("colorClass", colorClass)
-            .put("changes", "")
-            .put("exams", "")
+        val scheduleArray = hourRaw.optJSONArray("scheduale") ?: JSONArray()
+        val hourNum = hourRaw.optInt("hour", -1)
+        val time = parseHourTime(hourRaw.optString("hourName"))
 
         // --- Exams handling ---
+        var examTitle = ""
         if (hourRaw.has("exams")) {
-            val examsArray = hourRaw.getJSONArray("exams")
-            for (j in 0 until examsArray.length()) {
-                val examObj = examsArray.getJSONObject(j)
-                hour.put("exams", examObj.getString("title") ?: "idk")
+            val examsArray = hourRaw.optJSONArray("exams")
+            if (examsArray != null && examsArray.length() > 0) {
+                examTitle = examsArray.optJSONObject(0)?.optString("title", "") ?: ""
             }
         }
 
         // --- Changes handling ---
-        val changesArray = JSONArray().apply {
-            val c1 = hourRaw.optJSONArray("changes")
-            val c2 = scheduleItem.optJSONArray("changes")
-            if (c1 != null) for (i in 0 until c1.length()) put(c1.getJSONObject(i))
-            if (c2 != null) for (i in 0 until c2.length()) put(c2.getJSONObject(i))
+        val hourChanges = hourRaw.optJSONArray("changes") ?: JSONArray()
+
+        // Handle addition in an empty hour
+        if (scheduleArray.length() == 0 && hourChanges.length() > 0) {
+            for (j in 0 until hourChanges.length()) {
+                val itemObj = hourChanges.optJSONObject(j) ?: continue
+                if (itemObj.optBoolean("isAddition") ||
+                    itemObj.optString("definition").contains("תוספת שיעור") ||
+                    itemObj.optString("type") == "תוספת שיעור"
+                ) {
+                    val addTeacher = (itemObj.optString("privateName", "") + " " +
+                            itemObj.optString("lastName", "")).trim()
+                    var addSubject = "תוספת שיעור"
+                    for (key in hoursOriginal.keys()) {
+                        val existing = hoursOriginal.optJSONObject(key) ?: continue
+                        if (existing.optString("teacher") == addTeacher) {
+                            addSubject = existing.optString("subject")
+                            break
+                        }
+                    }
+                    val hour = JSONObject()
+                        .put("num", hourNum)
+                        .put("hour", hourNum)
+                        .put("subject", addSubject)
+                        .put("subjectLevel", "")
+                        .put("teacher", addTeacher)
+                        .put("room", itemObj.optString("room", "").takeIf { it != "null" } ?: "")
+                        .put("time", time)
+                        .put("colorClass", "yellow-cell")
+                        .put("changes", "תוספת שיעור")
+                        .put("exams", examTitle)
+                    hours.put("${hourNum}_add_$j", hour)
+                }
+            }
+            return
         }
-        var cancel = false
 
-        for (j in 0 until changesArray.length()) {
-            val itemObj = changesArray.getJSONObject(j)
-            println(itemObj)
-            println("def: ${itemObj.optString("definition")} ${itemObj.optBoolean("isAddition")} ${itemObj.optString("type")}")
+        for (k in 0 until scheduleArray.length()) {
+            val scheduleItem = scheduleArray.optJSONObject(k) ?: continue
+            val subject = cleanSubject(scheduleItem.optString("subject", "לא זמין"))
+            val teacher = (scheduleItem.optString("teacherPrivateName", "") + " " +
+                    scheduleItem.optString("teacherLastName", "")).trim().ifEmpty { "לא זמין" }
+            val itemHourNum = scheduleItem.optInt("hour", hourNum)
+            val colorClass = findColorClass(subject)
+            val room = scheduleItem.optString("room", "").takeIf { it != "null" } ?: ""
+            val subjectLevel = scheduleItem.optString("subjectLevel", "").takeIf { it != "null" } ?: ""
 
-            if (
-                itemObj.optBoolean("isAddition") ||
-                itemObj.optString("definition").contains("תוספת שיעור") ||
-                itemObj.optString("type") == "תוספת שיעור"
-            ) {
-                val addTeacher = itemObj.optString("privateName", "") + " " +
-                        itemObj.optString("lastName", "")
+            val hour = JSONObject()
+                .put("num", itemHourNum)
+                .put("hour", itemHourNum)
+                .put("subject", subject)
+                .put("subjectLevel", subjectLevel)
+                .put("teacher", teacher)
+                .put("room", room)
+                .put("time", time)
+                .put("colorClass", colorClass)
+                .put("changes", "")
+                .put("exams", examTitle)
 
-                var addSubject = "תוספת שיעור"
-                for (key in hoursOriginal.keys()) {
-                    val existing = hoursOriginal.getJSONObject(key)
-                    if (existing.getString("teacher") == addTeacher) {
-                        addSubject = existing.getString("subject")
-                        break
+            // Combine changes: hour-level changes and item-level changes
+            val changesArray = JSONArray().apply {
+                for (i in 0 until hourChanges.length()) {
+                    hourChanges.optJSONObject(i)?.let { put(it) }
+                }
+                val itemChanges = scheduleItem.optJSONArray("changes")
+                if (itemChanges != null) {
+                    for (i in 0 until itemChanges.length()) {
+                        itemChanges.optJSONObject(i)?.let { put(it) }
+                    }
+                }
+            }
+            var cancel = false
+
+            for (j in 0 until changesArray.length()) {
+                val itemObj = changesArray.optJSONObject(j) ?: continue
+                val def = itemObj.optString("definition", "")
+                val type = itemObj.optString("type", "")
+
+                if (itemObj.optBoolean("isAddition") ||
+                    def.contains("תוספת שיעור") ||
+                    type == "תוספת שיעור"
+                ) {
+                    val addTeacher = (itemObj.optString("privateName", "") + " " +
+                            itemObj.optString("lastName", "")).trim()
+                    var addSubject = "תוספת שיעור"
+                    for (key in hoursOriginal.keys()) {
+                        val existing = hoursOriginal.optJSONObject(key) ?: continue
+                        if (existing.optString("teacher") == addTeacher) {
+                            addSubject = existing.optString("subject")
+                            break
+                        }
+                    }
+                    hour.put("subject", addSubject)
+                    hour.put("teacher", addTeacher)
+                    hour.put("colorClass", "yellow-cell")
+                    hour.put("changes", "תוספת שיעור")
+                    break
+                }
+
+                // ביטול שיעור
+                if (def == "ביטול שיעור" || itemObj.optBoolean("isClassCancel", false) ||
+                    (def == "ביטול שיעור" && (itemObj.optInt("original_hour", -1) == -1 || itemObj.optInt("original_hour", -1) == itemHourNum))) {
+                    cancel = true
+                }
+
+                // הזזת שיעור
+                if (def == "הזזת שיעור" || itemObj.optBoolean("isClassMove", false)) {
+                    val fillTeacher = (itemObj.optString("privateName", "") + " " +
+                            itemObj.optString("lastName", "")).trim()
+                    var found = false
+                    for (key in hoursOriginal.keys()) {
+                        val existing = hoursOriginal.optJSONObject(key) ?: continue
+                        if (existing.optString("teacher") == fillTeacher) {
+                            hour.put("subject", existing.optString("subject"))
+                            hour.put("teacher", existing.optString("teacher"))
+                            hour.put("colorClass", existing.optString("colorClass"))
+                            found = true
+                            break
+                        }
+                    }
+                    if (!found && fillTeacher.isNotBlank()) {
+                        val prev = hour.optString("changes")
+                        hour.put("changes", (if (prev.isNotEmpty()) "$prev\n" else "") + "מילוי מקום של $fillTeacher")
                     }
                 }
 
-                hour.put("subject", addSubject)
-                hour.put("teacher", addTeacher)
-                hour.put("colorClass", "yellow-cell")
-                hour.put("changes", "תוספת שיעור")
+                // מילוי מקום
+                if (def == "מילוי מקום" || itemObj.optBoolean("isFillUp", false)) {
+                    val fillTeacher = (itemObj.optString("privateName", "") + " " +
+                            itemObj.optString("lastName", "")).trim()
+                    if (fillTeacher.isNotBlank()) {
+                        hour.put("teacher", fillTeacher)
+                        hour.put("subject", "${hour.optString("subject")} / מילוי מקום")
+                    }
+                    for (key in hoursOriginal.keys()) {
+                        val existing = hoursOriginal.optJSONObject(key) ?: continue
+                        if (existing.optString("teacher") == fillTeacher) {
+                            hour.put("subject", existing.optString("subject"))
+                            hour.put("teacher", existing.optString("teacher"))
+                            hour.put("colorClass", existing.optString("colorClass"))
+                            break
+                        }
+                    }
+                }
+            }
+
+            // Events handling
+            if (hourRaw.has("events")) {
+                val events = hourRaw.optJSONArray("events")
+                if (events != null && events.length() > 0) {
+                    val event = events.optJSONObject(0)
+                    if (event != null) {
+                        val title = event.optString("title", "")
+                        val accompaniers = event.optString("accompaniers", "").replace(Regex(",\\s*$"), "")
+                        if (accompaniers.isNotBlank() && accompaniers != ",") {
+                            hour.put("teacher", accompaniers)
+                        }
+                        if (title.isNotBlank()) {
+                            hour.put("subject", title)
+                            hour.put("changes", "")
+                        }
+                    }
+                }
+            }
+
+            if (cancel) {
+                hour.put("colorClass", "cancel-cell")
+                hour.put("changes", "ביטול שיעור")
                 hour.put("exams", "")
-
-                hours.put(hourNum.toString(), hour)
-                return
             }
 
-            // ביטול שיעור
-            if (itemObj.optString("definition", "לא זמין") == "ביטול שיעור" &&
-                (itemObj.optInt("original_hour", -1) == -1 || itemObj.optInt("original_hour", -1) == hourNum)) {
-                cancel = true
-            }
-
-            // original_hour reference
-            if (itemObj.optInt("original_hour", -1) != -1) {
-                cancel = true
-            }
-
-            // הזזת שיעור
-            if (itemObj.optString("definition", "לא זמין") == "הזזת שיעור") {
-                val fillTeacher = itemObj.optString("privateName", "לא זמין") + " " +
-                        itemObj.optString("lastName", "לא זמין")
-
-                var found = false
-                for (key in hoursOriginal.keys()) {
-                    val existing = hoursOriginal.getJSONObject(key)
-                    if (existing.getString("teacher") == fillTeacher) {
-                        hour.put("subject", existing.getString("subject"))
-                        hour.put("teacher", existing.getString("teacher"))
-                        hour.put("colorClass", existing.getString("colorClass"))
-                        found = true
-                        break
-                    }
-                }
-
-                if (!found) {
-                    val changes = hour.optString("changes")
-                    hour.put("changes", changes + "מילוי מקום של $fillTeacher\n")
-                }
-            }
-
-            // מילוי מקום
-            if (itemObj.optString("definition", "לא זמין") == "מילוי מקום") {
-                val fillTeacher = itemObj.optString("privateName", "לא זמין") + " " +
-                        itemObj.optString("lastName", "לא זמין")
-
-                hour.put("teacher", fillTeacher)
-                hour.put("subject", hour.getString("subject") + " / מילוי מקום")
-
-                //בדיקה של הזזת שיעור
-                var found = false
-                for (key in hoursOriginal.keys()) {
-                    val existing = hoursOriginal.getJSONObject(key)
-                    if (existing.getString("teacher") == fillTeacher) {
-                        hour.put("subject", existing.getString("subject"))
-                        hour.put("teacher", existing.getString("teacher"))
-                        hour.put("colorClass", existing.getString("colorClass"))
-                        found = true
-                        break
-                    }
-                }
-
-
-
-                if (!found) {
-                    hour.put("teacher", fillTeacher)
-                }
-            }
-
-        }
-
-        // --- Events handling ---
-        if (hourRaw.has("events") && hourRaw.getJSONArray("events").length() > 0) {
-            val events = hourRaw.getJSONArray("events")
-            val event = events.getJSONObject(0)
-            val title = event.getString("title")
-            val accompaniers = event.getString("accompaniers").replace(Regex(",\\s*$"), "")
-
-            if (accompaniers != "," && accompaniers != " " && accompaniers.isNotEmpty()) {
-                hour.put("teacher", accompaniers)
-            }
-            hour.put("subject", title)
-            hour.put("changes", "")
-        }
-
-        // --- Only keep if not canceled ---
-        if (!cancel) {
-            hours.put(hourNum.toString(), hour)
+            hours.put("${itemHourNum}_$k", hour)
         }
     }
 
@@ -666,44 +810,80 @@ class WebtopPlatform() : Platform {
         val schedule = JSONObject()
         if (dayIndex < 0) return schedule
         val institution = institutionCode ?: studentInstitution
-        val classCode = selectedValue ?: studentClass
+        val classCode = selectedValue?.takeIf { it.isNotBlank() } ?: studentClass
 
         try {
-            val payload = JSONObject()
-                .put("institutionCode", institution)
-                .put("selectedValue", classCode)
-                .put("typeView", 1)
+            val cacheKey = "$institution|$classCode"
+            val now = System.currentTimeMillis()
+            val days: JSONArray = if (cachedShotefKey == cacheKey &&
+                now - cachedShotefTime < 60_000 &&
+                cachedShotefDays != null
+            ) {
+                cachedShotefDays!!
+            } else {
+                val payload = JSONObject()
+                    .put("institutionCode", institution)
+                    .put("selectedValue", classCode)
+                    .put("typeView", 1)
 
-            val request = Request.Builder()
-                .url("https://webtopserver.smartschool.co.il/server/api/shotef/ShotefSchedualeData")
-                .addHeader("Cookie", _cookies ?: "")
-                .post(
-                    payload.toString()
-                        .toRequestBody("application/json; charset=utf-8".toMediaType())
-                )
-                .build()
+                val request = Request.Builder()
+                    .url("https://webtopserver.smartschool.co.il/server/api/shotef/ShotefSchedualeData")
+                    .addHeader("Cookie", _cookies ?: "")
+                    .post(
+                        payload.toString()
+                            .toRequestBody("application/json; charset=utf-8".toMediaType())
+                    )
+                    .build()
 
-            _client.newCall(request).execute().use { response ->
-                val body = response.body.string()
-                val days = JSONObject(body).getJSONArray("data")
-                if (dayIndex >= days.length()) return schedule
-
-                val day = days.getJSONObject(dayIndex)
-                val hoursRaw = day.getJSONArray("hoursData")
-
-                val hoursOriginal = JSONObject()
-                for (i in 0 until hoursRaw.length()) {
-                    val hour = hoursRaw.getJSONObject(i)
-                    if (hour.has("scheduale") && hour.getJSONArray("scheduale").length() > 0) {
-                        processScheduleOriginal(hour, hoursOriginal)
+                _client.newCall(request).execute().use { response ->
+                    val body = response.body.string()
+                    if (response.code == 401 || response.code == 403 || body.isEmpty()) {
+                        Log.d("WebtopPlatform", "Original schedule fetch unauthorized/empty → refreshing cookies")
+                        if (refreshCookies()) {
+                            return getOriginalSchedule(dayIndex, institutionCode, classCode)
+                        }
+                        return JSONObject().put("error", "login_failed")
                     }
+
+                    if (!response.isSuccessful) {
+                        return JSONObject().put("error", "server_unreachable")
+                    }
+
+                    val json = JSONObject(body)
+                    val fetchedDays = json.optJSONArray("data") ?: JSONArray()
+                    cachedShotefKey = cacheKey
+                    cachedShotefDays = fetchedDays
+                    cachedShotefTime = now
+                    fetchedDays
                 }
-                return hoursOriginal
             }
+
+            var day: JSONObject? = null
+            for (i in 0 until days.length()) {
+                val d = days.optJSONObject(i) ?: continue
+                val dIndex = if (d.has("dayIndex")) d.optInt("dayIndex", -1) else d.optInt("day", d.optInt("dayId", -1))
+                if (dIndex == dayIndex + 1) {
+                    day = d
+                    break
+                }
+            }
+            if (day == null) return schedule
+
+            val hoursRaw = day.optJSONArray("hoursData") ?: JSONArray()
+
+            val hoursOriginal = JSONObject()
+            for (i in 0 until hoursRaw.length()) {
+                val hour = hoursRaw.optJSONObject(i) ?: continue
+                val lessons = hour.optJSONArray("scheduale") ?: continue
+                if (lessons.length() > 0) {
+                    processScheduleOriginal(hour, hoursOriginal)
+                }
+            }
+            return hoursOriginal
         } catch (e: Exception) {
             Log.e("WebtopPlatform", "Failed to fetch original schedule", e)
+            return JSONObject().put("error", "server_unreachable")
         }
-        return JSONObject()
     }
 
     override fun getScheduleIndexes(): JSONArray = JSONArray()
@@ -711,6 +891,30 @@ class WebtopPlatform() : Platform {
     override fun isLoggedIn(): Boolean = loggedIn
 
     override fun refreshCookies(): Boolean {
+        if (isMoe()) {
+            Log.d("WebtopPlatform", "Refreshing MOE Webtop cookies...")
+            val u = username
+            val p = password
+            if (!u.isNullOrBlank() && !p.isNullOrBlank()) {
+                try {
+                    val session = WebtopMoeLogin(_client).login(u, p)
+                    val newCookies = session.cookieHeader
+                    if (newCookies.isNotBlank()) {
+                        _cookies = newCookies
+                        cachedShotefKey = null
+                        cachedShotefDays = null
+                        loggedIn = true
+                        Log.i("WebtopPlatform", "MOE Webtop cookies refreshed successfully via headless flow")
+                        return true
+                    }
+                } catch (e: Exception) {
+                    Log.w("WebtopPlatform", "Headless MOE cookie refresh failed: ${e.message}")
+                }
+            }
+            loggedIn = false
+            return false
+        }
+
         return try {
             val loginData = JSONObject()
                 .put("Data", encrypt(username + "0"))
@@ -730,7 +934,12 @@ class WebtopPlatform() : Platform {
                 studentId = data.getString("userId")
                 studentClass = data.getString("classCode") + "|" + data.get("classNumber")
                 studentInstitution = data.getString("institutionCode")
+                userStudentId = data.optString("studentId").ifEmpty { null }
+                userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
+                schoolName = data.optString("institutionName").ifEmpty { null }
                 _cookies = response.headers("Set-Cookie").joinToString("; ")
+                cachedShotefKey = null
+                cachedShotefDays = null
                 loggedIn = true
                 true
             }
@@ -755,6 +964,10 @@ class WebtopPlatform() : Platform {
             .put("loggedIn", loggedIn)
             .put("courses", JSONArray().apply { course?.let { put(it) } })
             .put("platformDisplayName", platformDisplayName)
+            .put("userStudentId", userStudentId)
+            .put("userType", userType ?: JSONObject.NULL)
+            .put("schoolName", schoolName)
+            .put("loginMethod", loginMethod)
     }
     @Throws(JSONException::class, IOException::class)
     override fun getAttendanceEvents(period: String): JSONObject {
@@ -932,70 +1145,14 @@ class WebtopPlatform() : Platform {
             .put("supportsSchedule", true)
             .put("supportsGrades", true)
             .put("supportsAttendance", true)
+            .put("scheduleSelection", studentClass)
+            .put("supportsOriginalSchedule", true)
+            .put("supportsScheduleSelection", true)
+            .put("scheduleKind", "weekly")
     }
 
 
     override fun getLoginFields(): LoginFields = loginFields
-
-    /**
-     * Register FCM token with the webtop server for push notifications
-     */
-    fun registerFCMToken(fcmToken: String): Boolean {
-        if (!isLoggedIn() || _cookies.isNullOrEmpty()) {
-            Log.w("WebtopPlatform", "Cannot register FCM token - not logged in or no cookies")
-            return false
-        }
-
-        return try {
-            val payload = JSONObject()
-                .put("param1", "android")
-                .put("param2", fcmToken)
-
-            val request = Request.Builder()
-                .url("https://webtopserver.smartschool.co.il/server/api/user/setRegistrationId")
-                .addHeader("Cookie", _cookies ?: "")
-                .addHeader("User-Agent", "Android-WebView/1.0")
-                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            Log.d("WebtopPlatform", "Registering FCM token: ${fcmToken.take(30)}...")
-
-            _client.newCall(request).execute().use { response ->
-                val body = response.body.string()
-                
-                Log.d("WebtopPlatform", "FCM Registration Status: ${response.code}")
-                Log.d("WebtopPlatform", "FCM Response: $body")
-
-                if (!response.isSuccessful) {
-                    Log.e("WebtopPlatform", "FCM registration failed: HTTP ${response.code}")
-                    return false
-                }
-
-                if (body.isNotEmpty()) {
-                    try {
-                        val jsonResponse = JSONObject(body)
-                        val success = jsonResponse.optBoolean("status", false)
-                        if (success) {
-                            Log.i("WebtopPlatform", "✅ FCM token registered successfully!")
-                            return true
-                        } else {
-                            Log.w("WebtopPlatform", "❌ FCM token registration failed - server returned false")
-                            return false
-                        }
-                    } catch (e: JSONException) {
-                        Log.w("WebtopPlatform", "⚠️ Could not parse FCM response as JSON, assuming success")
-                        return response.isSuccessful
-                    }
-                }
-
-                return response.isSuccessful
-            }
-        } catch (e: Exception) {
-            Log.e("WebtopPlatform", "❌ FCM registration error", e)
-            false
-        }
-    }
-
 
     companion object : Platform.Companion {
 
@@ -1004,8 +1161,8 @@ class WebtopPlatform() : Platform {
         override fun fromJson(obj: JSONObject): WebtopPlatform {
             val p = WebtopPlatform()
             p.id = obj.optString("id", "").ifEmpty { generateId() }
-            p.username = obj.optString("username", "")
-            p.password = obj.optString("password", "")
+            p.setUsername(obj.optString("username", ""))
+            p.setPassword(obj.optString("password", ""))
             p.studentName = obj.optString("name", "").ifEmpty { null }
             p.studentInstitution = obj.optString("institution", "").ifEmpty { null }
             p.studentId = obj.optString("studentId", "").ifEmpty { null }
@@ -1013,6 +1170,10 @@ class WebtopPlatform() : Platform {
             p._cookies = obj.optString("cookies", "").ifEmpty { null }
             p.loggedIn = obj.optBoolean("loggedIn", false)
             p.platformDisplayName = obj.optString("platformDisplayName")
+            p.userStudentId = obj.optString("userStudentId", "").ifEmpty { null }
+            p.userType = if (obj.has("userType") && !obj.isNull("userType")) obj.optInt("userType") else null
+            p.schoolName = obj.optString("schoolName", "").ifEmpty { null }
+            p.loginMethod = obj.optString("loginMethod", "").ifEmpty { null }
 
             Log.d("WebtopPlatform", "fromJson: ${p.username} ${p.password}")
             Log.d("WebtopPlatform", "fromJson obj: $obj")
@@ -1020,6 +1181,8 @@ class WebtopPlatform() : Platform {
             // Always guarantee one tab
             val course = JSONObject()
                 .put("name", "Webtop")
+                .put("courseKey", "Webtop")
+                .put("platformId", p.id)
                 .put("index", 0)
                 .put("semester", getCurrentSemester())
                 .put("semesterPicker", true)
@@ -1043,6 +1206,48 @@ class WebtopPlatform() : Platform {
         fun getCurrentSemester(): String {
             val month = Calendar.getInstance().get(Calendar.MONTH)
             return if (month >= Calendar.SEPTEMBER || month <= Calendar.JANUARY) "a" else "b"
+        }
+
+        @JvmStatic
+        fun loginWithMoe(key: String, user: String, pass: String): WebtopPlatform {
+            val p = WebtopPlatform()
+            val payload = JSONObject()
+                .put("rememberMe", false)
+                .put("key", key)
+                .put("UniqueId", java.util.UUID.randomUUID().toString())
+                .put("deviceDataJson", "{\"isMobile\":false,\"isTablet\":false,\"isDesktop\":true}")
+
+            val request = Request.Builder()
+                .url("https://webtopserver.smartschool.co.il/server/api/user/LoginMoe")
+                .header("Origin", "https://webtop.smartschool.co.il")
+                .header("Referer", "https://webtop.smartschool.co.il/")
+                .header("language", "he")
+                .header("rememberMe", "0")
+                .header("X-XSRF-TOKEN", "")
+                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            p._client.newCall(request).execute().use { response ->
+                val body = response.body.string()
+                val jsonResponse = JSONObject(body)
+                if (!jsonResponse.optBoolean("status", false)) {
+                    throw IOException("Webtop rejected the MOE sign-in")
+                }
+                val data = jsonResponse.optJSONObject("data") ?: throw IOException("No data in Webtop response")
+                p.studentId = data.optString("userId")
+                p.studentClass = "${data.optString("classCode")}|${data.opt("classNumber")}"
+                p.studentInstitution = data.optString("institutionCode")
+                p.studentName = "${data.optString("firstName")} ${data.optString("lastName")}".trim()
+                p.userStudentId = data.optString("studentId").ifEmpty { null }
+                p.userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
+                p.schoolName = data.optString("institutionName").ifEmpty { null }
+                p.setUsername(user)
+                p.setPassword(pass)
+                p.loginMethod = "moe"
+                p._cookies = response.headers("Set-Cookie").joinToString("; ")
+                p.loggedIn = true
+            }
+            return p
         }
 
         override fun checkCredentials(loginFields: LoginFields): Boolean {

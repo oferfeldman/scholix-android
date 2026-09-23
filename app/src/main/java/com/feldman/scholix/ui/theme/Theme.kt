@@ -5,6 +5,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import com.feldman.motion.MotionBlurBackdrop
+
 private val DarkColors = darkColorScheme(
     primary = Color(0xFF54B3FF),
     secondary = Color(0xFF47CB4C),
@@ -39,27 +41,12 @@ fun AppTheme(
         if (useDarkTheme) dynamicDarkColorScheme(context)
         else dynamicLightColorScheme(context)
 
-    // Your desired background override
-    val customBackground = baseScheme.surfaceContainer
-    val customSurfaceVarient = baseScheme.background
-
-    // Replace background + surface colors
-//    val colorScheme = baseScheme.copy(
-//        background = customBackground,
-////        surface = customBackground,
-//        surfaceVariant = customSurfaceVarient
-//    )
-//
-//    MaterialTheme(
-//        colorScheme = colorScheme,
-//        typography = MaterialTheme.typography,
-//        shapes = MaterialTheme.shapes,
-//        content = content
-//    )
-        MaterialTheme(
+    MaterialTheme(
         colorScheme = baseScheme,
         typography = MaterialTheme.typography,
         shapes = MaterialTheme.shapes,
-        content = content
+        content = {
+            MotionBlurBackdrop(content = content)
+        }
     )
 }

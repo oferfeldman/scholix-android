@@ -13,24 +13,40 @@ import java.io.IOException
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import androidx.core.content.edit
+import com.feldman.motion.MotionSymbols
 import com.feldman.scholix.R
 import com.feldman.scholix.api.platforms.DemoPlatform
+import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.OpenAUPlatform
-import com.feldman.scholix.api.platforms.ScholixPlatform
+import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
+import java.util.Locale
 
 data class PlatformInfo(
     val name: String,
     val iconRes: Int,
+    val iconSymbol: String? = null,
     val factory: () -> Platform
+)
+
+data class ProviderCourseOverrides(
+    val hiddenCourseKeys: Set<String> = emptySet(),
+    val courseOrder: List<String> = emptyList(),
+    /** Course key -> the name the user gave it, replacing the provider's. */
+    val courseNames: Map<String, String> = emptyMap()
 )
 
 val platformOptions = listOf(
     PlatformInfo("Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
     PlatformInfo("Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
     PlatformInfo("Open University", R.drawable.ic_open_au) { OpenAUPlatform() as Platform },
-    PlatformInfo("Demo", R.drawable.ic_account_circle) { DemoPlatform() as Platform },
-    PlatformInfo("Scholix", R.drawable.ic_account_circle) { ScholixPlatform() as Platform }
+    PlatformInfo("Mashov", R.drawable.ic_mashov) { MashovPlatform() as Platform },
+    PlatformInfo("Education Portal", R.drawable.ic_moe) { StudentsPortalPlatform() as Platform },
+    PlatformInfo(
+        "Demo",
+        R.drawable.ic_account_circle,
+        iconSymbol = MotionSymbols.ic_preview
+    ) { DemoPlatform() as Platform }
 )
 
 
@@ -40,6 +56,39 @@ object PlatformStorage {
     private const val PREFS_NAME = "platform_prefs"
     const val KEY_PLATFORMS = "platforms_logins"
     private const val TAG = "PlatformStorage"
+    private const val KEY_PROVIDER_COURSE_OVERRIDES_PREFIX = "provider_course_overrides_"
+    private const val KEY_PROVIDER_WINDOW_SUBJECTS_PREFIX = "provider_window_subjects_"
+
+    // --- free periods ("חלונות") ---------------------------------------------
+    // Subjects the user no longer attends (e.g. a bagrut already completed) are
+    // shown in the schedule as free periods rather than lessons.
+
+    private fun normalizeSubject(subject: String): String =
+        subject.trim().lowercase(Locale.ROOT)
+
+    fun loadWindowSubjects(context: Context, providerId: String): Set<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val raw = prefs.getStringSet("$KEY_PROVIDER_WINDOW_SUBJECTS_PREFIX$providerId", null)
+        return raw?.toSet() ?: emptySet()
+    }
+
+    fun saveWindowSubjects(context: Context, providerId: String, subjects: Set<String>) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit {
+            if (subjects.isEmpty()) {
+                remove("$KEY_PROVIDER_WINDOW_SUBJECTS_PREFIX$providerId")
+            } else {
+                putStringSet("$KEY_PROVIDER_WINDOW_SUBJECTS_PREFIX$providerId", subjects)
+            }
+        }
+    }
+
+    /** True if this lesson's subject is marked as a free period for the provider. */
+    fun isWindowSubject(subject: String, windowSubjects: Set<String>): Boolean {
+        if (subject.isBlank() || windowSubjects.isEmpty()) return false
+        val normalized = normalizeSubject(subject)
+        return windowSubjects.any { normalizeSubject(it) == normalized }
+    }
 
     /**
      * Serializes and saves the entire list of Platform objects.
@@ -76,7 +125,7 @@ object PlatformStorage {
                 try {
                     val className = obj.getString("class")
                     val cls = Class.forName(className)
-                    Log.e(TAG, "DESERIALIZING: raw class=$className, json=$obj")
+                    Log.d(TAG, "Deserializing platform: $className")
 
                     val method = cls.getMethod("fromJson", JSONObject::class.java)
                     val p = method.invoke(null, obj) as Platform
@@ -91,12 +140,22 @@ object PlatformStorage {
         return platforms
     }
 
-    fun addPlatform(context: Context, platform: Platform) {
-
+    fun addPlatforms(context: Context, newPlatforms: List<Platform>) {
+        if (newPlatforms.isEmpty()) return
         val platforms = loadPlatforms(context)
-
-        platforms.add(platform)
+        for (np in newPlatforms) {
+            platforms.removeAll { existing ->
+                existing.id == np.id || (
+                    existing is WebtopPlatform && np is WebtopPlatform
+                )
+            }
+            platforms.add(np)
+        }
         savePlatforms(context, platforms)
+    }
+
+    fun addPlatform(context: Context, platform: Platform) {
+        addPlatforms(context, listOf(platform))
     }
 
     @Throws(JSONException::class, IOException::class)
@@ -262,48 +321,177 @@ object PlatformStorage {
         Log.d(TAG, "Updated platform at index $index")
     }
 
-    @Throws(JSONException::class)
-    fun getCourses(context: Context): ArrayList<JSONObject> {
-        val platforms = loadPlatforms(context)
-        val allCourses = ArrayList<JSONObject>()
-        val seenNames = mutableSetOf<String>()
+    /** Field holding the provider's original course name once the user renames it. */
+    const val SOURCE_NAME = "sourceName"
 
-        for ((index, platform) in platforms.withIndex()) {
-            for (course in platform.getCourses()) {
-                val name = course.optString("name")
-                if (seenNames.add(name)) {
-                    val copy = JSONObject(course.toString())
-                    copy.put("index", index)
-                    allCourses.add(copy)
-                }
-            }
+    fun courseOverrideKey(course: JSONObject): String {
+        val sourceId = course.optString("courseKey").ifBlank { course.optString("id") }
+        if (sourceId.isNotBlank()) {
+            return "$sourceId|${course.optString("term")}"
         }
-        return allCourses
+
+        return listOf(
+            // The provider's own name, never the user's custom one, so renaming
+            // a course does not change its identity.
+            course.optString(SOURCE_NAME).ifBlank { course.optString("name") },
+            course.optString("term"),
+            course.optString("year"),
+            course.optString("semester"),
+            course.optString("teacher"),
+            course.optString("index")
+        ).joinToString("|")
     }
 
-    //Clear all platforms from shared preferences
+    private fun legacyCourseOverrideKey(course: JSONObject): String {
+        val sourceId = course.optString("courseKey").ifBlank { course.optString("id") }
+        val identity = sourceId
+            .ifBlank { course.optString(SOURCE_NAME) }
+            .ifBlank { course.optString("name") }
+        return "$identity|${course.optString("term")}"
+    }
+
+    fun isCourseHidden(course: JSONObject, hiddenCourseKeys: Set<String>): Boolean =
+        courseOverrideKey(course) in hiddenCourseKeys ||
+            legacyCourseOverrideKey(course) in hiddenCourseKeys
+
+    fun loadProviderCourseOverrides(context: Context, providerId: String): ProviderCourseOverrides {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val raw = prefs.getString("$KEY_PROVIDER_COURSE_OVERRIDES_PREFIX$providerId", null)
+            ?: return ProviderCourseOverrides()
+
+        return try {
+            val json = JSONObject(raw)
+            val hiddenArray = json.optJSONArray("hidden") ?: JSONArray()
+            val orderArray = json.optJSONArray("order") ?: JSONArray()
+            val namesObject = json.optJSONObject("names") ?: JSONObject()
+
+            val hidden = buildSet {
+                for (i in 0 until hiddenArray.length()) {
+                    val key = hiddenArray.optString(i)
+                    if (key.isNotBlank()) add(key)
+                }
+            }
+
+            val order = buildList {
+                for (i in 0 until orderArray.length()) {
+                    val key = orderArray.optString(i)
+                    if (key.isNotBlank()) add(key)
+                }
+            }
+
+            val names = buildMap {
+                val keys = namesObject.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val value = namesObject.optString(key)
+                    if (key.isNotBlank() && value.isNotBlank()) put(key, value)
+                }
+            }
+
+            ProviderCourseOverrides(
+                hiddenCourseKeys = hidden,
+                courseOrder = order,
+                courseNames = names
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to decode course overrides for provider $providerId", e)
+            ProviderCourseOverrides()
+        }
+    }
+
+    fun saveProviderCourseOverrides(
+        context: Context,
+        providerId: String,
+        overrides: ProviderCourseOverrides
+    ) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (overrides.hiddenCourseKeys.isEmpty() &&
+            overrides.courseOrder.isEmpty() &&
+            overrides.courseNames.isEmpty()
+        ) {
+            prefs.edit { remove("$KEY_PROVIDER_COURSE_OVERRIDES_PREFIX$providerId") }
+            return
+        }
+
+        val json = JSONObject().apply {
+            put("hidden", JSONArray(overrides.hiddenCourseKeys.toList()))
+            put("order", JSONArray(overrides.courseOrder))
+            put("names", JSONObject(overrides.courseNames))
+        }
+
+        prefs.edit {
+            putString("$KEY_PROVIDER_COURSE_OVERRIDES_PREFIX$providerId", json.toString())
+        }
+    }
+
+    private fun withCustomName(course: JSONObject, courseNames: Map<String, String>): JSONObject {
+        val custom = courseNames[courseOverrideKey(course)] ?: courseNames[legacyCourseOverrideKey(course)]
+        if (custom.isNullOrBlank()) return course
+
+        val copy = JSONObject(course.toString())
+        if (!copy.has(SOURCE_NAME)) {
+            copy.put(SOURCE_NAME, course.optString("name"))
+        }
+        copy.put("name", custom)
+        return copy
+    }
+
+    fun getProviderCourses(
+        context: Context,
+        provider: Platform,
+        includeHidden: Boolean = false
+    ): List<JSONObject> {
+        val overrides = loadProviderCourseOverrides(context, provider.id)
+        val rawCourses = provider.getCourses()
+            .filter { includeHidden || !isCourseHidden(it, overrides.hiddenCourseKeys) }
+            .map { withCustomName(it, overrides.courseNames) }
+            .map { course ->
+                val copy = JSONObject(course.toString())
+                if (!copy.has("platformId") || copy.optString("platformId").isBlank()) {
+                    copy.put("platformId", provider.id)
+                }
+                copy
+            }
+        if (overrides.courseOrder.isEmpty()) return rawCourses
+
+        val orderIndex = overrides.courseOrder.withIndex().associate { it.value to it.index }
+        return rawCourses.sortedBy { course ->
+            val key = courseOverrideKey(course)
+            val legacyKey = legacyCourseOverrideKey(course)
+            orderIndex[key] ?: orderIndex[legacyKey] ?: Int.MAX_VALUE
+        }
+    }
+
+    /**
+     * Retrieves all courses across all platforms.
+     */
+    fun getCourses(context: Context): ArrayList<JSONObject> {
+        val platforms = loadPlatforms(context)
+        val courses = ArrayList<JSONObject>()
+
+        for ((index, platform) in platforms.withIndex()) {
+            try {
+                val pCourses = getProviderCourses(context, platform)
+                pCourses.forEach { course ->
+                    course.put("platformId", platform.id)
+                    course.put("index", index)
+                }
+                courses.addAll(pCourses)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error retrieving courses for platform: ${platform.javaClass.simpleName}", e)
+            }
+        }
+        return courses
+    }
+
     fun clearPlatforms(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit {
-            remove(KEY_PLATFORMS)
-        }
+        prefs.edit { remove(KEY_PLATFORMS) }
         Log.d(TAG, "Cleared all stored platforms")
     }
 
-    fun hasGradesSupport(context: Context): Boolean {
-        val platforms = loadPlatforms(context)
-        return platforms.any { it.suportsGrades }
+    fun clearProviderCourseOverrides(context: Context, providerId: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit { remove("") }
     }
-
-    fun hasScheduleSupport(context: Context): Boolean {
-        val platforms = loadPlatforms(context)
-        return platforms.any { it.supportsSchedule }
-    }
-
-    fun hasAttendanceSupport(context: Context): Boolean {
-        val platforms = loadPlatforms(context)
-        return platforms.any { it.supportsAttendance }
-    }
-
-
 }

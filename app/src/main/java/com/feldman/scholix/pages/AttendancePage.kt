@@ -7,21 +7,31 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.R
+import androidx.compose.runtime.mutableIntStateOf
 import com.feldman.scholix.TopBarSpacing
+import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
+import com.feldman.scholix.ui.components.ProviderPickerBar
 import com.feldman.scholix.ui.components.ChipPicker
+import com.feldman.scholix.ui.components.SubjectIcon
+import com.feldman.motion.MotionSymbols
+import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionCard
+import com.feldman.motion.feldmanFont
+import com.feldman.motion.rememberSymbolPainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -49,22 +59,28 @@ fun FiltersGrid(
         ) {
             Box(modifier = Modifier.weight(1f)) {
                 ChipPicker(
-                    label = "Sort by",
-                    options = listOf("Type", "Date", "Subject"),
-                    selected = sortBy,
-                    onSelectedChange = onSortChange
-                )
-            }
-            Box(modifier = Modifier.weight(1f)) {
-                ChipPicker(
-                    label = "Year",
+                    label = stringResource(R.string.year),
                     options = listOf(
                         (currentYear - 1).toString(),
                         currentYear.toString(),
                         (currentYear + 1).toString()
                     ),
                     selected = year.toString(),
+                    optionIcon = { rememberSymbolPainter(MotionSymbols.ic_calendar_month) },
                     onSelectedChange = { onYearChange(it.toInt()) }
+                )
+            }
+            Box(modifier = Modifier.weight(1f)) {
+                ChipPicker(
+                    label = stringResource(R.string.semester),
+                    options = listOf("A", "B"),
+                    selected = semester,
+                    optionIcon = { option ->
+                        rememberSymbolPainter(
+                            if (option == "A") MotionSymbols.ic_looks_one else MotionSymbols.ic_looks_two
+                        )
+                    },
+                    onSelectedChange = onSemesterChange
                 )
             }
         }
@@ -73,17 +89,23 @@ fun FiltersGrid(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.End
         ) {
-            Box(modifier = Modifier.weight(1f)) {
-                ChipPicker(
-                    label = "Semester",
-                    options = listOf("A", "B"),
-                    selected = semester,
-                    onSelectedChange = onSemesterChange
-                )
-            }
-            Spacer(modifier = Modifier.weight(1f))
+            ChipPicker(
+                label = stringResource(R.string.sort_by),
+                options = listOf("Type", "Date", "Subject"),
+                selected = sortBy,
+                optionIcon = { option ->
+                    rememberSymbolPainter(
+                        when (option) {
+                            "Type" -> MotionSymbols.ic_event_note
+                            "Subject" -> MotionSymbols.ic_school
+                            else -> MotionSymbols.ic_calendar_month
+                        }
+                    )
+                },
+                onSelectedChange = onSortChange
+            )
         }
     }
 }
@@ -99,6 +121,28 @@ private val dateTryFormats = listOf(
     DateTimeFormatter.ofPattern("yyyy/MM/dd"),
     DateTimeFormatter.ofPattern("dd/MM/yyyy")
 )
+/**
+ * How a date is shown on a card: "01/09/2026".
+ *
+ * All digits on purpose. These cards lay out right-to-left for Hebrew content,
+ * and a written month splits the date into separate directional runs -- "1 Sep
+ * 2026" renders as "Sep 2026 1". Digits and slashes stay one run either way.
+ */
+private val attendanceDateFormat: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("dd/MM/yyyy")
+
+/**
+ * The event's date, formatted for display.
+ *
+ * Providers hand back whatever their API uses -- Mashov sends full ISO stamps
+ * like "2026-09-01T00:00:00" -- so parse it and print a readable date, falling
+ * back to the raw string only when it cannot be understood at all.
+ */
+private fun formatEventDate(raw: String?): String {
+    val parsed = parseDateOrNull(raw) ?: return raw.orEmpty()
+    return parsed.format(attendanceDateFormat)
+}
+
 private fun parseDateOrNull(raw: String?): LocalDate? {
     if (raw.isNullOrBlank()) return null
     for (fmt in dateTryFormats) {
@@ -127,29 +171,46 @@ fun AttendancePage(modifier: Modifier = Modifier) {
     var sortBy by rememberSaveable { mutableStateOf("Date") }
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
+    // The page used to read provider #0 with no way to change it. Pick between
+    // every provider that publishes attendance, like Grades and Schedule do.
+    var attendancePlatforms by remember { mutableStateOf<List<Platform>>(emptyList()) }
+    var selectedPlatformIndex by remember { mutableIntStateOf(0) }
+    var platformPickerExpanded by remember { mutableStateOf(false) }
+    var providersLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        attendancePlatforms = withContext(Dispatchers.IO) {
+            runCatching {
+                PlatformStorage.loadPlatforms(context).filter { it.supportsAttendance }
+            }.getOrDefault(emptyList())
+        }
+        providersLoaded = true
+    }
+    val selectedPlatform = attendancePlatforms.getOrNull(selectedPlatformIndex)
+
     val groupedEvents = remember(events, sortBy) {
         when (sortBy) {
             "Type" -> events.mapValues { (_, list) ->
-                list.sortedBy { ev ->
-                    try { LocalDate.parse(ev.optString("date"), dateFormatter) }
-                    catch (_: Exception) { LocalDate.MIN }
-                }
+                list.sortedBy { ev -> parseDateOrNull(ev.optString("date")) ?: LocalDate.MIN }
             }.toSortedMap()
 
             "Date" -> run {
                 val grouped = events
                     .flatMap { it.value }
                     .groupBy { ev ->
-                        parseDateOrNull(ev.optString("date"))?.toString() ?: "Unknown Date"
+                        parseDateOrNull(ev.optString("date"))?.format(attendanceDateFormat)
+                            ?: "Unknown Date"
                     }
                     .mapValues { (_, list) ->
                         list.sortedBy { ev -> parseDateOrNull(ev.optString("date")) ?: LocalDate.MIN }
                     }
 
-                // Sort keys chronologically; put "Unknown Date" at the end
+                // Chronological by the group's own events, with undated last.
+                val groupDate = grouped.mapValues { (_, list) ->
+                    list.firstNotNullOfOrNull { parseDateOrNull(it.optString("date")) }
+                }
                 val comparator = Comparator<String> { a, b ->
-                    val da = runCatching { LocalDate.parse(a) }.getOrNull()
-                    val db = runCatching { LocalDate.parse(b) }.getOrNull()
+                    val da = groupDate[a]
+                    val db = groupDate[b]
                     when {
                         da != null && db != null -> da.compareTo(db)
                         da != null -> -1
@@ -168,49 +229,16 @@ fun AttendancePage(modifier: Modifier = Modifier) {
         }
     }
 
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            val platform = PlatformStorage.getPlatform(context, 0)
-            println(platform)
-            println(platform)
-            println(platform)
-            println(platform)
-            println(platform)
-            println(platform)
-            println(platform)
-            if (platform != null) {
-                println(1)
-                try {
-                    val json = platform.getAttendanceEvents(yearState, semesterState.lowercase())
-                    val grouped = mutableMapOf<String, MutableList<JSONObject>>()
-
-                    val eventsJson = json.optJSONObject("events")
-                    eventsJson?.keys()?.forEach { type ->
-                        val arr = eventsJson.getJSONArray(type)
-                        val list = mutableListOf<JSONObject>()
-                        for (i in 0 until arr.length()) {
-                            list.add(arr.getJSONObject(i))
-                        }
-                        grouped[type] = list
-                    }
-
-                    withContext(Dispatchers.Main) {
-                        events = grouped
-                        isLoading = false
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    withContext(Dispatchers.Main) {
-                        isLoading = false
-                    }
-                }
-            }
+    LaunchedEffect(selectedPlatform?.id, yearState, semesterState) {
+        val platform = selectedPlatform
+        if (platform == null) {
+            // Nothing to load from: stop showing a spinner that will never end.
+            if (attendancePlatforms.isEmpty() && providersLoaded) isLoading = false
+            return@LaunchedEffect
         }
-    }
-    LaunchedEffect(yearState, semesterState) {
+        isLoading = true
         withContext(Dispatchers.IO) {
-            val platform = PlatformStorage.getPlatform(context, 0)
-            if (platform != null) {
+            run {
                 try {
                     val json = platform.getAttendanceEvents(yearState, semesterState.lowercase())
                     val grouped = mutableMapOf<String, MutableList<JSONObject>>()
@@ -241,9 +269,19 @@ fun AttendancePage(modifier: Modifier = Modifier) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(TopBarSpacing()))
+        if (attendancePlatforms.size > 1) {
+            ProviderPickerBar(
+                providers = attendancePlatforms,
+                selectedIndex = selectedPlatformIndex,
+                onSelected = { selectedPlatformIndex = it; isLoading = true },
+                expanded = platformPickerExpanded,
+                onExpandedChange = { platformPickerExpanded = it }
+            )
+            Spacer(Modifier.height(8.dp))
+        }
         FiltersGrid(
             sortBy = sortBy,
             onSortChange = { sortBy = it },
@@ -258,97 +296,90 @@ fun AttendancePage(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(20.dp))
 
         if (isLoading) {
-            Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularWavyProgressIndicator()
-            }
+            GradesLoadingIndicator(modifier = modifier.fillMaxSize())
         } else {
             if (events.isEmpty()) {
                 Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(stringResource(R.string.no_attendance_events_found))
+                    NoAttendanceState()
                 }
             } else {
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(16.dp))
-                ) {
-                    groupedEvents.forEach { (groupKey, list) ->
-
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    groupedEvents.forEach { (_, list) ->
                         itemsIndexed(list) { index, event ->
-                            val shape = when (index) {
-                                0 -> if (list.lastIndex == 0) RoundedCornerShape(24.dp)
-                                else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
-                                list.lastIndex -> RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp, topStart = 4.dp, topEnd = 4.dp)
-                                else -> RoundedCornerShape(4.dp)
-                            }
+                            val subject = event.optString("subject")
+                            val isRtl = isRtlText(subject)
 
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(80.dp),
-                                shape = shape,
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                ),
+                            MotionCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                position = when {
+                                    list.size == 1 -> ItemPosition.Alone
+                                    index == 0 -> ItemPosition.Start
+                                    index == list.lastIndex -> ItemPosition.End
+                                    else -> ItemPosition.Middle
+                                },
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentPadding = 0.dp
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 20.dp),
-                                    verticalArrangement = Arrangement.Center
+                                CompositionLocalProvider(
+                                    LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
                                 ) {
-                                    // First row: type + date
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = event.optString("type"),
-                                            style = MaterialTheme.typography.titleLarge.copy(
-                                                fontWeight = FontWeight.Medium
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurface
+                                        SubjectIcon(
+                                            subject = subject,
+                                            assignment = event.optString("type")
                                         )
-                                        Text(
-                                            text = event.optString("date"),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = subject,
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontFamily = feldmanFont(weight = 700),
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = event.optString("teacher"),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            event.optString("remark").takeIf { it.isNotBlank() }?.let { remark ->
+                                                Text(
+                                                    text = remark,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(
+                                                text = event.optString("type"),
+                                                style = MaterialTheme.typography.titleMedium.copy(
+                                                    fontFamily = feldmanFont(weight = 700),
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = formatEventDate(event.optString("date")),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
-                                    // Second row: teacher - subject
-                                    Text(
-                                        text = event.optString("teacher") + " - " + event.optString("subject"),
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-
-                                    val remark = event.optString("remark")
-                                    if (remark.isNotBlank()) {
-                                        Text("Notes: $remark", style = MaterialTheme.typography.bodySmall)
-                                    }
-
-//                                    if (event.optBoolean("enableJustified", true)) {
-//                                        Text(
-//                                            text = if (event.optBoolean("isJustified")) stringResource(
-//                                                R.string.justified
-//                                            ) else stringResource(R.string.not_justified),
-//                                            style = MaterialTheme.typography.bodySmall
-//                                        )
-//                                    }
                                 }
                             }
-
-
                             Spacer(Modifier.height(2.dp))
                         }
-
-                        item { Spacer(Modifier.height(12.dp)) }
                     }
-                    item { Spacer(Modifier.height(BottomBarSpacing())) }
+                    item { Spacer(Modifier.height(180.dp)) }
 
                 }
 
@@ -357,4 +388,34 @@ fun AttendancePage(modifier: Modifier = Modifier) {
     }
 
 
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun NoAttendanceState(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        SubjectIcon(
+            subject = "Attendance",
+            containerColor = MaterialTheme.colorScheme.primary,
+            iconColor = MaterialTheme.colorScheme.onPrimary,
+            size = 128.dp,
+            iconSize = 68.dp,
+            painter = rememberSymbolPainter(MotionSymbols.ic_event_busy),
+            polygon = MaterialShapes.Cookie12Sided
+        )
+        Spacer(Modifier.height(20.dp))
+        Text(
+            text = stringResource(R.string.no_attendance_events_found),
+            style = MaterialTheme.typography.headlineMedium,
+            fontFamily = feldmanFont(weight = 600, width = 140f),
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
+        )
+    }
 }

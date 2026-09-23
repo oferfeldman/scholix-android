@@ -1,11 +1,17 @@
 [versions]
 accompanistSwiperefresh = "0.36.0"
 activityCompose = "1.11.0"
-agp = "8.13.1"
+agp = "9.3.2"
 animation = "1.9.4"
 backdrop = "1.0.0"
+coilCompose = "2.7.0"
+converterGson = "3.0.0"
+credentials = "1.6.0"
+datastorePreferences = "1.2.1"
 firebaseBom = "34.5.0"
 foundation = "1.9.4"
+glanceAppwidget = "1.2.0"
+glanceMaterial3 = "1.2.0"
 jsoup = "1.21.2"
 kotlin = "2.2.21"
 ktorClientLogging = "3.3.1"
@@ -13,8 +19,12 @@ ktorSerializationKotlinxJson = "3.3.1"
 ktorClientContentNegotiation = "3.3.1"
 ktorClientOkhttp = "3.3.1"
 ktorClientCore = "3.3.1"
+materialKolor = "5.0.1"
+motion = "beta24-local"
+pdfboxAndroid = "2.0.27.0"
+retrofit = "3.0.0"
 room = "2.8.3"
-ksp = "2.2.0-2.0.2"
+ksp = "2.3.6"
 # AndroidX + core
 coreKtx = "1.17.0"
 appcompat = "1.7.1"
@@ -37,6 +47,7 @@ swiperefreshlayout = "1.1.0"
 roomKtx = "2.8.3"
 ui = "1.9.4"
 uiText = "1.9.4"
+webkit = "1.17.0"
 workRuntimeKtx = "2.11.0"
 
 [libraries]
@@ -47,13 +58,21 @@ androidx-animation = { module = "androidx.compose.animation:animation", version.
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
+androidx-credentials-play-services-auth = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
 androidx-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "foundation" }
+androidx-glance-material3 = { module = "androidx.glance:glance-material3", version.ref = "glanceMaterial3" }
+androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glanceAppwidget" }
 androidx-material3 = { module = "androidx.compose.material3:material3" }
 androidx-ui = { module = "androidx.compose.ui:ui" }
 androidx-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
 androidx-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 androidx-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
 backdrop = { module = "io.github.kyant0:backdrop", version.ref = "backdrop" }
+coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coilCompose" }
+converter-gson = { module = "com.squareup.retrofit2:converter-gson", version.ref = "converterGson" }
 firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
 firebase-crashlytics-ndk = { module = "com.google.firebase:firebase-crashlytics-ndk" }
@@ -69,6 +88,10 @@ androidx-material-icons-core = { module = "androidx.compose.material:material-ic
 androidx-material-icons-extended = { module = "androidx.compose.material:material-icons-extended", version.ref = "materialIconsCore" }
 androidx-room-runtime   = { module = "androidx.room:room-runtime",  version.ref = "room" }
 androidx-room-compiler  = { module = "androidx.room:room-compiler", version.ref = "room" }
+material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
+motion = { module = "io.github.feldmandev:motion", version.ref = "motion" }
+pdfbox-android = { module = "com.tom-roush:pdfbox-android", version.ref = "pdfboxAndroid" }
+retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit" }
 room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "roomKtx" }
 
 #liquid glass

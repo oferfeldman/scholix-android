@@ -6,7 +6,15 @@
     <string name="wednesday">רביעי</string>
     <string name="thursday">חמישי</string>
     <string name="friday">שישי</string>
-    <string name="noSchedule">אין מערכת ליום זה</string>
+    <string name="noSchedule">אין מערכת להיום</string>
+    <string name="noScheduleForDay">אין מערכת ל%1$s</string>
+    <string name="room">חדר</string>
+    <string name="sunday_full">יום ראשון</string>
+    <string name="monday_full">יום שני</string>
+    <string name="tuesday_full">יום שלישי</string>
+    <string name="wednesday_full">יום רביעי</string>
+    <string name="thursday_full">יום חמישי</string>
+    <string name="friday_full">יום שישי</string>
     <string name="original">מקורי</string>
     <string name="updated">מעודכן</string>
     <string name="course">קורס</string>
@@ -17,4 +25,15 @@
     <string name="year">שנה</string>
     <string name="grade">שכבה</string>
     <string name="classroom">כיתה</string>
+    <string name="no_courses_available">אין קורסים זמינים</string>
+    <string name="free_period">חלון</string>
+    <string name="parallel_lessons">%1$d שיעורים מקבילים</string>
+    <string name="customize_navigation">התאמת סרגל הניווט</string>
+    <string name="crash_logs">יומני קריסות</string>
+    <string name="crash_logs_description">הצגת דוחות קריסה ואבחון תקלות</string>
+    <string name="no_crashes">אין קריסות מתועדות</string>
+    <string name="clear_logs">נקה יומנים</string>
+    <string name="copy_log">העתק דוח</string>
+    <string name="crash_detected">סקוליקס נסגרה באופן בלתי צפוי</string>
+    <string name="crash_tap_details">לחץ לצפייה בפרטי הקריסה</string>
 </resources>

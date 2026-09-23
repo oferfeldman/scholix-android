@@ -24,9 +24,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalAutofillManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.contentType
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -34,12 +36,28 @@ import androidx.core.content.ContextCompat.getSystemService
 import androidx.credentials.CreatePasswordRequest
 import androidx.credentials.CredentialManager
 import com.feldman.scholix.api.*
-import com.feldman.scholix.ui.components.ActionRow
-import com.feldman.scholix.ui.components.SegmentedOption
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import android.app.Activity
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.feldman.scholix.api.platforms.StudentsPortalPlatform
+import com.feldman.scholix.api.platforms.MashovPlatform
+import com.feldman.scholix.api.platforms.MashovSchool
+import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.ui.HiddenMoeLogin
+import com.feldman.scholix.ui.HiddenWebtopMoeLogin
+import com.feldman.scholix.ui.components.ProviderPickerList
+import com.feldman.scholix.ui.components.WebtopLoginMethodPicker
+import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionButtonState
+import com.feldman.motion.MotionSymbols
+import com.feldman.motion.rememberSymbolPainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+internal val ProviderSheetActionButtonWidth = 80.dp
+internal val ProviderSheetActionButtonHeight = 56.dp
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -56,8 +74,20 @@ fun LoginPage(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    // Webtop can be added either with a username/password or via Ministry-of-
+    // Education (MOE) SSO. This picks which; it is only shown for Webtop.
+    val loginMethod = remember { mutableStateOf("password") }
+    val isWebtop = selectedPlatform?.name == "Webtop"
+    // The Education Portal uses normal username/password fields; the credentials
+    // are relayed by an off-screen engine because its IdP is bot-protected.
+    val isPortal = selectedPlatform?.name == "Education Portal"
+    val useMoeLogin = isWebtop && loginMethod.value == "moe"
+
     val showLoginPage = selectedPlatform != null
-    val backdrop = rememberLayerBackdrop()
+
+    // Credentials for the off-screen MOE sign-in (set when the user submits).
+    var portalCreds by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var webtopMoeCreds by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     Box(
         modifier = modifier
@@ -79,62 +109,18 @@ fun LoginPage(
 
                 Spacer(Modifier.height(16.dp))
 
-                ActionRow {
-                    addVerticalActionList(
-                        options = listOf(
-                            *platformOptions.map { option ->
-                                SegmentedOption(
-                                    option,
-                                    text = option.name,
-                                    iconRes = option.iconRes
-                                )
-                            }.toTypedArray()
-                        ),
-                        onClick = { option ->
-                            selectedPlatform = option
-                            loginFields = option.factory().getLoginFields()
-                            errorMessage = null
-                        },
-                        isGlass = false,
-                        backdrop = backdrop
-                    )
-
-                }
+                ProviderPickerList(
+                    providers = platformOptions,
+                    onSelect = { option ->
+                        selectedPlatform = option
+                        loginFields = option.factory().getLoginFields()
+                        errorMessage = null
+                    }
+                )
             }
-
-            // ─── Platform Selection Page ────────────────────────
-//            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-//                Text(
-//                    text = "Choose Your Platform",
-//                    style = MaterialTheme.typography.headlineMedium,
-//                    color = MaterialTheme.colorScheme.primary
-//                )
-//
-//                Spacer(Modifier.height(16.dp))
-//
-//                LazyVerticalGrid(
-//                    columns = GridCells.Adaptive(minSize = 120.dp),
-//                    modifier = Modifier
-//                        .fillMaxWidth()
-//                        .heightIn(max = 280.dp),
-//                    verticalArrangement = Arrangement.spacedBy(12.dp),
-//                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-//                ) {
-//                    items(platformOptions) { option ->
-//                        PlatformCard(
-//                            option = option,
-//                            onSelect = {
-//                                selectedPlatform = option
-//                                loginFields = option.factory().getLoginFields()
-//                                errorMessage = null
-//                            }
-//                        )
-//                    }
-//                }
-//            }
         }
 
-        // ─── Inner Login Page ─────────────────────────────
+        // ─── Inner Login Page ──────────────────────────────
         AnimatedVisibility(visible = showLoginPage, enter = fadeIn(), exit = fadeOut()) {
             selectedPlatform?.let { platform ->
                 val fields = loginFields ?: platform.factory().getLoginFields()
@@ -154,6 +140,7 @@ fun LoginPage(
                                 selectedPlatform = null
                                 errorMessage = null
                                 loginFields = null
+                                loginMethod.value = "password"
                             },
                             modifier = Modifier.align(Alignment.CenterStart),
                         ) {
@@ -173,6 +160,28 @@ fun LoginPage(
                         )
                     }
 
+                    // Webtop supports two ways in: username/password or the
+                    // Ministry-of-Education SSO. Offer the choice here.
+                    if (isWebtop) {
+                        WebtopLoginMethodPicker(
+                            state = loginMethod,
+                            onSelectedChange = { errorMessage = null }
+                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
+
+                    if (useMoeLogin) {
+                        // MOE sign-in: same fields, but these are the Ministry of
+                        // Education credentials; the SSO uses HTTP requests.
+                        Text(
+                            text = "Enter your Ministry of Education username and " +
+                                "password. Signing in happens in the background.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
+                    run {
                     DynamicLoginFields(
                         fields = fields,
                         onFieldsChanged = { loginFields = it },
@@ -187,6 +196,27 @@ fun LoginPage(
 
                             isLoading = true
                             errorMessage = null
+
+                            if (isPortal) {
+                                // Relayed to the MOE page off-screen; no browser UI.
+                                portalCreds = Pair(
+                                    fields.getValue("username").orEmpty(),
+                                    fields.getValue("password").orEmpty()
+                                )
+                                return@DynamicLoginFields
+                            }
+
+                            // Read the picker's state here rather than the value
+                            // captured when this lambda was built: a snapshot can go
+                            // stale and send MOE credentials down the Webtop password
+                            // path, which fails as "invalid credentials".
+                            if (isWebtop && loginMethod.value == "moe") {
+                                webtopMoeCreds = Pair(
+                                    fields.getValue("username").orEmpty(),
+                                    fields.getValue("password").orEmpty()
+                                )
+                                return@DynamicLoginFields
+                            }
 
                             scope.launch {
                                 try {
@@ -213,12 +243,13 @@ fun LoginPage(
                                     }
 
                                     val ok = withContext(Dispatchers.IO) {
-                                        // Try login once
-                                        created.refreshCookies()
-                                        created.isLoggedIn()
+                                        created.isLoggedIn() ||
+                                            (created.refreshCookies() && created.isLoggedIn())
                                     }
                                     if (ok) {
-                                        PlatformStorage.savePlatforms(context, listOf(created))
+                                        withContext(Dispatchers.IO) {
+                                            PlatformStorage.addPlatforms(context, listOf(created))
+                                        }
 
                                         try {
                                             val credentialManager = CredentialManager.create(context)
@@ -260,8 +291,77 @@ fun LoginPage(
                         buttonText = "Add",
 
                     )
+                    }
                 }
             }
+        }
+
+        // Off-screen MOE sign-in for the Education Portal (1dp, invisible).
+        portalCreds?.let { (user, pass) ->
+            HiddenMoeLogin(username = user, password = pass) { cookies, csrt, error ->
+                portalCreds = null
+                if (cookies == null) {
+                    errorMessage = error ?: "Ministry of Education login failed"
+                    isLoading = false
+                    return@HiddenMoeLogin
+                }
+                scope.launch {
+                    try {
+                        val created = withContext(Dispatchers.IO) {
+                            StudentsPortalPlatform.loginWithCookies(cookies, csrt, user, pass)
+                        }
+                        val ok = withContext(Dispatchers.IO) { created.isLoggedIn() }
+                        if (ok) {
+                            withContext(Dispatchers.IO) {
+                                PlatformStorage.addPlatforms(context, listOf(created))
+                            }
+                            onLoginSuccess()
+                        } else {
+                            errorMessage = "Ministry of Education login failed"
+                        }
+                    } catch (e: Exception) {
+                        errorMessage = "Login failed: ${e.localizedMessage}"
+                    } finally {
+                        isLoading = false
+                    }
+                }
+            }
+        }
+
+        // Off-screen MOE sign-in for Webtop (1dp, invisible).
+        webtopMoeCreds?.let { (user, pass) ->
+            HiddenWebtopMoeLogin(username = user, password = pass) { key, error ->
+                webtopMoeCreds = null
+                if (key == null) {
+                    errorMessage = error ?: "Ministry of Education login failed"
+                    isLoading = false
+                    return@HiddenWebtopMoeLogin
+                }
+                scope.launch {
+                    try {
+                        val created = withContext(Dispatchers.IO) {
+                            WebtopPlatform.loginWithMoe(key, user, pass)
+                        }
+                        val ok = withContext(Dispatchers.IO) { created.isLoggedIn() }
+                        if (ok) {
+                            withContext(Dispatchers.IO) {
+                                PlatformStorage.addPlatforms(context, listOf(created))
+                            }
+                            onLoginSuccess()
+                        } else {
+                            errorMessage = "Could not start the Webtop session"
+                        }
+                    } catch (e: Exception) {
+                        errorMessage = "Login failed: ${e.localizedMessage}"
+                    } finally {
+                        isLoading = false
+                    }
+                }
+            }
+        }
+
+        if (isLoading) {
+            GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
         }
     }
 }
@@ -275,9 +375,10 @@ fun DynamicLoginFields(
     errorMessage: String?,
     buttonText: String,
     onSubmit: () -> Unit,
-    onCancel: (() -> Unit)? = null
+    onCancel: (() -> Unit)? = null,
+    useMotionButtons: Boolean = false
 ) {
-    var mutableFields by remember { mutableStateOf(fields) }
+    var mutableFields by remember(fields) { mutableStateOf(fields) }
     val autofillManager = LocalAutofillManager.current
 
     Column(
@@ -287,7 +388,7 @@ fun DynamicLoginFields(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         fields.getFields().forEach { field ->
-            var value by remember { mutableStateOf(field.value ?: "") }
+            var value by remember(field.id, field.value) { mutableStateOf(field.value ?: "") }
             var passwordVisible by remember { mutableStateOf(false) }
 
             val autofillContentType = when (field.type) {
@@ -351,29 +452,56 @@ fun DynamicLoginFields(
         AnimatedVisibility(visible = !isLoading, enter = fadeIn(), exit = fadeOut()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                onCancel?.let {
-                    OutlinedButton(
-                        onClick = it,
-                        modifier = Modifier.weight(1f),
+                if (useMotionButtons) {
+                    if (onCancel != null) {
+                        MotionButton(
+                            icon = MotionSymbols.ic_close,
+                            onClick = onCancel,
+                            width = ProviderSheetActionButtonWidth,
+                            height = ProviderSheetActionButtonHeight,
+                            iconSize = 22.dp,
+                            defaultState = MotionButtonState(
+                                backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        )
+                    }
+                    MotionButton(
+                        icon = MotionSymbols.ic_check,
+                        onClick = {
+                            autofillManager?.commit()
+                            onSubmit()
+                        },
+                        width = ProviderSheetActionButtonWidth,
+                        height = ProviderSheetActionButtonHeight,
+                        iconSize = 22.dp
+                    )
+                } else {
+                    onCancel?.let {
+                        OutlinedButton(
+                            onClick = it,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text("Cancel")
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            autofillManager?.commit()
+                            onSubmit()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(56.dp),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("Cancel")
+                        Text(buttonText, style = MaterialTheme.typography.titleMedium)
                     }
-                }
-
-                Button(
-                    onClick =  {
-                        autofillManager?.commit()
-                        onSubmit()
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(56.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text(buttonText, style = MaterialTheme.typography.titleMedium)
                 }
             }
         }

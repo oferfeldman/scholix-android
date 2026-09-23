@@ -1,3 +1,5 @@
+package com.feldman.scholix.pages
+
 import android.text.BidiFormatter
 import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -13,8 +15,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.intl.Locale
@@ -29,8 +32,22 @@ import com.feldman.scholix.R
 import androidx.compose.ui.text.intl.LocaleList
 import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.TopBarSpacing
+import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
+import com.feldman.scholix.api.platformOptions
+import com.feldman.scholix.api.platforms.MashovPlatform
+import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.ui.components.ChipPicker
+import com.feldman.scholix.ui.components.ProviderPickerBar
+import com.feldman.scholix.ui.components.SubjectIcon
+import com.feldman.motion.IconBackgroundColor
+import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionCard
+import com.feldman.motion.MotionSymbols
+import com.feldman.motion.feldmanFont
+import com.feldman.motion.rememberSymbolPainter
+import com.feldman.motion.vibrantIconBackgroundColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Calendar
@@ -52,7 +69,7 @@ fun ClassFiltersRow(
         Box(modifier = Modifier.weight(1f)) {
             ChipPicker(
                 label = stringResource(R.string.grade),
-                options = listOf("7", "8", "9"),
+                options = (1..12).map(Int::toString),
                 selected = grade,
                 onSelectedChange = onGradeChange
             )
@@ -73,6 +90,7 @@ fun ClassFiltersRow(
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SchedulePage(
+    platforms: List<Platform>,
     modifier: Modifier = Modifier,
 ) {
     val dayNames = listOf(
@@ -83,13 +101,35 @@ fun SchedulePage(
         stringResource(R.string.thursday),
         stringResource(R.string.friday)
     )
+    val fullDayNames = listOf(
+        stringResource(R.string.sunday_full),
+        stringResource(R.string.monday_full),
+        stringResource(R.string.tuesday_full),
+        stringResource(R.string.wednesday_full),
+        stringResource(R.string.thursday_full),
+        stringResource(R.string.friday_full)
+    )
 
     val allSchedulesUpdated = remember { mutableStateMapOf<Int, List<JSONObject>>() }
     val allSchedulesOriginal = remember { mutableStateMapOf<Int, List<JSONObject>>() }
     val errorMessages = remember { mutableStateMapOf<Int, String?>() }
+    var loadedSelection by remember { mutableStateOf<String?>(null) }
 
-    val today = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
-    val initialPage = if (today == Calendar.SATURDAY) 0 else (today + 6) % 7
+    val todayCalendar = Calendar.getInstance()
+    val today = todayCalendar.get(Calendar.DAY_OF_WEEK)
+    val currentHour = todayCalendar.get(Calendar.HOUR_OF_DAY)
+    val todayPage = if (today == Calendar.SATURDAY) -1 else (today + 6) % 7
+
+    val tomorrowPage = when (today) {
+        Calendar.FRIDAY, Calendar.SATURDAY -> 0
+        else -> if (todayPage in 0..4) todayPage + 1 else 0
+    }
+
+    val initialPage = when {
+        today == Calendar.SATURDAY -> 0
+        currentHour >= 20 -> tomorrowPage
+        else -> todayPage
+    }
 
     val pagerState = rememberPagerState(
         initialPage = initialPage,
@@ -97,19 +137,63 @@ fun SchedulePage(
     )
     val coroutineScope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
+    var webtopRelogin by remember { mutableStateOf<WebtopPlatform?>(null) }
+    var reloginAttempted by remember { mutableStateOf(false) }
+    var scheduleReloadTrigger by remember { mutableIntStateOf(0) }
 
-    var selectedGrade by remember { mutableStateOf("9") }
-    var selectedClass by remember { mutableStateOf("6") }
-    val selectedValue = "${selectedGrade}|${selectedClass}"
     val context = LocalContext.current
+    // Every provider that can supply a schedule, so the page can switch between
+    // them the same way Grades switches between courses.
+    val schedulePlatforms = platforms.filter { it.supportsSchedule }
+    var selectedPlatformIndex by remember(schedulePlatforms.size) { mutableIntStateOf(0) }
+    var platformPickerExpanded by remember { mutableStateOf(false) }
+    val platform = schedulePlatforms.getOrNull(selectedPlatformIndex)
+    // Subjects the user marked as free periods for this provider.
+    val windowSubjects = remember(platform?.id) {
+        platform?.let { PlatformStorage.loadWindowSubjects(context, it.id) } ?: emptySet()
+    }
+    // Providers differ: Webtop publishes a separate "original" timetable and lets
+    // any grade/class be read, Mashov has one timetable for the signed-in student
+    // only. Show a control only where the provider backs it.
+    val scheduleInfo = remember(platform?.id) { platform?.getInfo() }
+    val supportsOriginal = scheduleInfo?.optBoolean("supportsOriginalSchedule", true) ?: true
+    val supportsSelection = scheduleInfo?.optBoolean("supportsScheduleSelection", true) ?: true
+    val rawScheduleSelection = platform?.getInfo()?.optString("scheduleSelection")
+    val accountSelection = remember(platform, rawScheduleSelection) {
+        rawScheduleSelection
+            ?.split('|', limit = 2)
+            ?.takeIf { it.size == 2 && it.all(String::isNotBlank) }
+    }
+    val accountSelectionKey = "${platform?.id}:${accountSelection?.joinToString("|")}"
+    var selectedGrade by remember(accountSelectionKey) {
+        mutableStateOf(accountSelection?.get(0) ?: "9")
+    }
+    var selectedClass by remember(accountSelectionKey) {
+        mutableStateOf(accountSelection?.get(1) ?: "6")
+    }
+    val selectedValue = "${selectedGrade}|${selectedClass}"
 
-    LaunchedEffect(pagerState.currentPage, selectedValue) {
+    LaunchedEffect(accountSelection) {
+        if (accountSelection != null && accountSelection.size == 2) {
+            selectedGrade = accountSelection[0]
+            selectedClass = accountSelection[1]
+        }
+    }
+
+    LaunchedEffect(pagerState.currentPage, platform?.id, selectedValue, scheduleReloadTrigger) {
         val page = pagerState.currentPage
+        val platformSelection = "${platform?.id}:$selectedValue"
+        if (loadedSelection != platformSelection) {
+            allSchedulesUpdated.clear()
+            allSchedulesOriginal.clear()
+            errorMessages.clear()
+            loadedSelection = platformSelection
+        }
 
         // 1. Check if we already have the data for the current page and selected filters.
         // If the data is already present, skip the network request.
-        val isUpdatedDataPresent = allSchedulesUpdated.containsKey(page) && allSchedulesUpdated[page]?.isNotEmpty() == true
-        val isOriginalDataPresent = allSchedulesOriginal.containsKey(page) && allSchedulesOriginal.get(page) != null
+        val isUpdatedDataPresent = allSchedulesUpdated.containsKey(page)
+        val isOriginalDataPresent = allSchedulesOriginal.containsKey(page)
 
         if (isUpdatedDataPresent && isOriginalDataPresent) {
             // Data is already cached and loaded for this page/filter combination.
@@ -120,13 +204,11 @@ fun SchedulePage(
         }
 
         // 2. Start loading and clear any previous error for this page
-        isLoading = true
+        isLoading = allSchedulesUpdated.isEmpty()
         errorMessages[page] = null
 
         try {
             Log.d("SchedulePage", "Fetching schedule for $selectedValue and page $page")
-
-            val platform = PlatformStorage.getPlatform(context, 0)
 
             if (platform != null) {
                 // Check if the page is STILL the current page before starting.
@@ -146,13 +228,22 @@ fun SchedulePage(
 
                     // detect if an error object is returned
                     if (schedule.has("error")) {
-                        // ... (error handling logic remains the same)
-                        val err = when (schedule.optString("error")) {
+                        val errorCode = schedule.optString("error")
+                        val webtop = platform as? WebtopPlatform
+                        if (errorCode == "login_failed" && webtop != null &&
+                            webtop.needsInteractiveRelogin() && !reloginAttempted
+                        ) {
+                            Log.d("SchedulePage", "Webtop session expired; re-signing in off-screen")
+                            reloginAttempted = true
+                            webtopRelogin = webtop
+                            return@withContext emptyList()
+                        }
+                        val err = when (errorCode) {
                             "server_unreachable" -> "Cannot reach the server.\nCheck your internet connection."
                             "login_failed" -> "Login failed.\nPlease re-login."
                             else -> "Unknown error occurred while loading schedule."
                         }
-                        errorMessages[page] = err // Note: updating state in IO is usually fine if it's a MutableStateMap or similar thread-safe structure, but it's safer to do it after withContext. For now, let's keep it clean.
+                        errorMessages[page] = err
                         emptyList()
                     } else {
                         schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
@@ -167,6 +258,30 @@ fun SchedulePage(
                     schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                 }
                 allSchedulesOriginal[page] = original
+
+                if ((platform is MashovPlatform || platform is WebtopPlatform) && errorMessages[page] == null) {
+                    val remainingDays = withContext(Dispatchers.IO) {
+                        dayNames.indices
+                            .filter { it != page }
+                            .associateWith { day ->
+                                val updatedSchedule = platform.getSchedule(day, null, selectedValue)
+                                val originalSchedule = platform.getOriginalSchedule(day, null, selectedValue)
+                                val updatedItems = updatedSchedule.keys().asSequence()
+                                    .map { updatedSchedule.getJSONObject(it) }
+                                    .toList()
+                                val originalItems = originalSchedule.keys().asSequence()
+                                    .map { originalSchedule.getJSONObject(it) }
+                                    .toList()
+                                updatedItems to originalItems
+                            }
+                    }
+                    val newUpdated = remainingDays.mapValues { it.value.first }
+                    val newOriginal = remainingDays.mapValues { it.value.second }
+                    androidx.compose.runtime.snapshots.Snapshot.withMutableSnapshot {
+                        allSchedulesUpdated.putAll(newUpdated)
+                        allSchedulesOriginal.putAll(newOriginal)
+                    }
+                }
 
             } else {
                 errorMessages[page] = "No platform account found."
@@ -190,20 +305,130 @@ fun SchedulePage(
     }
     }
 
+    val weekTimesByHour = remember(allSchedulesUpdated.size, allSchedulesOriginal.size, platform?.id) {
+        buildMap {
+            platform?.getInfo()?.optJSONObject("lessonTimes")?.let { bells ->
+                bells.keys().forEach { key ->
+                    val hour = key.toIntOrNull() ?: return@forEach
+                    val time = bells.optString(key)
+                    if (time.isNotBlank()) put(hour, time)
+                }
+            }
+            (allSchedulesUpdated.values + allSchedulesOriginal.values)
+                .flatten()
+                .forEach { lesson ->
+                    val hour = hourOf(lesson)
+                    val time = lesson.optString("time")
+                    if (hour >= 0 && time.isNotBlank()) putIfAbsent(hour, time)
+                }
+        }
+    }
+
+    val fetchesAllDaysTogether = remember(platform?.id) {
+        platform is WebtopPlatform || platform is MashovPlatform ||
+                platform?.getInfo()?.optString("scheduleKind") == "weekly"
+    }
+
+    var autoAdvancedToTomorrow by remember(platform?.id, selectedValue) {
+        mutableStateOf(false)
+    }
+
+    LaunchedEffect(allSchedulesUpdated[todayPage], fetchesAllDaysTogether) {
+        if (!fetchesAllDaysTogether || autoAdvancedToTomorrow) return@LaunchedEffect
+        if (todayPage == -1 || pagerState.currentPage != todayPage) return@LaunchedEffect
+
+        val todayLessons = allSchedulesUpdated[todayPage] ?: return@LaunchedEffect
+        if (todayLessons.isEmpty()) return@LaunchedEffect
+
+        val realLessons = todayLessons.filter {
+            !it.optBoolean(WINDOW_FLAG, false) &&
+                    !PlatformStorage.isWindowSubject(it.optString("subject"), windowSubjects) &&
+                    it.optString("colorClass") != "cancel-cell"
+        }
+
+        val lastLesson = realLessons.maxByOrNull { hourOf(it) } ?: todayLessons.maxByOrNull { hourOf(it) }
+        if (lastLesson != null) {
+            val lastHour = hourOf(lastLesson)
+            val timeStr = lastLesson.optString("time").ifBlank {
+                weekTimesByHour[lastHour].orEmpty()
+            }
+            val endTimeMinutes = parseLessonEndTimeMinutes(timeStr, lastHour)
+            val nowCal = Calendar.getInstance()
+            val currentMins = nowCal.get(Calendar.HOUR_OF_DAY) * 60 + nowCal.get(Calendar.MINUTE)
+
+            if (currentMins >= endTimeMinutes) {
+                autoAdvancedToTomorrow = true
+                pagerState.animateScrollToPage(tomorrowPage)
+            }
+        }
+    }
+
+    webtopRelogin?.let { webtop ->
+        HiddenWebtopMoeLogin(
+            username = webtop.getUsername().orEmpty(),
+            password = webtop.getPassword().orEmpty()
+        ) { key, error ->
+            webtopRelogin = null
+            if (key == null) {
+                Log.w("SchedulePage", "Webtop re-login failed: " + (error ?: "no key"))
+                errorMessages[pagerState.currentPage] = "Login failed.\nPlease re-login."
+                return@HiddenWebtopMoeLogin
+            }
+            coroutineScope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    webtop.adoptSession(key).also { success ->
+                        if (success) {
+                            val saved = PlatformStorage.loadPlatforms(context).toMutableList()
+                            val idx = saved.indexOfFirst { it.id == webtop.id }
+                            if (idx >= 0) saved[idx] = webtop else saved += webtop
+                            PlatformStorage.savePlatforms(context, saved)
+                        }
+                    }
+                }
+                if (ok) {
+                    reloginAttempted = false
+                    errorMessages.remove(pagerState.currentPage)
+                    allSchedulesUpdated.remove(pagerState.currentPage)
+                    allSchedulesOriginal.remove(pagerState.currentPage)
+                    scheduleReloadTrigger++
+                } else {
+                    errorMessages[pagerState.currentPage] = "Login failed.\nPlease re-login."
+                }
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
     ) {
-        Spacer(Modifier.height(TopBarSpacing()+40.dp))
+        // Same top inset as Grades and Attendance, so the provider picker lands in
+        // the same place on all three pages.
+        Spacer(Modifier.height(TopBarSpacing()))
         val scheduleMode = remember { mutableStateOf(ScheduleMode.Updated) }
+        LaunchedEffect(supportsOriginal) {
+            if (!supportsOriginal) scheduleMode.value = ScheduleMode.Updated
+        }
 
-        Row(
+        if (schedulePlatforms.size > 1) {
+            ProviderPickerBar(
+                providers = schedulePlatforms,
+                selectedIndex = selectedPlatformIndex,
+                onSelected = { selectedPlatformIndex = it },
+                expanded = platformPickerExpanded,
+                onExpandedChange = { platformPickerExpanded = it },
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+
+        if (supportsOriginal || supportsSelection) Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp)
+                .padding(horizontal = 16.dp)
         ) {
-            Box(modifier = Modifier.weight(1f)) {
+            if (supportsOriginal) Box(modifier = Modifier.weight(1f)) {
                 val original = stringResource(R.string.original)
                 val updated = stringResource(R.string.updated)
                 ChipPicker(
@@ -224,19 +449,19 @@ fun SchedulePage(
                     }
                 )
             }
-            Box(modifier = Modifier.weight(1f)) {
+            if (supportsSelection) Box(modifier = Modifier.weight(1f)) {
                 ChipPicker(
                     label = stringResource(R.string.grade), // "שכבה"
-                    options = listOf("7", "8", "9"),
+                    options = ((1..12).map(Int::toString) + selectedGrade).distinct(),
                     selected = selectedGrade,
                     onSelectedChange = { selectedGrade = it }
                 )
             }
 
-            Box(modifier = Modifier.weight(1f)) {
+            if (supportsSelection) Box(modifier = Modifier.weight(1f)) {
                 ChipPicker(
                     label = stringResource(R.string.classroom), // "כיתה"
-                    options = (1..9).map { it.toString() },
+                    options = ((1..9).map(Int::toString) + selectedClass).distinct(),
                     selected = selectedClass,
                     onSelectedChange = { selectedClass = it }
                 )
@@ -249,7 +474,7 @@ fun SchedulePage(
         PrimaryTabRow(
             selectedTabIndex = pagerState.currentPage,
             modifier = Modifier
-                .padding(horizontal = 8.dp)
+                .padding(horizontal = 16.dp)
                 .fillMaxWidth(),
             containerColor = MaterialTheme.colorScheme.background
         ) {
@@ -275,18 +500,20 @@ fun SchedulePage(
         Spacer(modifier = Modifier.height(12.dp))
 
         HorizontalPager(state = pagerState) { page ->
-            val scheduleItems = when (scheduleMode.value) {
+            val rawItems = when (scheduleMode.value) {
                 ScheduleMode.Updated -> allSchedulesUpdated[page] ?: emptyList()
                 ScheduleMode.Original -> allSchedulesOriginal[page] ?: emptyList()
             }
+            val scheduleItems = remember(rawItems, windowSubjects, weekTimesByHour) {
+                withFreePeriods(rawItems, windowSubjects, weekTimesByHour)
+            }
 
             val errMessage = errorMessages[page]
+            val pageFetched = allSchedulesUpdated.containsKey(page)
 
             when {
-                isLoading && scheduleItems.isEmpty() -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularWavyProgressIndicator()
-                    }
+                errMessage == null && (!pageFetched || (isLoading && scheduleItems.isEmpty())) -> {
+                    GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
                 }
                 errMessage != null -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -303,44 +530,65 @@ fun SchedulePage(
                 }
                 scheduleItems.isEmpty() -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            stringResource(R.string.noSchedule),
-                            color = Color.Gray,
-                            textAlign = TextAlign.Center
+                        NoScheduleState(
+                            dayName = fullDayNames[page],
+                            isToday = page == todayPage
                         )
                     }
                 }
                 else -> {
                     LazyColumn(
                         modifier = Modifier
-                            .padding(horizontal = 8.dp)
+                            .padding(horizontal = 16.dp)
                             .fillMaxSize(),
-//                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-//                        items(scheduleItems) { item ->
-//                            ScheduleCard(item)
-//                        }
-                        itemsIndexed(scheduleItems) { index, item ->
-                            val isFirst = index == 0
-                            val isLast = index == scheduleItems.lastIndex
-
-                            val shape = when {
-                                isFirst && isLast -> RoundedCornerShape(16.dp)
-                                isFirst -> RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 4.dp)
-                                isLast -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
-                                else -> RoundedCornerShape(4.dp)
+                        itemsIndexed(
+                            scheduleItems,
+                            key = { hourIndex, lessonsInHour ->
+                                val first = lessonsInHour.firstOrNull()
+                                "hour_${hourIndex}_${first?.let { hourOf(it) }}_${first?.optString("subject")}_${lessonsInHour.size}"
                             }
+                        ) { hourIndex, lessonsInHour ->
+                            val firstLesson = lessonsInHour.first()
+                            val hourNum = hourOf(firstLesson)
+                            val time = lessonsInHour.firstOrNull { it.optString("time").isNotBlank() }?.optString("time").orEmpty()
 
-                            ScheduleCardConnected(
-                                item = item,
-                                shape = shape
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    lessonsInHour.forEachIndexed { subIndex, item ->
+                                        key(item.optString("subject") + "_" + item.optInt("hour", subIndex) + "_" + subIndex) {
+                                            ScheduleCardConnected(
+                                                item = item,
+                                                position = if (lessonsInHour.size == 1) {
+                                                    ItemPosition.Alone
+                                                } else {
+                                                    when (subIndex) {
+                                                        0 -> ItemPosition.Start
+                                                        lessonsInHour.lastIndex -> ItemPosition.End
+                                                        else -> ItemPosition.Middle
+                                                    }
+                                                },
+                                                color = scheduleColor(item.optString("subject")),
+                                                index = hourIndex * 10 + subIndex
+                                            )
+                                        }
+                                    }
+                                }
+
+                                HourLabel(hour = hourNum, time = time)
+                            }
 
                             Spacer(Modifier.height(2.dp))
                         }
 
                         item {
-                            Spacer(Modifier.height(BottomBarSpacing()))
+                            Spacer(Modifier.height(180.dp))
                         }
                     }
                 }
@@ -349,89 +597,147 @@ fun SchedulePage(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ScheduleCardConnected(
     item: JSONObject,
-    shape: RoundedCornerShape
+    position: ItemPosition,
+    color: IconBackgroundColor,
+    index: Int
 ) {
-    val colors = getColorFromClass(item.optString("colorClass"))
+    // A free period is drawn in the plain surface colour so it reads as a gap
+    // between lessons rather than a lesson of its own.
+    if (item.optBoolean(WINDOW_FLAG, false)) {
+        FreePeriodCard(position = position, replacedSubject = item.optString("subject"))
+        return
+    }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = colors.background)
+    val isCancel = item.optString("colorClass") == "cancel-cell"
+    val actualColor = if (isCancel) {
+        IconBackgroundColor(
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            onColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    } else {
+        color
+    }
 
+    MotionCard(
+        position = position,
+        containerColor = actualColor.color,
+        contentPadding = 12.dp
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalAlignment = Alignment.End   // Hebrew natural right side
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
 
             val subjectRaw = item.optString("subject")
-            val subjectFormatted = remember(subjectRaw) {
+            val subjectLevel = item.optString("subjectLevel")
+            val subjectFormatted = remember(subjectRaw, subjectLevel) {
                 val locale = java.util.Locale.forLanguageTag("he")
-                BidiFormatter.getInstance(locale).unicodeWrap(subjectRaw)
+                val cleanLevel = subjectLevel.replace("``", "\"").trim()
+                val combined = if (cleanLevel.isNotBlank() && !subjectRaw.contains(cleanLevel)) {
+                    "\u200F$subjectRaw\u200F • \u200F$cleanLevel\u200F"
+                } else {
+                    subjectRaw
+                }
+                val fixed = formatBidiHebrewWithLatin(combined)
+                BidiFormatter.getInstance(locale).unicodeWrap(fixed)
             }
-            val onSurface = MaterialTheme.colorScheme.onSurface
-
-            val reversedColor = Color(
-                red = 1f - onSurface.red,
-                green = 1f - onSurface.green,
-                blue = 1f - onSurface.blue,
-                alpha = onSurface.alpha
-            )
-
-            Text(
-                text = subjectFormatted,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Start,   // Hebrew RTL makes this RIGHT
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    textDirection = TextDirection.ContentOrRtl,
-                    localeList = LocaleList(Locale("he"), Locale("en"))
-                ),
-                color = colors.content
-            )
-
-            Text(
-                text = item.optString("teacher"),
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Start,
-                fontSize = 14.sp,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    textDirection = TextDirection.ContentOrRtl,
-                    localeList = LocaleList(Locale("he"), Locale("en"))
-                ),
-                color = colors.content
-            )
-
             val changes = item.optString("changes")
             val exams = item.optString("exams")
-
-            val extraText = when {
-                changes.isNotEmpty() -> changes
-                exams.isNotEmpty() -> exams
-                else -> null
+            val teacher = item.optString("teacher")
+            val room = item.optString("room")
+            val roomLabel = stringResource(R.string.room)
+            val details = remember(teacher, room) {
+                val raw = when {
+                    teacher.isNotBlank() && room.isNotBlank() -> "$teacher, $roomLabel: $room"
+                    teacher.isNotBlank() -> teacher
+                    room.isNotBlank() -> "$roomLabel: $room"
+                    else -> ""
+                }
+                if (raw.isNotBlank()) {
+                    val locale = java.util.Locale.forLanguageTag("he")
+                    BidiFormatter.getInstance(locale).unicodeWrap(formatBidiHebrewWithLatin(raw))
+                } else ""
             }
 
-            if (extraText != null) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = extraText,
+                    text = subjectFormatted,
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Start,
-                    fontSize = 14.sp,
-                    style = MaterialTheme.typography.bodyMedium.copy(
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
                         textDirection = TextDirection.ContentOrRtl,
                         localeList = LocaleList(Locale("he"), Locale("en"))
                     ),
-                    color = colors.content
+                    color = actualColor.onColor
                 )
+                if (details.isNotBlank()) {
+                    Text(
+                        text = details,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Start,
+                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            textDirection = TextDirection.ContentOrRtl,
+                            localeList = LocaleList(Locale("he"), Locale("en"))
+                        ),
+                        color = actualColor.onColor
+                    )
+                }
+
+                val extraText = when {
+                    changes.isNotEmpty() -> changes
+                    exams.isNotEmpty() -> exams
+                    else -> null
+                }
+                if (extraText != null) {
+                    Text(
+                        text = extraText,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Start,
+                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            textDirection = TextDirection.ContentOrRtl,
+                            localeList = LocaleList(Locale("he"), Locale("en"))
+                        ),
+                        color = actualColor.onColor
+                    )
+                }
             }
+            Spacer(Modifier.width(12.dp))
+            SubjectIcon(
+                subject = subjectRaw,
+                assignment = if (exams.isNotEmpty()) "exam" else "",
+                containerColor = Color.White.copy(alpha = 0.36f),
+                iconColor = actualColor.onColor,
+                size = 52.dp,
+                iconSize = 30.dp,
+                polygon = scheduleIconShapes[index % scheduleIconShapes.size],
+                morphPolygon = scheduleIconShapes[(index + 3) % scheduleIconShapes.size]
+            )
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+private val scheduleIconShapes = listOf(
+    MaterialShapes.Circle,
+    MaterialShapes.Gem,
+    MaterialShapes.Cookie6Sided,
+    MaterialShapes.Cookie9Sided,
+    MaterialShapes.Sunny,
+    MaterialShapes.Cookie12Sided
+)
+
+private fun scheduleColor(subject: String): IconBackgroundColor {
+    val normalized = subject.trim().lowercase().filter(Char::isLetterOrDigit)
+    val index = Math.floorMod(normalized.hashCode(), vibrantIconBackgroundColors.size)
+    return vibrantIconBackgroundColors[index]
 }
 
 @Composable
@@ -540,6 +846,293 @@ fun getColorFromClass(colorClass: String): ThemedColor {
             "custom-pink-cell" -> ThemedColor(Color(0xfffab5ff), Color.Black)
             "cancel-cell" -> ThemedColor(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant)
             else -> ThemedColor(Color.White, Color.Black)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun NoScheduleState(
+    dayName: String,
+    isToday: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        SubjectIcon(
+            subject = "Schedule",
+            containerColor = MaterialTheme.colorScheme.primary,
+            iconColor = MaterialTheme.colorScheme.onPrimary,
+            size = 128.dp,
+            iconSize = 68.dp,
+            painter = rememberSymbolPainter(MotionSymbols.ic_schedule),
+            polygon = MaterialShapes.Cookie12Sided
+        )
+        Spacer(Modifier.height(20.dp))
+        Text(
+            text = if (isToday) {
+                stringResource(R.string.noSchedule)
+            } else {
+                stringResource(R.string.noScheduleForDay, dayName)
+            },
+            style = MaterialTheme.typography.headlineMedium,
+            fontFamily = feldmanFont(weight = 600, width = 140f),
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/** Marks a synthesised free period ("חלון") rather than a real lesson. */
+const val WINDOW_FLAG = "isWindow"
+
+/**
+ * Expand a day's lessons into a continuous run of hours.
+ *
+ * Two kinds of free period ("חלון") end up in the list:
+ *  * gaps — hours with no lesson at all, including the ones before the first
+ *    lesson, so a day that starts at hour 3 still shows hours 0-2; and
+ *  * subjects the user marked as free in provider settings (e.g. a bagrut
+ *    already completed), which are kept in place but shown as a window.
+ *
+ * The run always starts at hour 0 and ends at the last hour that has a real
+ * lesson, so trailing empty hours are not invented.
+ */
+fun withFreePeriods(
+    items: List<JSONObject>,
+    windowSubjects: Set<String>,
+    /**
+     * Hour -> clock time gathered from every loaded day. A gap has no lesson of
+     * its own to take a time from, and schools run a fixed bell schedule, so the
+     * time hour 3 has on other days is the time hour 3 has today.
+     */
+    weekTimesByHour: Map<Int, String> = emptyMap(),
+): List<List<JSONObject>> {
+    if (items.isEmpty()) return emptyList()
+
+    val byHour = HashMap<Int, MutableList<JSONObject>>()
+    val timesByHour = HashMap<Int, String>(weekTimesByHour)
+    for (item in items) {
+        val h = hourOf(item)
+        if (h >= 0) {
+            byHour.getOrPut(h) { mutableListOf() }.add(item)
+            item.optString("time").takeIf { it.isNotBlank() }?.let { timesByHour[h] = it }
+        }
+    }
+    if (byHour.isEmpty()) return emptyList()
+
+    // Only extend to the last REAL lesson: a trailing window is not a window.
+    val lastRealHour = byHour.entries
+        .filter { entry ->
+            entry.value.any {
+                !it.optBoolean(WINDOW_FLAG, false) &&
+                        !PlatformStorage.isWindowSubject(it.optString("subject"), windowSubjects) &&
+                        it.optString("colorClass") != "cancel-cell"
+            }
+        }
+        .maxOfOrNull { it.key } ?: (byHour.keys.maxOrNull() ?: 0)
+
+    val out = ArrayList<List<JSONObject>>(lastRealHour + 1)
+    for (hour in 0..lastRealHour) {
+        val lessons = byHour[hour]
+        when {
+            lessons.isNullOrEmpty() ->
+                out.add(
+                    listOf(
+                        JSONObject()
+                            .put("num", hour)
+                            .put("hour", hour)
+                            .put(WINDOW_FLAG, true)
+                            .put("subject", "")
+                            .put("time", timesByHour[hour].orEmpty())
+                    )
+                )
+
+            lessons.all { PlatformStorage.isWindowSubject(it.optString("subject"), windowSubjects) } -> {
+                out.add(
+                    lessons.map { lesson ->
+                        JSONObject(lesson.toString())
+                            .put("num", hour)
+                            .put("hour", hour)
+                            .put(WINDOW_FLAG, true)
+                            .apply {
+                                if (optString("time").isBlank()) {
+                                    put("time", timesByHour[hour].orEmpty())
+                                }
+                            }
+                    }
+                )
+            }
+
+            else -> {
+                out.add(
+                    lessons.map { lesson ->
+                        val isWindow = PlatformStorage.isWindowSubject(lesson.optString("subject"), windowSubjects)
+                        if (isWindow) {
+                            JSONObject(lesson.toString())
+                                .put("num", hour)
+                                .put("hour", hour)
+                                .put(WINDOW_FLAG, true)
+                                .apply {
+                                    if (optString("time").isBlank()) {
+                                        put("time", timesByHour[hour].orEmpty())
+                                    }
+                                }
+                        } else {
+                            lesson.apply {
+                                if (optString("time").isBlank()) {
+                                    put("time", timesByHour[hour].orEmpty())
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+        }
+    }
+    out.sortBy { list -> list.firstOrNull()?.let { hourOf(it) } ?: -1 }
+    return out
+}
+
+fun formatBidiHebrewWithLatin(text: String): String {
+    val rlm = "\u200F"
+    return text
+        .replace(Regex("([A-Za-z0-9])(\\s*[•\\-–—\\(\\)\\[\\]:,/])")) { match ->
+            "${match.groupValues[1]}$rlm${match.groupValues[2]}"
+        }
+        .replace(Regex("([•\\-–—\\(\\)\\[\\]:,/]\\s*)([A-Za-z0-9])")) { match ->
+            "${match.groupValues[1]}$rlm${match.groupValues[2]}"
+        }
+}
+
+fun hourOf(o: JSONObject): Int =
+    o.optInt("num", o.optInt("hour", o.optString("num").toIntOrNull() ?: o.optString("hour").toIntOrNull() ?: -1))
+
+fun parseLessonEndTimeMinutes(timeStr: String, hourNum: Int): Int {
+    val times = Regex("""\d{1,2}:\d{2}""").findAll(timeStr).map { it.value }.toList()
+    if (times.isNotEmpty()) {
+        val latest = times.maxByOrNull { t ->
+            val parts = t.split(":").mapNotNull { it.toIntOrNull() }
+            if (parts.size == 2) parts[0] * 60 + parts[1] else 0
+        }
+        if (latest != null) {
+            val p = latest.split(":").mapNotNull { it.toIntOrNull() }
+            if (p.size == 2) return p[0] * 60 + p[1]
+        }
+    }
+    return when (hourNum) {
+        0 -> 8 * 60
+        1 -> 8 * 60 + 45
+        2 -> 9 * 60 + 30
+        3 -> 10 * 60 + 30
+        4 -> 11 * 60 + 15
+        5 -> 12 * 60 + 15
+        6 -> 13 * 60
+        7 -> 14 * 60 + 10
+        8 -> 14 * 60 + 55
+        9 -> 15 * 60 + 50
+        10 -> 16 * 60 + 35
+        else -> 8 * 60 + (hourNum * 55)
+    }
+}
+
+/**
+ * The hour number shown beside every row, including hour zero, so gaps in the
+ * day stay countable at a glance.
+ */
+@Composable
+fun HourLabel(hour: Int, time: String = "") {
+    // A fixed width, always: sizing it to the content made every card in a day
+    // shift sideways depending on whether that hour happened to have a time.
+    Column(
+        modifier = Modifier.width(52.dp).padding(start = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (hour >= 0) {
+            Text(
+                text = hour.toString(),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (time.isNotBlank()) {
+            time.split(" - ").forEach { part ->
+                Text(
+                    text = part,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A free period ("חלון"): an hour with no lesson, or one whose subject the user
+ * marked as free in provider settings.
+ *
+ * Deliberately built like a normal lesson card -- same height, same icon and
+ * text layout -- so the day reads as one continuous column. Only the teacher /
+ * room line is dropped, since there is nobody to name; `replacedSubject` is the
+ * lesson that was dropped, shown so it is clear why the hour is free.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun FreePeriodCard(position: ItemPosition, replacedSubject: String = "") {
+    val container = MaterialTheme.colorScheme.surfaceVariant
+    val onContainer = MaterialTheme.colorScheme.onSurfaceVariant
+    MotionCard(
+        position = position,
+        containerColor = container,
+        contentPadding = 12.dp
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.free_period),
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Start,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        textDirection = TextDirection.ContentOrRtl,
+                        localeList = LocaleList(Locale("he"), Locale("en"))
+                    ),
+                    color = onContainer
+                )
+                // Second line keeps the card the same height as a lesson card.
+                Text(
+                    text = replacedSubject,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Start,
+                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        textDirection = TextDirection.ContentOrRtl,
+                        localeList = LocaleList(Locale("he"), Locale("en"))
+                    ),
+                    color = onContainer.copy(alpha = 0.7f)
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            SubjectIcon(
+                subject = "",
+                assignment = "free",
+                painter = rememberSymbolPainter(MotionSymbols.ic_weekend, fill = 1f),
+                containerColor = onContainer.copy(alpha = 0.14f),
+                iconColor = onContainer,
+                size = 52.dp,
+                iconSize = 30.dp,
+            )
         }
     }
 }

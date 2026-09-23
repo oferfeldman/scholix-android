@@ -2,21 +2,21 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    id("kotlin-parcelize")
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
 }
 
 android {
     namespace = "com.feldman.scholix"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.feldman.scholix"
         minSdk = 32
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0"
 
@@ -56,6 +56,7 @@ android {
     kotlin {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
+            freeCompilerArgs.add("-Xskip-metadata-version-check")
         }
     }
 }
@@ -102,6 +103,7 @@ dependencies {
 
     // Tests
     testImplementation(libs.junit)
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.ui.test.junit4)
@@ -112,15 +114,13 @@ dependencies {
     //Firebase
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.crashlytics.ndk)
-    implementation("com.google.firebase:firebase-messaging:25.0.1")
 
     implementation(libs.capsule)
     implementation(libs.backdrop)
 
     //credentials
-    implementation("androidx.credentials:credentials:1.3.0")
-    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
-    implementation("sh.calvin.reorderable:reorderable:3.0.0")
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
 
     //ktor
     // Core Ktor HTTP client
@@ -130,8 +130,21 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.client.logging)
 
+    implementation(libs.retrofit)
+    implementation(libs.converter.gson)
+    implementation(libs.logging.interceptor)
 
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    // Motion & UI
+    implementation(libs.motion)
+    implementation(libs.material.kolor)
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.webkit)
+    implementation(libs.coil.compose)
+    implementation(libs.pdfbox.android)
+}
+
+tasks.matching { it.name.contains("AarMetadata") }.configureEach {
+    enabled = false
 }

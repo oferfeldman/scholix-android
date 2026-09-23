@@ -52,6 +52,9 @@
 # Keep Okio
 -keep class okio.** { *; }
 
+# PDFBox's JPEG-2000 decoder is optional and is not bundled with Android PDFBox.
+-dontwarn com.gemalto.jp2.JP2Decoder
+
 # Keep all Scholix classes
 -keep class com.feldman.scholix.** { *; }
 -dontwarn com.feldman.scholix.**
