@@ -45,10 +45,12 @@ import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.MashovSchool
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.ui.HiddenMoeLogin
+import com.feldman.scholix.ui.InbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.ui.components.ProviderPickerList
 import com.feldman.scholix.ui.components.WebtopLoginMethodPicker
 import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionButtonDefaults
 import com.feldman.motion.MotionButtonState
 import com.feldman.motion.MotionSymbols
 import com.feldman.motion.rememberSymbolPainter
@@ -182,7 +184,15 @@ fun LoginPage(
                         Spacer(Modifier.height(16.dp))
                     }
                     run {
-                    DynamicLoginFields(
+                    if (platform.name == "Inbar (Bar-Ilan)") {
+                        InbarLogin(
+                            onSuccess = { account ->
+                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                                onLoginSuccess()
+                            },
+                            onCancel = { selectedPlatform = null; loginFields = null; errorMessage = null }
+                        )
+                    } else DynamicLoginFields(
                         fields = fields,
                         onFieldsChanged = { loginFields = it },
                         isLoading = isLoading,
@@ -460,13 +470,11 @@ fun DynamicLoginFields(
                         MotionButton(
                             icon = MotionSymbols.ic_close,
                             onClick = onCancel,
-                            width = ProviderSheetActionButtonWidth,
-                            height = ProviderSheetActionButtonHeight,
-                            iconSize = 22.dp,
-                            defaultState = MotionButtonState(
+                            sizes = MotionButtonDefaults.sizes(width = ProviderSheetActionButtonWidth, height = ProviderSheetActionButtonHeight, iconSize = 22.dp),
+                            states = MotionButtonDefaults.states(default = MotionButtonState(
                                 backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
                                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
+                            ))
                         )
                     }
                     MotionButton(
@@ -475,9 +483,7 @@ fun DynamicLoginFields(
                             autofillManager?.commit()
                             onSubmit()
                         },
-                        width = ProviderSheetActionButtonWidth,
-                        height = ProviderSheetActionButtonHeight,
-                        iconSize = 22.dp
+                        sizes = MotionButtonDefaults.sizes(width = ProviderSheetActionButtonWidth, height = ProviderSheetActionButtonHeight, iconSize = 22.dp)
                     )
                 } else {
                     onCancel?.let {

@@ -12,7 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.clickable
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,15 +43,26 @@ import org.json.JSONObject
 
 @Composable
 internal fun MailAction(text: String, enabled: Boolean = true, primary: Boolean = false, onClick: () -> Unit) {
-    MotionButton(text = text, height = 48.dp, fontSize = 16.sp, contentPadding = PaddingValues(horizontal = 14.dp), enabled = enabled, onClick = onClick,
-        defaultState = if (primary) null else MotionButtonState(backgroundColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer))
+    MotionButton(
+        text = text,
+        contentPadding = PaddingValues(horizontal = 14.dp),
+        enabled = enabled,
+        onClick = onClick,
+        sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp),
+        states = MotionButtonDefaults.states(default = if (primary) null else MotionButtonState(backgroundColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer))
+    )
 }
 
 @Composable
 internal fun MailIconAction(icon: String, label: String, enabled: Boolean = true, primary: Boolean = false, onClick: () -> Unit) {
-    MotionButton(icon = icon, width = 48.dp, height = 48.dp, iconSize = 24.dp, enabled = enabled, onClick = onClick,
+    MotionButton(
+        icon = icon,
+        enabled = enabled,
+        onClick = onClick,
         modifier = Modifier.semantics { contentDescription = label },
-        defaultState = if (primary) null else MotionButtonState(backgroundColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer))
+        sizes = MotionButtonDefaults.sizes(width = 48.dp, height = 48.dp, iconSize = 24.dp),
+        states = MotionButtonDefaults.states(default = if (primary) null else MotionButtonState(backgroundColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer))
+    )
 }
 
 @Composable
@@ -111,7 +123,7 @@ private fun MessageCard(
                     Text(
                         text = sender.trim().take(1).uppercase(),
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontFamily = feldmanFont(weight = 600),
+                            fontFamily = MotionFonts.feldman(weight = 600),
                             fontWeight = FontWeight.SemiBold
                         ),
                         color = if (unread) MaterialTheme.colorScheme.onPrimaryContainer
@@ -144,7 +156,7 @@ private fun MessageCard(
                 Text(
                     text = sender.ifBlank { title },
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = feldmanFont(weight = if (unread) 600 else 500),
+                        fontFamily = MotionFonts.feldman(weight = if (unread) 600 else 500),
                         fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Medium
                     ),
                     color = MaterialTheme.colorScheme.onSurface,
@@ -235,18 +247,20 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
         vm.refresh()
     }
     LaunchedEffect(selecting) { selected = emptyList() }
-    MotionScaffold(contentWindowInsets = WindowInsets(0)) {
-        item { Spacer(Modifier.height(TopBarSpacing())) }
+    MotionScaffold(
+        contentWindowInsets = WindowInsets(0)
+    ) {
+        Item { Spacer(Modifier.height(TopBarSpacing())) }
         if (providers.isEmpty()) {
-            section {
-                pageItem(title = "Connect Webtop", description = "Add a Webtop account to read and send messages.", icon = painterResource(R.drawable.ic_webtop), onClick = { onNavigate(AppDest.Platforms) })
+            Section {
+                PageItem(title = "Connect Webtop", description = "Add a Webtop account to read and send messages.", icon = painterResource(R.drawable.ic_webtop), onClick = { onNavigate(AppDest.Platforms) })
             }
         } else {
-            if (providers.size > 1) item(modifier = Modifier.padding(bottom = 8.dp)) {
+            if (providers.size > 1) Item(modifier = Modifier.padding(bottom = 8.dp)) {
                 ProviderPickerBar(providers = providers, selectedIndex = providers.indexOfFirst { it.id == vm.providerId }.coerceAtLeast(0),
                     onSelected = { vm.selectProvider(providers[it].id) }, expanded = providerExpanded, onExpandedChange = { providerExpanded = it })
             }
-            item(modifier = Modifier.padding(vertical = 8.dp)) {
+            Item(modifier = Modifier.padding(vertical = 8.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) {
                         ChipPicker(label = "Mailbox", options = MailboxFolder.entries.map { it.title }, selected = vm.folder.title,
@@ -259,27 +273,27 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                     MailIconAction(MotionSymbols.ic_more_vert, "Mailbox options") { onNavigate(AppDest.MessageTools(vm.providerId)) }
                 }
             }
-            if (searchVisible || vm.query.isNotBlank()) item(modifier = Modifier.padding(bottom = 8.dp)) {
+            if (searchVisible || vm.query.isNotBlank()) Item(modifier = Modifier.padding(bottom = 8.dp)) {
                 OutlinedTextField(value = vm.query, onValueChange = { vm.query = it }, singleLine = true,
                     label = { Text("Search messages") }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth())
             }
-            if (vm.unreadOnly || vm.labelId != 0) item {
+            if (vm.unreadOnly || vm.labelId != 0) Item {
                 Text(listOfNotNull(if (vm.unreadOnly) "Unread only" else null, vm.folders.firstOrNull { it.optInt("id") == vm.labelId }?.text("title")).joinToString(" · "),
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             }
-            if (vm.error != null || vm.notice != null) item { MailFeedback(vm) }
+            if (vm.error != null || vm.notice != null) Item { MailFeedback(vm) }
             if (vm.folder == MailboxFolder.DRAFTS) {
                 val local = vm.localDrafts(vm.providerId)
                 if (local.isNotEmpty()) {
-                    title("On this device")
-                    section { local.forEach { (key, draft) ->
+                    Title("On this device")
+                    Section { local.forEach { (key, draft) ->
                         val rawSubject = draft.subject.ifBlank { "Untitled draft" }
                         val isRtl = isRtlText(rawSubject)
                         val bidi = BidiFormatter.getInstance()
                         val subject = bidi.unicodeWrap(rawSubject)
-                        item(key = key) {
+                        Item(key = key) {
                             CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                                PageSettingsItem(
+                                MotionPageSettingsItem(
                                     title = subject,
                                     description = "Saved automatically on this device",
                                     icon = rememberSymbolPainter(MotionSymbols.ic_draft),
@@ -288,11 +302,11 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                             }
                         }
                     } }
-                    title("On Webtop")
+                    Title("On Webtop")
                 }
             }
             if (vm.messages.isNotEmpty()) {
-                if (selecting) item(modifier = Modifier.padding(vertical = 8.dp)) {
+                if (selecting) Item(modifier = Modifier.padding(vertical = 8.dp)) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         MailIconAction(MotionSymbols.ic_close, "Done selecting") { vm.selecting = false; selected = emptyList() }
                         MailIconAction(MotionSymbols.ic_select_all, "Select all") { selected = vm.messages.map { it.text("messageId") } }
@@ -307,7 +321,7 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                         }
                     }
                 }
-                section {
+                Section {
                     vm.messages.forEach { message ->
                         val id = message.text("messageId")
                         val unread = vm.folder == MailboxFolder.INBOX && message.optInt("hasRead") == 0
@@ -327,7 +341,7 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                             else -> null
                         }
 
-                        item(key = id, containerColor = containerColor) {
+                        Item(key = id, containerColor = containerColor) {
                             CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                                 MessageCard(
                                     sender = sender,
@@ -354,11 +368,11 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                         }
                     }
                 }
-            } else if (!vm.loading && vm.error == null) item { Text("No messages in this view.") }
-            if (vm.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            if (vm.hasMore && !vm.loading) item { MailAction("Load more") { vm.refresh(more = true) } }
+            } else if (!vm.loading && vm.error == null) Item { Text("No messages in this view.") }
+            if (vm.loading) Item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            if (vm.hasMore && !vm.loading) Item { MailAction("Load more") { vm.refresh(more = true) } }
         }
-        item { Spacer(Modifier.height(BottomBarSpacing())) }
+        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete messages?") },
         text = { Text(if (vm.folder == MailboxFolder.TRASH) "These messages will be permanently deleted." else "Move the selected messages to Trash?") },
@@ -369,18 +383,21 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
 @Composable
 fun MessageToolsPage(providerId: String, onNavigate: MotionNavigator, onBack: () -> Unit) {
     val vm = requireNotNull(LocalAppState.current.messagesViewModel)
-    MotionScaffold(fitContentHeight = true, contentWindowInsets = WindowInsets(0)) {
-        title("Mailbox options")
-        section {
-            pageItem(title = "Refresh", icon = rememberSymbolPainter(MotionSymbols.ic_refresh), onClick = { vm.refresh(); vm.initialize(); onBack() })
-            if (vm.messages.isNotEmpty()) pageItem(title = "Select messages", icon = rememberSymbolPainter(MotionSymbols.ic_checklist), onClick = { vm.selecting = true; onBack() })
-            if (vm.folder == MailboxFolder.INBOX) switchItem(title = "Unread only", checked = vm.unreadOnly, onCheckedChange = { vm.unreadOnly = it })
-            if (vm.folder in listOf(MailboxFolder.INBOX, MailboxFolder.SENT)) pageItem(title = "Folders", icon = rememberSymbolPainter(MotionSymbols.ic_folder),
+    MotionScaffold(
+        fitContentHeight = true,
+        contentWindowInsets = WindowInsets(0)
+    ) {
+        Title("Mailbox options")
+        Section {
+            PageItem(title = "Refresh", icon = rememberSymbolPainter(MotionSymbols.ic_refresh), onClick = { vm.refresh(); vm.initialize(); onBack() })
+            if (vm.messages.isNotEmpty()) PageItem(title = "Select messages", icon = rememberSymbolPainter(MotionSymbols.ic_checklist), onClick = { vm.selecting = true; onBack() })
+            if (vm.folder == MailboxFolder.INBOX) SwitchItem(title = "Unread only", checked = vm.unreadOnly, onCheckedChange = { vm.unreadOnly = it })
+            if (vm.folder in listOf(MailboxFolder.INBOX, MailboxFolder.SENT)) PageItem(title = "Folders", icon = rememberSymbolPainter(MotionSymbols.ic_folder),
                 onClick = { onBack(); onNavigate(AppDest.MessageFolders(providerId, vm.folder.name)) })
-            pageItem(title = "Notifications", icon = rememberSymbolPainter(MotionSymbols.ic_notifications), onClick = { onBack(); onNavigate(AppDest.Notifications(providerId)) })
-            pageItem(title = "Signature", icon = rememberSymbolPainter(MotionSymbols.ic_edit), onClick = { onBack(); onNavigate(AppDest.MessageSignature(providerId)) })
+            PageItem(title = "Notifications", icon = rememberSymbolPainter(MotionSymbols.ic_notifications), onClick = { onBack(); onNavigate(AppDest.Notifications(providerId)) })
+            PageItem(title = "Signature", icon = rememberSymbolPainter(MotionSymbols.ic_edit), onClick = { onBack(); onNavigate(AppDest.MessageSignature(providerId)) })
         }
-        item { Spacer(Modifier.height(16.dp)) }
+        Item { Spacer(Modifier.height(16.dp)) }
     }
 }
 
@@ -402,13 +419,15 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
             vm.loadMessage(destination.providerId, destination.messageId, folder, destination.fromInbox)
         }
     }
-    MotionScaffold(topBar = { SettingsTopBar("Message", onBack) }) {
-        if (vm.error != null || vm.notice != null) item { MailFeedback(vm) }
-        if (message == null) item {
+    MotionScaffold(
+        topBar = { SettingsTopBar("Message", onBack) }
+    ) {
+        if (vm.error != null || vm.notice != null) Item { MailFeedback(vm) }
+        if (message == null) Item {
             if (key in vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             else MailAction("Retry") { vm.loadMessage(destination.providerId, destination.messageId, folder, destination.fromInbox, true) }
         } else {
-            section { item {
+            Section { Item {
                 val rawSubject = message.text("subject")
                 val rawSender = "${message.text("privateName")} ${message.text("lastName")}".trim()
                 val isRtl = isRtlText("$rawSender $rawSubject")
@@ -427,7 +446,7 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
                     }
                 }
             } }
-            item(modifier = Modifier.padding(vertical = 12.dp)) {
+            Item(modifier = Modifier.padding(vertical = 12.dp)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val canWrite = vm.permissions[destination.providerId]?.optBoolean("isAllowedToWriteMessages") == true
                     val canReply = canWrite && !message.optBoolean("replyDisabled") && !message.optBoolean("isSystemMessage")
@@ -446,12 +465,12 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
                     MailIconAction(MotionSymbols.ic_delete, "Delete") { confirmDelete = true }
                 }
             }
-            item { RichMessageBody(message.text("messageContent"), Modifier.fillMaxWidth().height(460.dp), onView = { reader = it }) }
+            Item { RichMessageBody(message.text("messageContent"), Modifier.fillMaxWidth().height(460.dp), onView = { reader = it }) }
             val attachments = message.optJSONArray("filesList")?.objects().orEmpty()
             if (attachments.isNotEmpty()) {
-                title("Attachments")
-                section { attachments.forEach { file ->
-                    pageItem(title = file.text("fileName"), icon = painterResource(R.drawable.ic_docs), onClick = {
+                Title("Attachments")
+                Section { attachments.forEach { file ->
+                    PageItem(title = file.text("fileName"), icon = painterResource(R.drawable.ic_docs), onClick = {
                         vm.action("download:${file.text("fileName")}") {
                             val url = file.text("fileUrl").toUri()
                             require(url.scheme == "https") { "Webtop did not provide a download link." }
@@ -464,9 +483,9 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
                     })
                 } }
             }
-            if (message.optBoolean("replyDisabled")) item { Text("The sender disabled replies to this message.") }
+            if (message.optBoolean("replyDisabled")) Item { Text("The sender disabled replies to this message.") }
         }
-        item { Spacer(Modifier.height(BottomBarSpacing())) }
+        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete message?") },
         text = { Text(if (folder == MailboxFolder.TRASH) "This will permanently delete the message." else "The message will move to Trash.") },

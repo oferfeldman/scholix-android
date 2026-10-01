@@ -26,8 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.feldman.motion.MotionScaffold
 import com.feldman.motion.MotionSymbols
-import com.feldman.motion.feldmanFont
-import com.feldman.motion.isDarkTheme
+import com.feldman.motion.MotionFonts
+import com.feldman.motion.isMotionDarkTheme
 import com.feldman.scholix.R
 import com.feldman.scholix.ui.components.SettingsCategoryColor
 import com.feldman.scholix.ui.components.SettingsTopBar
@@ -44,7 +44,7 @@ fun CrashLogsPage(onBack: () -> Unit) {
     val context = LocalContext.current
     var crashReports by remember { mutableStateOf(CrashHandler.getCrashReports(context)) }
 
-    val isDark = isDarkTheme()
+    val isDark = isMotionDarkTheme()
     val categoryColor = SettingsCategoryColor.SYSTEM.container(isDark)
     val categoryContentColor = SettingsCategoryColor.SYSTEM.content(isDark)
     val configuration = LocalConfiguration.current
@@ -53,7 +53,7 @@ fun CrashLogsPage(onBack: () -> Unit) {
     }
 
     MotionScaffold(
-        scaffoldModifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         topBar = {
             SettingsTopBar(
                 title = stringResource(R.string.crash_logs),
@@ -64,7 +64,7 @@ fun CrashLogsPage(onBack: () -> Unit) {
         }
     ) {
         if (crashReports.isEmpty()) {
-            item {
+            Item {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -89,7 +89,7 @@ fun CrashLogsPage(onBack: () -> Unit) {
                         Text(
                             text = stringResource(R.string.no_crashes),
                             style = MaterialTheme.typography.headlineMedium,
-                            fontFamily = feldmanFont(weight = 600, width = 140f),
+                            fontFamily = MotionFonts.feldman(weight = 600, width = 140f),
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
                             textAlign = TextAlign.Center
@@ -98,7 +98,7 @@ fun CrashLogsPage(onBack: () -> Unit) {
                 }
             }
         } else {
-            item {
+            Item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -123,9 +123,9 @@ fun CrashLogsPage(onBack: () -> Unit) {
                 }
             }
 
-            section {
+            Section {
                 crashReports.forEach { report ->
-                    item(key = report.id, padding = 0.dp) {
+                    Item(key = report.id, padding = 0.dp) {
                         CrashReportItem(
                             report = report,
                             onCopy = {

@@ -28,9 +28,9 @@ import com.feldman.scholix.ui.components.ProviderPickerBar
 import com.feldman.scholix.ui.components.ChipPicker
 import com.feldman.scholix.ui.components.SubjectIcon
 import com.feldman.motion.MotionSymbols
-import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionItemPosition
 import com.feldman.motion.MotionCard
-import com.feldman.motion.feldmanFont
+import com.feldman.motion.MotionFonts
 import com.feldman.motion.rememberSymbolPainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -313,10 +313,10 @@ fun AttendancePage(modifier: Modifier = Modifier) {
                             MotionCard(
                                 modifier = Modifier.fillMaxWidth(),
                                 position = when {
-                                    list.size == 1 -> ItemPosition.Alone
-                                    index == 0 -> ItemPosition.Start
-                                    index == list.lastIndex -> ItemPosition.End
-                                    else -> ItemPosition.Middle
+                                    list.size == 1 -> MotionItemPosition.Alone
+                                    index == 0 -> MotionItemPosition.Start
+                                    index == list.lastIndex -> MotionItemPosition.End
+                                    else -> MotionItemPosition.Middle
                                 },
                                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
                                 contentPadding = 0.dp
@@ -339,7 +339,7 @@ fun AttendancePage(modifier: Modifier = Modifier) {
                                             Text(
                                                 text = subject,
                                                 style = MaterialTheme.typography.titleLarge.copy(
-                                                    fontFamily = feldmanFont(weight = 700),
+                                                    fontFamily = MotionFonts.feldman(weight = 700),
                                                     fontWeight = FontWeight.Bold
                                                 ),
                                                 color = MaterialTheme.colorScheme.onSurface
@@ -362,7 +362,7 @@ fun AttendancePage(modifier: Modifier = Modifier) {
                                             Text(
                                                 text = event.optString("type"),
                                                 style = MaterialTheme.typography.titleMedium.copy(
-                                                    fontFamily = feldmanFont(weight = 700),
+                                                    fontFamily = MotionFonts.feldman(weight = 700),
                                                     fontWeight = FontWeight.Bold
                                                 ),
                                                 color = MaterialTheme.colorScheme.onSurface
@@ -412,7 +412,7 @@ private fun NoAttendanceState(modifier: Modifier = Modifier) {
         Text(
             text = stringResource(R.string.no_attendance_events_found),
             style = MaterialTheme.typography.headlineMedium,
-            fontFamily = feldmanFont(weight = 600, width = 140f),
+            fontFamily = MotionFonts.feldman(weight = 600, width = 140f),
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center

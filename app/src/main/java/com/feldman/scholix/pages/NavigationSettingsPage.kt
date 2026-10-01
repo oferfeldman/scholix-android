@@ -7,8 +7,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import com.feldman.motion.MotionSectionDefaults
 import com.feldman.motion.MotionScaffold
-import com.feldman.motion.isDarkTheme
+import com.feldman.motion.isMotionDarkTheme
 import com.feldman.scholix.LocalAppState
 import com.feldman.scholix.storage.defaultNavbarPages
 import com.feldman.scholix.storage.navbarPagesFlow
@@ -24,12 +25,12 @@ fun NavigationSettingsPage(onBack: () -> Unit) {
     val saved by remember(context) { context.navbarPagesFlow() }.collectAsState(initial = defaultNavbarPages)
     val pages = LocalAppState.current.navigationPages
     val selected = saved.intersect(pages.map { it.label }.toSet())
-    val isDark = isDarkTheme()
+    val isDark = isMotionDarkTheme()
     val categoryColor = SettingsCategoryColor.NAVIGATION.container(isDark)
     val categoryContentColor = SettingsCategoryColor.NAVIGATION.content(isDark)
 
     MotionScaffold(
-        scaffoldModifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         topBar = {
             SettingsTopBar(
                 title = "Navigation",
@@ -39,21 +40,20 @@ fun NavigationSettingsPage(onBack: () -> Unit) {
             )
         }
     ) {
-        item { Text("Choose up to four pages for the navbar. Other pages stay in More.") }
-        section {
+        Item { Text("Choose up to four pages for the navbar. Other pages stay in More.") }
+        Section {
             pages.forEach { page ->
                 val checked = page.label in selected
                 val isMaxSelected = selected.size >= 4 && !checked
                 val itemEnabled = if (checked) selected.size > 1 else !isMaxSelected
-                switchItem(
+                SwitchItem(
                     key = page.label,
                     title = page.label,
                     icon = painterResource(page.filledIcon),
                     checked = checked,
                     enabled = itemEnabled,
                     containerColor = if (isMaxSelected) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f) else null,
-                    backgroundColor = if (isMaxSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primary,
-                    iconColor = if (isMaxSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else MaterialTheme.colorScheme.onPrimary,
+                    iconStyle = MotionSectionDefaults.iconStyle(containerColor = if (isMaxSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primary, contentColor = if (isMaxSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else MaterialTheme.colorScheme.onPrimary),
                     onCheckedChange = { enabled ->
                         scope.launch {
                             context.setNavbarPages(if (enabled) selected + page.label else selected - page.label)
@@ -62,8 +62,8 @@ fun NavigationSettingsPage(onBack: () -> Unit) {
                 )
             }
         }
-        section {
-            pageItem(title = "Restore defaults", onClick = {
+        Section {
+            PageItem(title = "Restore defaults", onClick = {
                 scope.launch { context.setNavbarPages(defaultNavbarPages) }
             })
         }

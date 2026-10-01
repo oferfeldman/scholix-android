@@ -27,3 +27,12 @@ dependencyResolutionManagement {
 
 rootProject.name = "scholix"
 include(":app")
+providers.gradleProperty("scholix.motionSource").orNull?.let { source ->
+    includeBuild(source) {
+        dependencySubstitution {
+            substitute(module("io.github.feldmandev:motion")).using(project(":motion"))
+        }
+    }
+}
+// Optional focused device harness when private Motion artifacts are unavailable.
+if (providers.gradleProperty("scholix.inbarTestApp").orNull == "true") include(":inbar-testapp")

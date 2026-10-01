@@ -107,7 +107,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.Room
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.ui.draw.alpha
-import com.feldman.motion.FloatingToolbarDefaults
+import com.feldman.motion.MotionFloatingToolbarDefaults
 import com.feldman.motion.MotionDropdown
 import com.feldman.motion.MotionDropdownDefaults
 import com.feldman.motion.MotionDropdownMenuAlignment
@@ -116,6 +116,7 @@ import com.feldman.motion.MotionFabConfig
 import com.feldman.motion.MotionDest
 import com.feldman.motion.MotionLevel
 import com.feldman.motion.MotionNavigationBar
+import com.feldman.motion.MotionNavigationBarDefaults
 import com.feldman.motion.MotionNavigationAxis
 import com.feldman.motion.MotionNavHost
 import com.feldman.motion.MotionThemeRepository
@@ -549,7 +550,6 @@ fun MainScreen(
             MotionBottomBarHost(
                 navigationState = navigationState,
                 visible = currentScreen.showNavigation,
-                motionLevel = motionLevel,
                 bottomBarHeight = bottomBarHeight,
                 fullyDarkened = true,
                 darkeningHeight = 240.dp,
@@ -560,13 +560,11 @@ fun MainScreen(
                     currentDest = currentScreen,
                     selectedDest = selectedNavbarDest,
                     destinations = visibleNavbarDestinations,
-                    showContrast = false,
-                    fullyDarkened = true,
                     onNavigate = { dest -> backStack.navigateTop(dest) },
                     floatingActionButton = moreFab.content,
                     onHeightChanged = { bottomBarHeight = it },
-                    darkeningHeight = 180.dp,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    contrast = MotionNavigationBarDefaults.contrast(enabled = false, fullyDarkened = true, height = 180.dp)
                 )
             }
         } else if (!isLandscape && currentScreen.showNavigation) {
@@ -613,7 +611,7 @@ private fun OverflowMenuFab(
     var opensAbove by remember { mutableStateOf(true) }
 
     Box {
-        FloatingToolbarDefaults.StandardFloatingActionButton(
+        MotionFloatingToolbarDefaults.StandardFloatingActionButton(
             onClick = { expanded = !expanded }
         ) {
             Icon(

@@ -62,18 +62,20 @@ sealed class AppDest : MotionDest {
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             val overflowPages = LocalAppState.current.overflowPages
-            MotionScaffold(fitContentHeight = true) {
-                title("More")
-                section {
+            MotionScaffold(
+                fitContentHeight = true
+            ) {
+                Title("More")
+                Section {
                     overflowPages.forEach { destination ->
-                        pageItem(
+                        PageItem(
                             key = destination.label,
                             title = destination.label,
                             icon = painterResource(destination.filledIcon),
                             onClick = { onBack(); onNavigate(destination) }
                         )
                     }
-                    pageItem(
+                    PageItem(
                         title = "Customize navigation",
                         icon = painterResource(R.drawable.ic_menu),
                         onClick = { onBack(); onNavigate(NavigationSettings) }

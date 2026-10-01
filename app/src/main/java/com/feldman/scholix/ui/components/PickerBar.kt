@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionButtonDefaults
 import com.feldman.motion.MotionButtonState
 import com.feldman.motion.MotionDropdown
 import com.feldman.motion.MotionDropdownDefaults
@@ -75,26 +76,20 @@ fun <T> PickerBar(
             onClick = { onSelected(selectedIndex - 1) },
             enabled = selectedIndex > 0,
             modifier = Modifier.semantics { this.contentDescription = previousDescription },
-            width = 48.dp,
-            height = 64.dp,
-            iconSize = 32.dp,
-            defaultState = MotionButtonState(
+            sizes = MotionButtonDefaults.sizes(width = 48.dp, height = 64.dp, iconSize = 32.dp),
+            states = MotionButtonDefaults.states(default = MotionButtonState(
                 backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-            )
+            ))
         )
 
         MotionDropdown(
             options = options,
             selected = selected,
             onSelected = { option -> onSelected(options.indexOf(option)) },
-            optionLabel = optionLabel,
-            optionDescription = { option -> optionDescription(option).takeIf { it.isNotBlank() } },
-            optionKey = optionKey,
             leadingContent = { optionIcon(selected) },
             expanded = expanded,
             onExpandedChange = onExpandedChange,
-            shape = RoundedCornerShape(28.dp),
             colors = MotionDropdownDefaults.tonalColors(
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
@@ -104,18 +99,6 @@ fun <T> PickerBar(
                 menuItemIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 menuItemDescriptionColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
             ),
-            borderWidth = 0.dp,
-            minHeight = 64.dp,
-            textStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-            valueTextFit = MotionDropdownTextFit.Wrap,
-            valueMaxLines = 2,
-            menuMaxHeight = 420.dp,
-            menuShape = RoundedCornerShape(28.dp),
-            menuItemShape = RoundedCornerShape(24.dp),
-            menuMinWidth = 320.dp,
-            menuMaxWidth = 360.dp,
-            menuMatchAnchorWidth = false,
-            menuAlignment = MotionDropdownMenuAlignment.Center,
             direction = MotionDropdownDirection.Auto,
             contentDescription = contentDescription,
             optionContent = { option, isSelected ->
@@ -184,7 +167,12 @@ fun <T> PickerBar(
             },
             modifier = Modifier
                 .weight(1f)
-                .height(64.dp)
+                .height(64.dp),
+            items = MotionDropdownDefaults.items(label = optionLabel, description = { option -> optionDescription(option).takeIf { it.isNotBlank() } }, key = optionKey),
+            shapes = MotionDropdownDefaults.shapes(anchor = RoundedCornerShape(28.dp), menu = RoundedCornerShape(28.dp), menuItem = RoundedCornerShape(24.dp)),
+            sizes = MotionDropdownDefaults.sizes(borderWidth = 0.dp, minHeight = 64.dp, menuMaxHeight = 420.dp, menuMinWidth = 320.dp, menuMaxWidth = 360.dp),
+            text = MotionDropdownDefaults.text(value = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
+            menu = MotionDropdownDefaults.menu(matchAnchorWidth = false, alignment = MotionDropdownMenuAlignment.Center)
         )
 
         MotionButton(
@@ -192,13 +180,11 @@ fun <T> PickerBar(
             onClick = { onSelected(selectedIndex + 1) },
             enabled = selectedIndex < options.lastIndex,
             modifier = Modifier.semantics { this.contentDescription = nextDescription },
-            width = 48.dp,
-            height = 64.dp,
-            iconSize = 32.dp,
-            defaultState = MotionButtonState(
+            sizes = MotionButtonDefaults.sizes(width = 48.dp, height = 64.dp, iconSize = 32.dp),
+            states = MotionButtonDefaults.states(default = MotionButtonState(
                 backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-            )
+            ))
         )
     }
 }

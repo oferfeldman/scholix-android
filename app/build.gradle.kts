@@ -1,13 +1,16 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     id("kotlin-parcelize")
-    id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
 }
+
+// A fresh checkout can build without private Firebase configuration.
+if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
 
 android {
     namespace = "com.feldman.scholix"
@@ -62,6 +65,7 @@ android {
             )
         }
         getByName("debug") {
+            providers.gradleProperty("scholix.applicationIdSuffix").orNull?.let { applicationIdSuffix = it }
             // Sign debug with the release key only when credentials are available.
             if (haveSigning) signingConfig = signingConfigs.getByName("release")
         }
@@ -82,6 +86,11 @@ android {
 }
 
 dependencies {
+    constraints {
+        // Keep app/test runtime constraints aligned with AndroidX Test 1.3 / Espresso 3.7.
+        implementation("androidx.concurrent:concurrent-futures:1.2.0")
+        implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
+    }
     //BOMS
     implementation(platform(libs.firebase.bom))
     implementation(platform(libs.androidx.compose.bom))
@@ -120,11 +129,13 @@ dependencies {
     // Optional - navigation
     implementation(libs.navigation.compose)
     implementation(libs.jsoup)
+    implementation("com.google.android.gms:play-services-auth-api-phone:18.2.0")
 
     // Tests
     testImplementation(libs.junit)
     testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.ui.test.junit4)
     implementation(libs.accompanist.swiperefresh)

@@ -58,10 +58,13 @@ fun MessageComposePage(destination: AppDest.ComposeMessage, onNavigate: MotionNa
         if (controller.view == null) { action(); return }
         controller.flush { html -> vm.draft(destination.draftKey)?.let { vm.updateDraft(destination.draftKey, it.copy(html = html)) }; action() }
     }
-    MotionScaffold(scaffoldModifier = Modifier.imePadding(), topBar = { SettingsTopBar("Compose message", { flush(onBack) }) }) {
-        if (draft == null) item { Text("This draft was sent or discarded."); MailAction("Back", onClick = onBack) }
+    MotionScaffold(
+        modifier = Modifier.imePadding(),
+        topBar = { SettingsTopBar("Compose message", { flush(onBack) }) }
+    ) {
+        if (draft == null) Item { Text("This draft was sent or discarded."); MailAction("Back", onClick = onBack) }
         else {
-            item(modifier = Modifier.padding(vertical = 12.dp)) {
+            Item(modifier = Modifier.padding(vertical = 12.dp)) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val sending = "send:${destination.draftKey}" in vm.busy
                     MailIconAction(MotionSymbols.ic_send, if (sending) "Working…" else if (draft.scheduledAt.isEmpty()) "Send" else "Schedule send",
@@ -72,11 +75,11 @@ fun MessageComposePage(destination: AppDest.ComposeMessage, onNavigate: MotionNa
                     MailIconAction(MotionSymbols.ic_more_vert, "Message options", !sending) { flush { onNavigate(AppDest.MessageOptions(destination)) } }
                 }
             }
-            if (vm.error != null || vm.notice != null) item { MailFeedback(vm) }
-            section {
-                pageItem(title = "Recipients (${draft.recipients.size})", description = "Add people",
+            if (vm.error != null || vm.notice != null) Item { MailFeedback(vm) }
+            Section {
+                PageItem(title = "Recipients (${draft.recipients.size})", description = "Add people",
                     icon = painterResource(R.drawable.ic_account), onClick = { flush { onNavigate(AppDest.MessagePeople(destination)) } })
-                if (draft.recipients.isNotEmpty()) item {
+                if (draft.recipients.isNotEmpty()) Item {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         draft.recipients.forEach { person ->
                             InputChip(selected = true, onClick = {
@@ -86,29 +89,29 @@ fun MessageComposePage(destination: AppDest.ComposeMessage, onNavigate: MotionNa
                     }
                 }
             }
-            item(modifier = Modifier.padding(vertical = 12.dp)) { OutlinedTextField(value = draft.subject, onValueChange = { vm.updateDraft(destination.draftKey, draft.copy(subject = it)) }, label = { Text("Subject") }, singleLine = true, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) }
-            item {
+            Item(modifier = Modifier.padding(vertical = 12.dp)) { OutlinedTextField(value = draft.subject, onValueChange = { vm.updateDraft(destination.draftKey, draft.copy(subject = it)) }, label = { Text("Subject") }, singleLine = true, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) }
+            Item {
                 key(destination.draftKey) {
                     RichMessageEditor(initialHtml = draft.html, controller = controller,
                         onChange = { html -> vm.draft(destination.draftKey)?.let { vm.updateDraft(destination.draftKey, it.copy(html = html)) } },
                         onPickImage = { imagePicker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth().height(380.dp))
                 }
             }
-            if ("image:${destination.providerId}" in vm.busy) item { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Uploading image…") }
-            title("Attachments (${draft.attachments.size}/5)")
-            section {
+            if ("image:${destination.providerId}" in vm.busy) Item { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Uploading image…") }
+            Title("Attachments (${draft.attachments.size}/5)")
+            Section {
                 draft.attachments.forEachIndexed { index, file ->
-                    pageItem(key = "$index:${file.name}", title = file.name, description = "Tap to remove", icon = painterResource(R.drawable.ic_docs),
+                    PageItem(key = "$index:${file.name}", title = file.name, description = "Tap to remove", icon = painterResource(R.drawable.ic_docs),
                         onClick = { vm.updateDraft(destination.draftKey, draft.copy(attachments = draft.attachments.filterIndexed { i, _ -> i != index })) })
                 }
-                pageItem(title = "Add attachments", description = "Up to 50 MB per file", icon = painterResource(R.drawable.ic_add),
+                PageItem(title = "Add attachments", description = "Up to 50 MB per file", icon = painterResource(R.drawable.ic_add),
                     onClick = { if (draft.attachments.size < 5) attachmentsPicker.launch(arrayOf("*/*")) else vm.error = "Remove an attachment before adding another." })
             }
-            item(modifier = Modifier.padding(vertical = 12.dp)) { Text("Draft saved automatically on this device.", style = MaterialTheme.typography.bodySmall) }
-            item(modifier = Modifier.padding(bottom = 12.dp)) { MailAction("Discard draft", "send:${destination.draftKey}" !in vm.busy) { discard = true } }
-            if (draft.scheduledAt.isNotEmpty()) item { Text("Scheduled for ${draft.scheduledAt}") }
+            Item(modifier = Modifier.padding(vertical = 12.dp)) { Text("Draft saved automatically on this device.", style = MaterialTheme.typography.bodySmall) }
+            Item(modifier = Modifier.padding(bottom = 12.dp)) { MailAction("Discard draft", "send:${destination.draftKey}" !in vm.busy) { discard = true } }
+            if (draft.scheduledAt.isNotEmpty()) Item { Text("Scheduled for ${draft.scheduledAt}") }
         }
-        item { Spacer(Modifier.height(BottomBarSpacing())) }
+        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Discard this local draft?") },
         text = { Text("A copy already saved to Webtop will remain in Webtop Drafts.") },
@@ -151,28 +154,32 @@ fun MessagePeoplePage(composer: AppDest.ComposeMessage, onBack: () -> Unit) {
         val people = if (checked) (current.recipients + person).distinctBy(::recipientKey) else current.recipients.filter { recipientKey(it) != recipientKey(person) }
         vm.updateDraft(composer.draftKey, current.copy(recipients = people))
     }
-    MotionScaffold(topBar = { SettingsTopBar("Choose recipients", onBack) }, fitContentHeight = true, contentWindowInsets = WindowInsets(0)) {
-        item(modifier = Modifier.padding(vertical = 12.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+    MotionScaffold(
+        topBar = { SettingsTopBar("Choose recipients", onBack) },
+        fitContentHeight = true,
+        contentWindowInsets = WindowInsets(0)
+    ) {
+        Item(modifier = Modifier.padding(vertical = 12.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Text("${draft.recipients.size} selected", modifier = Modifier.weight(1f)); MailIconAction(MotionSymbols.ic_check, "Done", onClick = onBack)
         } }
-        if (canTeachers) item { ChipPicker(options = listOf("Search", "Teachers"), selected = mode, onSelectedChange = { mode = it }, label = "Directory") }
-        if (mode == "Teachers") item(modifier = Modifier.padding(top = 8.dp)) { ChipPicker(options = views.values.toList(), selected = views.getValue(view), onSelectedChange = { label -> view = views.entries.first { it.value == label }.key }, label = "Teachers") }
-        item(modifier = Modifier.padding(vertical = 12.dp)) { OutlinedTextField(query, { query = it }, label = { Text(if (mode == "Teachers") "Filter teachers" else "Search people") }, singleLine = true, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) }
-        if (canAdvanced && mode == "Search") section { switchItem(title = "Advanced search", checked = advanced, onCheckedChange = { advanced = it }) }
-        if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        if (error != null) item { Text(error!!, color = MaterialTheme.colorScheme.error) }
+        if (canTeachers) Item { ChipPicker(options = listOf("Search", "Teachers"), selected = mode, onSelectedChange = { mode = it }, label = "Directory") }
+        if (mode == "Teachers") Item(modifier = Modifier.padding(top = 8.dp)) { ChipPicker(options = views.values.toList(), selected = views.getValue(view), onSelectedChange = { label -> view = views.entries.first { it.value == label }.key }, label = "Teachers") }
+        Item(modifier = Modifier.padding(vertical = 12.dp)) { OutlinedTextField(query, { query = it }, label = { Text(if (mode == "Teachers") "Filter teachers" else "Search people") }, singleLine = true, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) }
+        if (canAdvanced && mode == "Search") Section { SwitchItem(title = "Advanced search", checked = advanced, onCheckedChange = { advanced = it }) }
+        if (loading) Item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        if (error != null) Item { Text(error!!, color = MaterialTheme.colorScheme.error) }
         val visible = if (mode == "Teachers") results.filter { recipientName(it).contains(query, ignoreCase = true) || it.text("subject").contains(query, ignoreCase = true) } else results
         if (visible.isNotEmpty()) {
-            item { MailAction("Select all results") {
+            Item { MailAction("Select all results") {
                 val current = vm.draft(composer.draftKey) ?: return@MailAction
                 vm.updateDraft(composer.draftKey, current.copy(recipients = (current.recipients + visible).distinctBy(::recipientKey)))
             } }
-            section { visible.forEach { person ->
-                switchItem(key = recipientKey(person), title = recipientName(person), description = person.text("subject").ifBlank { person.text("type") },
+            Section { visible.forEach { person ->
+                SwitchItem(key = recipientKey(person), title = recipientName(person), description = person.text("subject").ifBlank { person.text("type") },
                     icon = painterResource(R.drawable.ic_account), checked = draft.recipients.any { recipientKey(it) == recipientKey(person) }, onCheckedChange = { select(person, it) })
             } }
-        } else if (!loading && error == null) item { Text(if (mode == "Search" && query.length < 2) "Enter at least two characters to search." else "No matching people.") }
-        item { Spacer(Modifier.height(16.dp)) }
+        } else if (!loading && error == null) Item { Text(if (mode == "Search" && query.length < 2) "Enter at least two characters to search." else "No matching people.") }
+        Item { Spacer(Modifier.height(16.dp)) }
     }
 }
 
@@ -182,11 +189,15 @@ fun MessageOptionsPage(composer: AppDest.ComposeMessage, onNavigate: MotionNavig
     val context = LocalContext.current
     val draft = vm.draft(composer.draftKey) ?: return
     val permissions = vm.permissions[composer.providerId]
-    MotionScaffold(topBar = { SettingsTopBar("Message options", onBack) }, fitContentHeight = true, contentWindowInsets = WindowInsets(0)) {
-        section {
-            switchItem(title = "Hide recipient list", checked = draft.hideRecipients, onCheckedChange = { vm.updateDraft(composer.draftKey, draft.copy(hideRecipients = it)) })
-            switchItem(title = "Disable replies", checked = draft.blockReplies, onCheckedChange = { vm.updateDraft(composer.draftKey, draft.copy(blockReplies = it)) })
-            pageItem(title = "Schedule sending", description = draft.scheduledAt.ifBlank { "Send immediately" }, onClick = {
+    MotionScaffold(
+        topBar = { SettingsTopBar("Message options", onBack) },
+        fitContentHeight = true,
+        contentWindowInsets = WindowInsets(0)
+    ) {
+        Section {
+            SwitchItem(title = "Hide recipient list", checked = draft.hideRecipients, onCheckedChange = { vm.updateDraft(composer.draftKey, draft.copy(hideRecipients = it)) })
+            SwitchItem(title = "Disable replies", checked = draft.blockReplies, onCheckedChange = { vm.updateDraft(composer.draftKey, draft.copy(blockReplies = it)) })
+            PageItem(title = "Schedule sending", description = draft.scheduledAt.ifBlank { "Send immediately" }, onClick = {
                 val now = LocalDateTime.now()
                 DatePickerDialog(context, { _, year, month, day ->
                     TimePickerDialog(context, { _, hour, minute ->
@@ -196,22 +207,22 @@ fun MessageOptionsPage(composer: AppDest.ComposeMessage, onNavigate: MotionNavig
                     }, now.hour, now.minute, true).show()
                 }, now.year, now.monthValue - 1, now.dayOfMonth).show()
             })
-            if (draft.scheduledAt.isNotBlank()) pageItem(title = "Clear scheduled time", onClick = { vm.updateDraft(composer.draftKey, draft.copy(scheduledAt = "")) })
-            pageItem(title = "Personal signature", onClick = { onNavigate(AppDest.MessageSignature(composer.providerId)) })
+            if (draft.scheduledAt.isNotBlank()) PageItem(title = "Clear scheduled time", onClick = { vm.updateDraft(composer.draftKey, draft.copy(scheduledAt = "")) })
+            PageItem(title = "Personal signature", onClick = { onNavigate(AppDest.MessageSignature(composer.providerId)) })
         }
-        if (permissions?.optBoolean("isAllowedToChangeSender") == true) item {
+        if (permissions?.optBoolean("isAllowedToChangeSender") == true) Item {
             OutlinedTextField(draft.senderName, { vm.updateDraft(composer.draftKey, draft.copy(senderName = it)) }, label = { Text("Sender display name") }, modifier = Modifier.fillMaxWidth())
         }
         if (permissions?.optBoolean("allowSendEmail") == true) {
-            section { switchItem(title = "Also send by email", checked = draft.sendToMail, onCheckedChange = { vm.updateDraft(composer.draftKey, draft.copy(sendToMail = it)) }) }
+            Section { SwitchItem(title = "Also send by email", checked = draft.sendToMail, onCheckedChange = { vm.updateDraft(composer.draftKey, draft.copy(sendToMail = it)) }) }
             if (draft.sendToMail) {
-                item { OutlinedTextField(draft.mailFrom, { vm.updateDraft(composer.draftKey, draft.copy(mailFrom = it)) }, label = { Text("Email sender name") }, modifier = Modifier.fillMaxWidth()) }
-                item { OutlinedTextField(draft.mailReplyTo, { vm.updateDraft(composer.draftKey, draft.copy(mailReplyTo = it)) }, label = { Text("Reply-to email") }, modifier = Modifier.fillMaxWidth()) }
+                Item { OutlinedTextField(draft.mailFrom, { vm.updateDraft(composer.draftKey, draft.copy(mailFrom = it)) }, label = { Text("Email sender name") }, modifier = Modifier.fillMaxWidth()) }
+                Item { OutlinedTextField(draft.mailReplyTo, { vm.updateDraft(composer.draftKey, draft.copy(mailReplyTo = it)) }, label = { Text("Reply-to email") }, modifier = Modifier.fillMaxWidth()) }
             }
         }
-        if (vm.error != null) item { MailFeedback(vm) }
-        item(modifier = Modifier.padding(vertical = 12.dp)) { MailAction("Done", onClick = onBack) }
-        item { Spacer(Modifier.height(16.dp)) }
+        if (vm.error != null) Item { MailFeedback(vm) }
+        Item(modifier = Modifier.padding(vertical = 12.dp)) { MailAction("Done", onClick = onBack) }
+        Item { Spacer(Modifier.height(16.dp)) }
     }
 }
 
@@ -225,13 +236,16 @@ fun MessageSignaturePage(providerId: String, onBack: () -> Unit) {
         if (uri != null) vm.uploadImage(providerId, uri) { controller.insertImage(it) }
     }
     LaunchedEffect(providerId, vm.providerId) { if (vm.providerId.isNotEmpty()) vm.initialize(providerId) }
-    MotionScaffold(topBar = { SettingsTopBar("Personal signature", onBack) }, scaffoldModifier = Modifier.imePadding()) {
-        if (vm.error != null || vm.notice != null) item { MailFeedback(vm) }
-        if (original == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+    MotionScaffold(
+        topBar = { SettingsTopBar("Personal signature", onBack) },
+        modifier = Modifier.imePadding()
+    ) {
+        if (vm.error != null || vm.notice != null) Item { MailFeedback(vm) }
+        if (original == null) Item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         else {
-            item { Text("Added to new messages. Existing drafts keep their current content.") }
-            item { RichMessageEditor(html, controller, { html = it }, { picker.launch(arrayOf("image/*")) }, Modifier.fillMaxWidth().height(380.dp)) }
-            item { MailAction("Save signature", "signature:$providerId" !in vm.busy) { controller.flush { content ->
+            Item { Text("Added to new messages. Existing drafts keep their current content.") }
+            Item { RichMessageEditor(html, controller, { html = it }, { picker.launch(arrayOf("image/*")) }, Modifier.fillMaxWidth().height(380.dp)) }
+            Item { MailAction("Save signature", "signature:$providerId" !in vm.busy) { controller.flush { content ->
                 vm.action("signature:$providerId") {
                     withContext(Dispatchers.IO) { vm.mailbox(providerId).updateSignature(original, content) }
                     vm.signatures[providerId] = JSONObject(original.toString()).put("signature", content)
@@ -240,6 +254,6 @@ fun MessageSignaturePage(providerId: String, onBack: () -> Unit) {
                 }
             } } }
         }
-        item { Spacer(Modifier.height(BottomBarSpacing())) }
+        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
 }

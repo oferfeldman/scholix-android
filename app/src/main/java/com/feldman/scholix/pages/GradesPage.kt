@@ -42,9 +42,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.feldman.motion.AutoSizeText
-import com.feldman.motion.ITEM_SPACER
-import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionAutoSizeText
+import com.feldman.motion.MotionSectionDefaults
+import com.feldman.motion.MotionItemPosition
 import com.feldman.motion.MotionCard
 import com.feldman.motion.MotionButton
 import com.feldman.motion.MotionButtonState
@@ -55,7 +55,7 @@ import com.feldman.motion.MotionDropdownMenuAlignment
 import com.feldman.motion.MotionDropdownTextFit
 import com.feldman.motion.MotionLazyColumn
 import com.feldman.motion.MotionSymbols
-import com.feldman.motion.feldmanFont
+import com.feldman.motion.MotionFonts
 import com.feldman.motion.rememberSymbolPainter
 import com.feldman.lockerapp.ui.theme.AppTheme
 import com.feldman.scholix.BottomBarSpacing
@@ -161,7 +161,7 @@ private fun NoGradesCourseState(
         Text(
             text = "No grades yet",
             style = MaterialTheme.typography.headlineMedium,
-            fontFamily = feldmanFont(weight = 600, width = 140f),
+            fontFamily = MotionFonts.feldman(weight = 600, width = 140f),
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center
@@ -210,7 +210,13 @@ private fun CoursePickerBar(
         onSelected = onSelected,
         expanded = expanded,
         onExpandedChange = onExpandedChange,
-        optionLabel = { course -> course.optString("name").ifBlank { courseLabel } },
+        optionLabel = { course ->
+            val name = course.optString("name").ifBlank { courseLabel }
+            val year = course.optInt("year")
+            val multipleYears = courses.filter { it.optString("name") == course.optString("name") }
+                .map { it.optInt("year") }.distinct().size > 1
+            if (year > 0 && multipleYears) "$name · $year" else name
+        },
         optionDescription = { course -> courseSupportingText(course) },
         optionKey = { course ->
             "${course.optString("platformId")}|${course.optString("courseKey")}|${course.optString("name")}"
@@ -350,10 +356,10 @@ private fun CoursePickerPane(
                     val selected = item.index == selectedIndex
                     MotionCard(
                         position = when {
-                            filteredCourses.size == 1 -> ItemPosition.Alone
-                            filteredIndex == 0 -> ItemPosition.Start
-                            filteredIndex == filteredCourses.lastIndex -> ItemPosition.End
-                            else -> ItemPosition.Middle
+                            filteredCourses.size == 1 -> MotionItemPosition.Alone
+                            filteredIndex == 0 -> MotionItemPosition.Start
+                            filteredIndex == filteredCourses.lastIndex -> MotionItemPosition.End
+                            else -> MotionItemPosition.Middle
                         },
                         selected = selected,
                         containerColor = if (selected) {
@@ -935,9 +941,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                         when {
 
                             stillLoading -> {}
-                            grades.isNotEmpty() -> {
+                            grades.isNotEmpty() || finalGrade != null -> {
+                                if (grades.isNotEmpty()) {
                                 MotionCard(
-                                    position = ItemPosition.Alone,
+                                    position = MotionItemPosition.Alone,
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentPadding = 0.dp,
                                     modifier = Modifier.fillMaxWidth()
@@ -952,7 +959,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            AutoSizeText(
+                                            MotionAutoSizeText(
                                                 text = averageLabel,
                                                 style = MaterialTheme.typography.titleLarge.copy(
                                                     fontWeight = FontWeight.Medium,
@@ -966,10 +973,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
 
                                             Spacer(Modifier.width(16.dp))
 
-                                            AutoSizeText(
+                                            MotionAutoSizeText(
                                                 text = String.format("%.1f", average),
                                                 style = MaterialTheme.typography.bodyLarge.copy(
-                                                    fontFamily = if (expressiveDesign) feldmanFont(weight = 900) else null,
+                                                    fontFamily = if (expressiveDesign) MotionFonts.feldman(weight = 900) else null,
                                                     fontWeight = FontWeight.Black,
                                                     fontSize = 48.sp
                                                 ),
@@ -982,10 +989,11 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                     }
                                 }
 
+                                }
                                 if (finalGrade != null) {
-                                    Spacer(Modifier.height(ITEM_SPACER))
+                                    Spacer(Modifier.height(MotionSectionDefaults.ItemSpacing))
                                     MotionCard(
-                                        position = ItemPosition.Alone,
+                                        position = MotionItemPosition.Alone,
                                         containerColor = MaterialTheme.colorScheme.primary,
                                         contentPadding = 0.dp,
                                         modifier = Modifier.fillMaxWidth()
@@ -1000,7 +1008,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                AutoSizeText(
+                                                MotionAutoSizeText(
                                                     text = finalGradeLabel,
                                                     style = MaterialTheme.typography.titleLarge.copy(
                                                         fontWeight = FontWeight.Medium,
@@ -1013,10 +1021,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                                 )
                                                 Spacer(Modifier.width(16.dp))
 
-                                                AutoSizeText(
+                                                MotionAutoSizeText(
                                                     text = finalGrade!!.optString("grade"),
                                                     style = MaterialTheme.typography.bodyLarge.copy(
-                                                        fontFamily = if (expressiveDesign) feldmanFont(weight = 900) else null,
+                                                        fontFamily = if (expressiveDesign) MotionFonts.feldman(weight = 900) else null,
                                                         fontWeight = FontWeight.Black,
                                                         fontSize = 48.sp,
                                                     ),
@@ -1030,7 +1038,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                     }
                                 }
 
-                                Spacer(Modifier.height(ITEM_SPACER))
+                                Spacer(Modifier.height(MotionSectionDefaults.ItemSpacing))
                             }
                             else -> {
                                 val displayError = errorMessage
@@ -1124,7 +1132,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                         Text(
                                             text = subject,
                                             style = MaterialTheme.typography.titleLarge.copy(
-                                                fontFamily = feldmanFont(weight = 500),
+                                                fontFamily = MotionFonts.feldman(weight = 500),
                                                 fontWeight = FontWeight.Medium
                                             ),
                                             color = MaterialTheme.colorScheme.onSurface
@@ -1143,7 +1151,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                     Text(
                                         text = gradeStr,
                                         style = MaterialTheme.typography.bodyLarge.copy(
-                                            fontFamily = feldmanFont(weight = 700, width = 50f),
+                                            fontFamily = MotionFonts.feldman(weight = 700, width = 50f),
                                             lineHeight = 40.sp
                                         ),
                                         color = gradeColor(gradeStr),
