@@ -58,10 +58,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import coil.compose.AsyncImage
-import com.feldman.motion.ITEM_SPACER
-import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionSectionDefaults
+import com.feldman.motion.MotionItemPosition
 import com.feldman.motion.MotionCard
-import com.feldman.motion.feldmanFont
+import com.feldman.motion.MotionFonts
 import com.feldman.scholix.R
 import com.feldman.scholix.ui.components.ChipPicker
 import com.google.gson.GsonBuilder
@@ -201,7 +201,7 @@ fun TiktekBooksPage(onOpenBook: (String, String, String) -> Unit) {
             Text(
                 "Tiktek",
                 color = MaterialTheme.colorScheme.primary,
-                fontFamily = feldmanFont(weight = 900, width = 120f),
+                fontFamily = MotionFonts.feldman(weight = 900, width = 120f),
                 fontSize = 26.sp
             )
         })
@@ -238,10 +238,10 @@ fun TiktekBooksPage(onOpenBook: (String, String, String) -> Unit) {
                     itemsIndexed(visibleBooks, key = { _, book -> book.id }) { index, book ->
                         MotionCard(
                             position = when {
-                                visibleBooks.size == 1 -> ItemPosition.Alone
-                                index == 0 -> ItemPosition.Start
-                                index == visibleBooks.lastIndex -> ItemPosition.End
-                                else -> ItemPosition.Middle
+                                visibleBooks.size == 1 -> MotionItemPosition.Alone
+                                index == 0 -> MotionItemPosition.Start
+                                index == visibleBooks.lastIndex -> MotionItemPosition.End
+                                else -> MotionItemPosition.Middle
                             },
                             contentPadding = 0.dp
                         ) {
@@ -274,7 +274,7 @@ fun TiktekBooksPage(onOpenBook: (String, String, String) -> Unit) {
                                 }
                             }
                         }
-                        Spacer(Modifier.size(ITEM_SPACER))
+                        Spacer(Modifier.size(MotionSectionDefaults.ItemSpacing))
                     }
                 }
             }
@@ -365,7 +365,7 @@ fun TiktekBookPage(bookId: String, bookName: String, subjectId: String, onBack: 
                                 )
                             }
                         }
-                        Spacer(Modifier.size(ITEM_SPACER))
+                        Spacer(Modifier.size(MotionSectionDefaults.ItemSpacing))
                     }
                 }
             }

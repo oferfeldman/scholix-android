@@ -41,13 +41,13 @@ import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.ui.components.ChipPicker
 import com.feldman.scholix.ui.components.ProviderPickerBar
 import com.feldman.scholix.ui.components.SubjectIcon
-import com.feldman.motion.IconBackgroundColor
-import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionIconBackground
+import com.feldman.motion.MotionItemPosition
 import com.feldman.motion.MotionCard
 import com.feldman.motion.MotionSymbols
-import com.feldman.motion.feldmanFont
+import com.feldman.motion.MotionFonts
 import com.feldman.motion.rememberSymbolPainter
-import com.feldman.motion.vibrantIconBackgroundColors
+import com.feldman.motion.MotionThemeDefaults
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Calendar
@@ -566,12 +566,12 @@ fun SchedulePage(
                                             ScheduleCardConnected(
                                                 item = item,
                                                 position = if (lessonsInHour.size == 1) {
-                                                    ItemPosition.Alone
+                                                    MotionItemPosition.Alone
                                                 } else {
                                                     when (subIndex) {
-                                                        0 -> ItemPosition.Start
-                                                        lessonsInHour.lastIndex -> ItemPosition.End
-                                                        else -> ItemPosition.Middle
+                                                        0 -> MotionItemPosition.Start
+                                                        lessonsInHour.lastIndex -> MotionItemPosition.End
+                                                        else -> MotionItemPosition.Middle
                                                     }
                                                 },
                                                 color = scheduleColor(item.optString("subject")),
@@ -601,8 +601,8 @@ fun SchedulePage(
 @Composable
 fun ScheduleCardConnected(
     item: JSONObject,
-    position: ItemPosition,
-    color: IconBackgroundColor,
+    position: MotionItemPosition,
+    color: MotionIconBackground,
     index: Int
 ) {
     // A free period is drawn in the plain surface colour so it reads as a gap
@@ -614,7 +614,7 @@ fun ScheduleCardConnected(
 
     val isCancel = item.optString("colorClass") == "cancel-cell"
     val actualColor = if (isCancel) {
-        IconBackgroundColor(
+        MotionIconBackground(
             color = MaterialTheme.colorScheme.surfaceContainerHighest,
             onColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -734,10 +734,10 @@ private val scheduleIconShapes = listOf(
     MaterialShapes.Cookie12Sided
 )
 
-private fun scheduleColor(subject: String): IconBackgroundColor {
+private fun scheduleColor(subject: String): MotionIconBackground {
     val normalized = subject.trim().lowercase().filter(Char::isLetterOrDigit)
-    val index = Math.floorMod(normalized.hashCode(), vibrantIconBackgroundColors.size)
-    return vibrantIconBackgroundColors[index]
+    val index = Math.floorMod(normalized.hashCode(), MotionThemeDefaults.VibrantIconBackgrounds.size)
+    return MotionThemeDefaults.VibrantIconBackgrounds[index]
 }
 
 @Composable
@@ -880,7 +880,7 @@ private fun NoScheduleState(
                 stringResource(R.string.noScheduleForDay, dayName)
             },
             style = MaterialTheme.typography.headlineMedium,
-            fontFamily = feldmanFont(weight = 600, width = 140f),
+            fontFamily = MotionFonts.feldman(weight = 600, width = 140f),
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center
@@ -1085,7 +1085,7 @@ fun HourLabel(hour: Int, time: String = "") {
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun FreePeriodCard(position: ItemPosition, replacedSubject: String = "") {
+fun FreePeriodCard(position: MotionItemPosition, replacedSubject: String = "") {
     val container = MaterialTheme.colorScheme.surfaceVariant
     val onContainer = MaterialTheme.colorScheme.onSurfaceVariant
     MotionCard(

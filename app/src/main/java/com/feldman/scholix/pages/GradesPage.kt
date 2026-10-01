@@ -42,9 +42,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.feldman.motion.AutoSizeText
-import com.feldman.motion.ITEM_SPACER
-import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionAutoSizeText
+import com.feldman.motion.MotionSectionDefaults
+import com.feldman.motion.MotionItemPosition
 import com.feldman.motion.MotionCard
 import com.feldman.motion.MotionButton
 import com.feldman.motion.MotionButtonState
@@ -55,7 +55,7 @@ import com.feldman.motion.MotionDropdownMenuAlignment
 import com.feldman.motion.MotionDropdownTextFit
 import com.feldman.motion.MotionLazyColumn
 import com.feldman.motion.MotionSymbols
-import com.feldman.motion.feldmanFont
+import com.feldman.motion.MotionFonts
 import com.feldman.motion.rememberSymbolPainter
 import com.feldman.lockerapp.ui.theme.AppTheme
 import com.feldman.scholix.BottomBarSpacing
@@ -66,6 +66,8 @@ import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.ui.HiddenMoeLogin
 import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.ui.HiddenInbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.storage.expressiveDesignFlow
 import com.feldman.scholix.ui.components.ChipPicker
@@ -161,7 +163,7 @@ private fun NoGradesCourseState(
         Text(
             text = "No grades yet",
             style = MaterialTheme.typography.headlineMedium,
-            fontFamily = feldmanFont(weight = 600, width = 140f),
+            fontFamily = MotionFonts.feldman(weight = 600, width = 140f),
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Center
@@ -210,7 +212,13 @@ private fun CoursePickerBar(
         onSelected = onSelected,
         expanded = expanded,
         onExpandedChange = onExpandedChange,
-        optionLabel = { course -> course.optString("name").ifBlank { courseLabel } },
+        optionLabel = { course ->
+            val name = course.optString("name").ifBlank { courseLabel }
+            val year = course.optInt("year")
+            val multipleYears = courses.filter { it.optString("name") == course.optString("name") }
+                .map { it.optInt("year") }.distinct().size > 1
+            if (year > 0 && multipleYears) "$name · $year" else name
+        },
         optionDescription = { course -> courseSupportingText(course) },
         optionKey = { course ->
             "${course.optString("platformId")}|${course.optString("courseKey")}|${course.optString("name")}"
@@ -350,10 +358,10 @@ private fun CoursePickerPane(
                     val selected = item.index == selectedIndex
                     MotionCard(
                         position = when {
-                            filteredCourses.size == 1 -> ItemPosition.Alone
-                            filteredIndex == 0 -> ItemPosition.Start
-                            filteredIndex == filteredCourses.lastIndex -> ItemPosition.End
-                            else -> ItemPosition.Middle
+                            filteredCourses.size == 1 -> MotionItemPosition.Alone
+                            filteredIndex == 0 -> MotionItemPosition.Start
+                            filteredIndex == filteredCourses.lastIndex -> MotionItemPosition.End
+                            else -> MotionItemPosition.Middle
                         },
                         selected = selected,
                         containerColor = if (selected) {
@@ -469,11 +477,18 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     // request instead of showing "please re-login" for a recoverable session.
     // Providers by id, so a course with no subject icon can borrow its logo.
     var providersById by remember { mutableStateOf<Map<String, Platform>>(emptyMap()) }
+    var inbarRelogin by remember { mutableStateOf<InbarPlatform?>(null) }
     LaunchedEffect(Unit) {
         providersById = withContext(Dispatchers.IO) {
             runCatching {
                 PlatformStorage.loadPlatforms(context).associateBy { it.id }
             }.getOrDefault(emptyMap())
+        }
+        // A saved account may still be waiting for its first SMS verification.
+        if (courses.isEmpty()) {
+            inbarRelogin = providersById.values.filterIsInstance<InbarPlatform>()
+                .firstOrNull { !it.isLoggedIn() && it.hasSavedLoginDetails() }
+            if (inbarRelogin != null) isLoading = true
         }
     }
     var portalRelogin by remember { mutableStateOf<StudentsPortalPlatform?>(null) }
@@ -562,6 +577,16 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
             }
 
             if (currentId == requestId) {
+                val inbar = requestPlatform as? InbarPlatform
+                if (requestErrorCode == "login_failed" && inbar != null &&
+                    inbar.hasSavedLoginDetails() && !reloginAttempted) {
+                    reloginAttempted = true
+                    inbarRelogin = inbar
+                    isLoading = true
+                    errorMessage = null
+                    loadedKey = keyFor(course, year, semester)
+                    return@launch
+                }
                 val portal = requestPlatform as? StudentsPortalPlatform
                 if (requestErrorCode == "login_failed" && portal != null &&
                     portal.needsInteractiveRelogin() && !reloginAttempted
@@ -738,10 +763,49 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
         }
     }
 
+    inbarRelogin?.let { savedAccount ->
+        val pending = remember(savedAccount) { savedAccount.forSmsLogin() }
+        HiddenInbarLogin(account = pending,
+            onSmsRequested = { account ->
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+            }, onResult = { account, error ->
+                if (account != null) {
+                    val selectedKey = courses.getOrNull(selectedTab)?.optString("courseKey")
+                    val refreshed = withContext(Dispatchers.IO) {
+                        PlatformStorage.addPlatforms(context, listOf(account))
+                        PlatformStorage.getCourses(context)
+                    }
+                    inbarRelogin = null
+                    providersById = providersById + (account.id to account)
+                    courses = refreshed
+                    selectedTab = refreshed.indexOfFirst {
+                        it.optString("platformId") == account.id && it.optString("courseKey") == selectedKey
+                    }.coerceAtLeast(0)
+                    loadedKey = null
+                    isLoading = false
+                    errorMessage = null
+                    reloginAttempted = false
+                } else {
+                    inbarRelogin = null
+                    isLoading = false
+                    errorMessage = error
+                }
+            })
+    }
+
     if (courses.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (!courseLoadFinished) {
+            if (!courseLoadFinished || inbarRelogin != null || isLoading) {
                 GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
+            } else if (errorMessage != null) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = {
+                        inbarRelogin = providersById.values.filterIsInstance<InbarPlatform>()
+                            .firstOrNull { it.hasSavedLoginDetails() }
+                        if (inbarRelogin != null) { isLoading = true; errorMessage = null }
+                    }) { Text("Retry login") }
+                }
             } else {
                 Text(
                     text = stringResource(R.string.no_courses_available),
@@ -935,9 +999,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                         when {
 
                             stillLoading -> {}
-                            grades.isNotEmpty() -> {
+                            grades.isNotEmpty() || finalGrade != null -> {
+                                if (grades.isNotEmpty()) {
                                 MotionCard(
-                                    position = ItemPosition.Alone,
+                                    position = MotionItemPosition.Alone,
                                     containerColor = MaterialTheme.colorScheme.primary,
                                     contentPadding = 0.dp,
                                     modifier = Modifier.fillMaxWidth()
@@ -952,7 +1017,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            AutoSizeText(
+                                            MotionAutoSizeText(
                                                 text = averageLabel,
                                                 style = MaterialTheme.typography.titleLarge.copy(
                                                     fontWeight = FontWeight.Medium,
@@ -966,10 +1031,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
 
                                             Spacer(Modifier.width(16.dp))
 
-                                            AutoSizeText(
+                                            MotionAutoSizeText(
                                                 text = String.format("%.1f", average),
                                                 style = MaterialTheme.typography.bodyLarge.copy(
-                                                    fontFamily = if (expressiveDesign) feldmanFont(weight = 900) else null,
+                                                    fontFamily = if (expressiveDesign) MotionFonts.feldman(weight = 900) else null,
                                                     fontWeight = FontWeight.Black,
                                                     fontSize = 48.sp
                                                 ),
@@ -982,10 +1047,11 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                     }
                                 }
 
+                                }
                                 if (finalGrade != null) {
-                                    Spacer(Modifier.height(ITEM_SPACER))
+                                    Spacer(Modifier.height(MotionSectionDefaults.ItemSpacing))
                                     MotionCard(
-                                        position = ItemPosition.Alone,
+                                        position = MotionItemPosition.Alone,
                                         containerColor = MaterialTheme.colorScheme.primary,
                                         contentPadding = 0.dp,
                                         modifier = Modifier.fillMaxWidth()
@@ -1000,7 +1066,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                AutoSizeText(
+                                                MotionAutoSizeText(
                                                     text = finalGradeLabel,
                                                     style = MaterialTheme.typography.titleLarge.copy(
                                                         fontWeight = FontWeight.Medium,
@@ -1013,10 +1079,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                                 )
                                                 Spacer(Modifier.width(16.dp))
 
-                                                AutoSizeText(
+                                                MotionAutoSizeText(
                                                     text = finalGrade!!.optString("grade"),
                                                     style = MaterialTheme.typography.bodyLarge.copy(
-                                                        fontFamily = if (expressiveDesign) feldmanFont(weight = 900) else null,
+                                                        fontFamily = if (expressiveDesign) MotionFonts.feldman(weight = 900) else null,
                                                         fontWeight = FontWeight.Black,
                                                         fontSize = 48.sp,
                                                     ),
@@ -1030,7 +1096,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                     }
                                 }
 
-                                Spacer(Modifier.height(ITEM_SPACER))
+                                Spacer(Modifier.height(MotionSectionDefaults.ItemSpacing))
                             }
                             else -> {
                                 val displayError = errorMessage
@@ -1065,6 +1131,14 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                         modifier = Modifier.fillMaxWidth(),
                                         textAlign = TextAlign.Center
                                     )
+                                    val savedInbar = providersById[selectedCourse?.optString("platformId")] as? InbarPlatform
+                                    if (savedInbar?.hasSavedLoginDetails() == true) {
+                                        TextButton(onClick = {
+                                            inbarRelogin = savedInbar
+                                            isLoading = true
+                                            errorMessage = null
+                                        }) { Text("Retry login") }
+                                    }
                                 }
                             }
 
@@ -1124,7 +1198,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                         Text(
                                             text = subject,
                                             style = MaterialTheme.typography.titleLarge.copy(
-                                                fontFamily = feldmanFont(weight = 500),
+                                                fontFamily = MotionFonts.feldman(weight = 500),
                                                 fontWeight = FontWeight.Medium
                                             ),
                                             color = MaterialTheme.colorScheme.onSurface
@@ -1143,7 +1217,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                     Text(
                                         text = gradeStr,
                                         style = MaterialTheme.typography.bodyLarge.copy(
-                                            fontFamily = feldmanFont(weight = 700, width = 50f),
+                                            fontFamily = MotionFonts.feldman(weight = 700, width = 50f),
                                             lineHeight = 40.sp
                                         ),
                                         color = gradeColor(gradeStr),

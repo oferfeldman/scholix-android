@@ -9,18 +9,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.feldman.motion.MotionCard
-import com.feldman.motion.MotionColumnScaffoldPageItem
-import com.feldman.motion.MotionColumnScaffoldSingleChoiceSegmentedPicker
+import com.feldman.motion.MotionPageSettingsItem
+import com.feldman.motion.MotionSegmentedPicker
 import com.feldman.motion.rememberSymbolPainter
-import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionItemPosition
 import com.feldman.scholix.api.PlatformInfo
 
 /** Corner treatment for a row at [index] of a connected group of [count] rows. */
-private fun groupPosition(index: Int, count: Int): ItemPosition = when {
-    count == 1 -> ItemPosition.Alone
-    index == 0 -> ItemPosition.Start
-    index == count - 1 -> ItemPosition.End
-    else -> ItemPosition.Middle
+private fun groupPosition(index: Int, count: Int): MotionItemPosition = when {
+    count == 1 -> MotionItemPosition.Alone
+    index == 0 -> MotionItemPosition.Start
+    index == count - 1 -> MotionItemPosition.End
+    else -> MotionItemPosition.Middle
 }
 
 /**
@@ -46,7 +46,7 @@ fun ProviderPickerList(
                 position = groupPosition(index, providers.size),
                 contentPadding = 0.dp
             ) {
-                MotionColumnScaffoldPageItem(
+                MotionPageSettingsItem(
                     title = provider.name,
                     description = null,
                     icon = icon,
@@ -69,7 +69,7 @@ fun WebtopLoginMethodPicker(
     onSelectedChange: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    MotionColumnScaffoldSingleChoiceSegmentedPicker(
+    MotionSegmentedPicker(
         options = listOf("Webtop password", "Ministry of Education"),
         icons = null,
         selectedIndex = WEBTOP_LOGIN_METHODS.indexOf(state.value).coerceAtLeast(0),

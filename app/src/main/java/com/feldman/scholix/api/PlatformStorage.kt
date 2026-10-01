@@ -16,6 +16,7 @@ import androidx.core.content.edit
 import com.feldman.motion.MotionSymbols
 import com.feldman.scholix.R
 import com.feldman.scholix.api.platforms.DemoPlatform
+import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
@@ -39,6 +40,7 @@ data class ProviderCourseOverrides(
 val platformOptions = listOf(
     PlatformInfo("Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
     PlatformInfo("Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
+    PlatformInfo("Inbar (Bar-Ilan)", R.drawable.ic_bar_ilan) { InbarPlatform() },
     PlatformInfo("Open University", R.drawable.ic_open_au) { OpenAUPlatform() as Platform },
     PlatformInfo("Mashov", R.drawable.ic_mashov) { MashovPlatform() as Platform },
     PlatformInfo("Education Portal", R.drawable.ic_moe) { StudentsPortalPlatform() as Platform },

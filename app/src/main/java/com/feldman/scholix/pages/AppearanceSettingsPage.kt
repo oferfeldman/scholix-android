@@ -23,9 +23,12 @@ import com.feldman.motion.MotionLevel
 import com.feldman.motion.MotionScaffold
 import com.feldman.motion.MotionSymbols
 import com.feldman.motion.MotionThemeRepository
-import com.feldman.motion.isDarkTheme
-import com.feldman.motion.symbolPainter
-import com.feldman.motion.themeColors
+import com.feldman.motion.isMotionDarkTheme
+import com.feldman.motion.rememberSymbolPainter
+import com.feldman.motion.MotionThemeDefaults
+import com.feldman.motion.MotionDynamicColorSwatch
+import com.feldman.motion.MotionSectionDefaults
+import com.materialkolor.PaletteStyle
 import com.feldman.scholix.storage.OrientationMode
 import com.feldman.scholix.storage.orientationModeFlow
 import com.feldman.scholix.storage.setOrientationMode
@@ -48,17 +51,16 @@ fun AppearanceSettingsPage(onBack: () -> Unit) {
     val themeMode by themeRepository.themeMode.collectAsState(initial = 0)
     val themeColor by themeRepository.themeColor.collectAsState(initial = 0)
     val dynamicColor by themeRepository.dynamicColor.collectAsState(initial = true)
-    val tintPalette by themeRepository.tintPalette.collectAsState(initial = false)
+    val paletteStyle by themeRepository.paletteStyle.collectAsState(initial = PaletteStyle.Vibrant)
     val motionLevel by themeRepository.motionLevel.collectAsState(initial = MotionLevel.MEDIUM)
     val orientationMode by context.orientationModeFlow().collectAsState(initial = OrientationMode.AUTO)
     val expressiveDesign by themeRepository.expressiveDesign.collectAsState(initial = true)
-    val useDark = isDarkTheme()
+    val useDark = isMotionDarkTheme()
     val dynamicColorSeed =
         if (useDark) dynamicDarkColorScheme(context).primary else dynamicLightColorScheme(context).primary
 
     MotionScaffold(
-        scaffoldModifier = Modifier.fillMaxSize(),
-        expressiveDesign = expressiveDesign,
+        modifier = Modifier.fillMaxSize(),
         topBar = {
             SettingsTopBar(
                 title = "Appearance",
@@ -67,17 +69,17 @@ fun AppearanceSettingsPage(onBack: () -> Unit) {
             )
         }
     ) {
-        title("Theme")
-        section {
+        Title("Theme")
+        Section {
             listOf(
                 Triple(0, "System", MotionSymbols.ic_brightness_auto),
                 Triple(1, "Light", MotionSymbols.ic_light_mode),
                 Triple(2, "Dark", MotionSymbols.ic_dark_mode)
             ).forEach { (id, label, icon) ->
-                choiceItem(
+                ChoiceItem(
                     key = id,
                     title = label,
-                    icon = symbolPainter(icon),
+                    icon = rememberSymbolPainter(icon),
                     selected = themeMode == id,
                     // The item's selected content is always onPrimary, so the selected fill has to
                     // be primary for the pair to have any contrast.
@@ -87,10 +89,10 @@ fun AppearanceSettingsPage(onBack: () -> Unit) {
             }
         }
 
-        title("Theme color")
-        section {
-            colorPickerItem(
-                colors = themeColors.map { pair -> if (useDark) pair.dark else pair.light },
+        Title("Theme color")
+        Section {
+            ColorPickerItem(
+                colors = MotionThemeDefaults.SeedColors.map { pair -> if (useDark) pair.dark else pair.light },
                 selectedIndex = if (dynamicColor) -1 else themeColor,
                 onSelected = { index ->
                     scope.launch {
@@ -98,34 +100,35 @@ fun AppearanceSettingsPage(onBack: () -> Unit) {
                         themeRepository.setDynamicColor(false)
                     }
                 },
-                dynamicColor = dynamicColorSeed,
-                dynamicColorSelected = dynamicColor,
-                onDynamicColorSelected = {
-                    scope.launch { themeRepository.setDynamicColor(true) }
-                },
-                dynamicColorIcon = symbolPainter(MotionSymbols.ic_hdr_auto)
+                dynamicColor = MotionDynamicColorSwatch(
+                    color = dynamicColorSeed,
+                    selected = dynamicColor,
+                    onSelected = { scope.launch { themeRepository.setDynamicColor(true) } },
+                    icon = rememberSymbolPainter(MotionSymbols.ic_hdr_auto)
+                )
             )
-            switchItem(
+            SwitchItem(
                 title = "Vibrant palette",
                 description = "Use higher saturation tones",
-                icon = symbolPainter(MotionSymbols.ic_contrast),
-                checked = tintPalette,
+                icon = rememberSymbolPainter(MotionSymbols.ic_contrast),
+                checked = paletteStyle == PaletteStyle.Vibrant,
                 onCheckedChange = { checked ->
-                    scope.launch { themeRepository.setTintPalette(checked) }
+                    scope.launch { themeRepository.setPaletteStyle(if (checked) PaletteStyle.Vibrant else PaletteStyle.TonalSpot) }
                 },
                 visible = !dynamicColor
             )
         }
 
-        title("Design")
-        section {
-            switchItem(
+        Title("Design")
+        Section {
+            SwitchItem(
                 title = "Expressive design",
                 description = "Use expressive, bold UI",
-                icon = symbolPainter(MotionSymbols.ic_animation),
-                iconShape = if(expressiveDesign) MaterialShapes.Cookie12Sided else MaterialShapes.Circle,
-                iconMorphShape = if(expressiveDesign) MaterialShapes.Circle else MaterialShapes.Cookie12Sided,
-                iconMorphOnSelection = false,
+                icon = rememberSymbolPainter(MotionSymbols.ic_animation),
+                iconStyle = MotionSectionDefaults.iconStyle(
+                    shape = if(expressiveDesign) MaterialShapes.Cookie12Sided else MaterialShapes.Circle,
+                    morphShape = if(expressiveDesign) MaterialShapes.Circle else MaterialShapes.Cookie12Sided
+                ),
                 checked = expressiveDesign,
                 onCheckedChange = { checked ->
                     scope.launch { themeRepository.setExpressiveDesign(checked) }
@@ -133,18 +136,18 @@ fun AppearanceSettingsPage(onBack: () -> Unit) {
             )
         }
 
-        title("Motion")
-        section {
+        Title("Motion")
+        Section {
             listOf(
                 Triple(MotionLevel.NONE, "None", MotionSymbols.ic_stop_circle),
                 Triple(MotionLevel.LOW, "Low", MotionSymbols.ic_trail_length_short),
                 Triple(MotionLevel.MEDIUM, "Medium", MotionSymbols.ic_trail_length_medium),
                 Triple(MotionLevel.HIGH, "High", MotionSymbols.ic_trail_length)
             ).forEach { (level, label, icon) ->
-                choiceItem(
+                ChoiceItem(
                     key = level.id,
                     title = label,
-                    icon = symbolPainter(icon),
+                    icon = rememberSymbolPainter(icon),
                     selected = motionLevel == level,
                     containerColor = if (motionLevel == level) colorScheme.primary else colorScheme.surfaceContainerHigh,
                     onClick = { scope.launch { themeRepository.setMotionLevel(level) } }
@@ -152,14 +155,14 @@ fun AppearanceSettingsPage(onBack: () -> Unit) {
             }
         }
 
-        title("Orientation")
-        section {
-            segmentedPickerItem(
+        Title("Orientation")
+        Section {
+            SegmentedPickerItem(
                 options = listOf("Auto", "Portrait", "Landscape"),
                 icons = listOf(
-                    symbolPainter(MotionSymbols.ic_screen_rotation),
-                    symbolPainter(MotionSymbols.ic_screen_lock_portrait),
-                    symbolPainter(MotionSymbols.ic_screen_lock_landscape)
+                    rememberSymbolPainter(MotionSymbols.ic_screen_rotation),
+                    rememberSymbolPainter(MotionSymbols.ic_screen_lock_portrait),
+                    rememberSymbolPainter(MotionSymbols.ic_screen_lock_landscape)
                 ),
                 selectedIndex = OrientationMode.entries.indexOf(orientationMode),
                 onSelected = { index ->
@@ -168,7 +171,7 @@ fun AppearanceSettingsPage(onBack: () -> Unit) {
             )
         }
 
-        item {
+        Item {
             Spacer(Modifier.height(120.dp))
         }
     }

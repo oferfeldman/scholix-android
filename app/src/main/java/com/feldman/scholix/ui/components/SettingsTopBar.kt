@@ -12,7 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import com.feldman.motion.MotionSymbols
-import com.feldman.motion.symbolPainter
+import com.feldman.motion.rememberSymbolPainter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,7 +33,7 @@ fun SettingsTopBar(
                         contentColor = colorScheme.onSurface
                     )
                 ) {
-                    Icon(symbolPainter(MotionSymbols.ic_arrow_back), "Back")
+                    Icon(rememberSymbolPainter(MotionSymbols.ic_arrow_back), "Back")
                 }
             }
         },

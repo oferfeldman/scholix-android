@@ -43,13 +43,15 @@ import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.ProviderCourseOverrides
 import com.feldman.scholix.api.applyLoginFields
 import com.feldman.scholix.api.platformOptions
-import com.feldman.motion.ItemPosition
+import com.feldman.motion.MotionItemPosition
 import com.feldman.motion.MotionCard
+import com.feldman.motion.MotionSectionDefaults
 import com.feldman.motion.MotionScaffold
 import com.feldman.motion.MotionSymbols
 import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionButtonDefaults
 import com.feldman.motion.MotionButtonState
-import com.feldman.motion.isDarkTheme
+import com.feldman.motion.isMotionDarkTheme
 import com.feldman.motion.motionBottomSheetAnchor
 import com.feldman.motion.rememberSymbolPainter
 import android.app.Activity
@@ -58,6 +60,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.ui.HiddenMoeLogin
+import com.feldman.scholix.ui.HiddenInbarLogin
+import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.ui.components.ProviderPickerList
@@ -118,13 +122,13 @@ fun PlatformsPage(
 
     var confirmDeleteIndex by remember { mutableStateOf<Int?>(null) }
 
-    val useDark = isDarkTheme()
+    val useDark = isMotionDarkTheme()
     val accountColors = remember(currentPlatforms) {
         assignPlatformAccountColors(currentPlatforms)
     }
 
     MotionScaffold(
-        scaffoldModifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         topBar = {
             SettingsTopBar(
                 title = "Providers",
@@ -203,13 +207,13 @@ fun PlatformsPage(
         }
     ) {
         if (currentPlatforms.isEmpty()) {
-            item {
+            Item {
                 Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
                     Text("No providers yet")
                 }
             }
         } else {
-            reorderableSection(
+            ReorderableSection(
                 items = currentPlatforms,
                 key = { platform -> platform.id },
                 onReorder = { fromIndex, toIndex ->
@@ -246,7 +250,7 @@ fun PlatformsPage(
             }
         }
 
-        item {
+        Item {
             Spacer(Modifier.height(120.dp))
         }
     }
@@ -352,6 +356,12 @@ fun AddPlatformSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selectedPlatform by remember { mutableStateOf<PlatformInfo?>(null) }
+    var inbarLogin by remember { mutableStateOf<InbarPlatform?>(null) }
+    val savedInbar = remember(selectedPlatform) {
+        if (selectedPlatform?.name == "Inbar (Bar-Ilan)")
+            PlatformStorage.loadPlatforms(context).filterIsInstance<InbarPlatform>().lastOrNull()
+        else null
+    }
     var loginFields by remember { mutableStateOf<LoginFields?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -367,6 +377,21 @@ fun AddPlatformSheet(
     val addStatus = when {
         webtopMoeCreds != null || portalCreds != null -> "Signing in with the Ministry of Education"
         else -> "Signing in"
+    }
+
+    inbarLogin?.let { pending ->
+        HiddenInbarLogin(account = pending,
+            onSmsRequested = { account ->
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+            }, onResult = { account, error ->
+                if (account != null) withContext(Dispatchers.IO) {
+                    PlatformStorage.addPlatforms(context, listOf(account))
+                }
+                inbarLogin = null
+                isLoading = false
+                errorMessage = error
+                if (account != null) { onAdded(); onClose() }
+            })
     }
 
     // Off-screen MOE sign-in: the user types into this sheet's own fields and no
@@ -452,6 +477,12 @@ fun AddPlatformSheet(
         }
         isLoading = true
         errorMessage = null
+        if (selectedPlatform!!.name == "Inbar (Bar-Ilan)") {
+            inbarLogin = (savedInbar?.forSmsLogin() ?: InbarPlatform(fields)).apply {
+                applyLoginFields(fields)
+            }
+            return
+        }
         // Read the picker's state here, not a value captured when this function was
         // created: onSubmit outlives the composition that built it, so a snapshot
         // would send Ministry-of-Education credentials down the Webtop password
@@ -514,13 +545,13 @@ fun AddPlatformSheet(
 
     if (isLoading) {
         MotionScaffold(
-            scaffoldModifier = Modifier.fillMaxWidth(),
-            contentModifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp),
             containerColor = MaterialTheme.colorScheme.background,
             contentWindowInsets = WindowInsets(0),
             fitContentHeight = true
         ) {
-            item {
+            Item {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -546,14 +577,14 @@ fun AddPlatformSheet(
     }
 
     MotionScaffold(
-        scaffoldModifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         // Keyboard insets are handled once, by MotionBottomSheetScene.
-        contentModifier = Modifier,
+        contentPadding = PaddingValues(0.dp),
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0),
         fitContentHeight = true
     ) {
-        item {
+        Item {
             if (selectedPlatform == null) {
         Column(
             modifier = Modifier
@@ -572,7 +603,11 @@ fun AddPlatformSheet(
                 providers = platformOptions,
                 onSelect = { option ->
                     selectedPlatform = option
-                    loginFields = option.factory().getLoginFields()
+                    val draft = option.factory()
+                    loginFields = draft.getLoginFields().apply {
+                        if (draft is InbarPlatform) PlatformStorage.loadPlatforms(context)
+                            .filterIsInstance<InbarPlatform>().lastOrNull()?.let { loadFrom(it) }
+                    }
                     errorMessage = null
                 }
             )
@@ -581,13 +616,11 @@ fun AddPlatformSheet(
                 icon = MotionSymbols.ic_close,
                 onClick = onClose,
                 modifier = Modifier.semantics { contentDescription = "Cancel" },
-                width = ProviderSheetActionButtonWidth,
-                height = ProviderSheetActionButtonHeight,
-                iconSize = 22.dp,
-                defaultState = MotionButtonState(
+                sizes = MotionButtonDefaults.sizes(width = ProviderSheetActionButtonWidth, height = ProviderSheetActionButtonHeight, iconSize = 22.dp),
+                states = MotionButtonDefaults.states(default = MotionButtonState(
                     backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                )
+                ))
             )
         }
             } else {
@@ -683,6 +716,7 @@ fun EditProviderSheet(
         mutableStateOf<String>(initialMethod ?: "password")
     }
     var webtopRelogin by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var inbarRelogin by remember(provider.id) { mutableStateOf<InbarPlatform?>(null) }
     // Editing the portal's password must also re-establish its SSO session:
     // the stored cookie is what actually authenticates, and new credentials
     // alone would leave grades failing until the next manual re-add.
@@ -905,6 +939,23 @@ fun EditProviderSheet(
         }
     }
 
+    inbarRelogin?.let { pending ->
+        HiddenInbarLogin(account = pending,
+            onSmsRequested = { account ->
+                if (providerName.isNotBlank()) account.setName(providerName)
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+            }, onResult = { account, error ->
+                if (account != null) {
+                    if (providerName.isNotBlank()) account.setName(providerName)
+                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                }
+                inbarRelogin = null
+                busy = false
+                errorMessage = error
+                if (account != null) { onChanged(); courseOverridesChanged = false; onClose() }
+            })
+    }
+
     val orderedCourses = orderedCoursesState.value
     val hiddenCourseKeys = hiddenCourseKeysState.value
     val visibleCourses = orderedCourses.filter {
@@ -916,13 +967,13 @@ fun EditProviderSheet(
 
     if (busy) {
         MotionScaffold(
-            scaffoldModifier = Modifier.fillMaxWidth(),
-            contentModifier = Modifier.padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp),
             containerColor = MaterialTheme.colorScheme.background,
             contentWindowInsets = WindowInsets(0),
             fitContentHeight = true
         ) {
-            item {
+            Item {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -952,7 +1003,11 @@ fun EditProviderSheet(
     fun submitEdit() {
         val user = loginFields.getValue("username").orEmpty()
         val pass = loginFields.getValue("password").orEmpty()
-        if (loginFields.getFields().isNotEmpty() && (user.isBlank() || pass.isBlank())) {
+        if (provider !is InbarPlatform && loginFields.getFields().isNotEmpty() && (user.isBlank() || pass.isBlank())) {
+            errorMessage = "Please fill in all fields"
+            return
+        }
+        if (provider is InbarPlatform && loginFields.getFields().any { it.value.isNullOrBlank() }) {
             errorMessage = "Please fill in all fields"
             return
         }
@@ -963,7 +1018,10 @@ fun EditProviderSheet(
 
         val currentMethod = (provider as? WebtopPlatform)?.let { webtopLoginMethod.value }
         val savedMethod = (provider as? WebtopPlatform)?.loginMethod
-        val credsChanged = user != provider.getUsername() || pass != provider.getPassword()
+        val credsChanged = if (provider is InbarPlatform)
+            loginFields.getValue("id").orEmpty().trim() != provider.getUsername() ||
+                loginFields.getValue("mobile").orEmpty().trim() != provider.mobile
+        else user != provider.getUsername() || pass != provider.getPassword()
 
         if (!credsChanged && provider.isLoggedIn()) {
             scope.launch {
@@ -1001,6 +1059,12 @@ fun EditProviderSheet(
                     if (!dismissing) busy = false
                 }
             }
+            return
+        }
+
+        if (provider is InbarPlatform) {
+            savingStatus = "Signing in"
+            inbarRelogin = provider.forSmsLogin().apply { applyLoginFields(loginFields) }
             return
         }
 
@@ -1097,13 +1161,13 @@ fun EditProviderSheet(
     }
 
     MotionScaffold(
-        scaffoldModifier = Modifier.fillMaxWidth(),
-        contentModifier = Modifier.padding(horizontal = 16.dp),
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0),
         fitContentHeight = true
     ) {
-        item {
+        Item {
             Column(modifier = Modifier.padding(top = 8.dp)) {
                 Text(
                     text = "Edit provider",
@@ -1124,7 +1188,7 @@ fun EditProviderSheet(
         // Nothing to choose from means no section at all, rather than a heading
         // over a "nothing here yet" line.
         if (provider.supportsSchedule && subjectOptionsState.value.isNotEmpty()) {
-            item {
+            Item {
                 Column(modifier = Modifier.padding(top = 20.dp)) {
                     SectionHeaderWithHelp(
                         title = "Dropped subjects",
@@ -1153,7 +1217,7 @@ fun EditProviderSheet(
         }
 
         if (coursesLoading) {
-            item {
+            Item {
                 Box(
                     modifier = Modifier.fillMaxWidth().height(120.dp),
                     contentAlignment = Alignment.Center
@@ -1162,7 +1226,7 @@ fun EditProviderSheet(
                 }
             }
         } else {
-            reorderableSection(
+            ReorderableSection(
                 items = visibleCourses,
                 key = { course -> "visible:${PlatformStorage.courseOverrideKey(course)}" },
                 title = "Courses",
@@ -1173,7 +1237,7 @@ fun EditProviderSheet(
                         PlatformStorage.courseOverrideKey(it) !in currentHidden
                     }
                     if (fromIndex !in currentVisible.indices || toIndex !in currentVisible.indices) {
-                        return@reorderableSection
+                        return@ReorderableSection
                     }
                     val reorderedVisible = currentVisible.toMutableList().apply {
                         add(toIndex, removeAt(fromIndex))
@@ -1210,17 +1274,17 @@ fun EditProviderSheet(
             }
 
             if (removedCourses.isNotEmpty()) {
-                title("Removed courses")
-                item {
+                Title("Removed courses")
+                Item {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         removedCourses.forEachIndexed { index, course ->
                             key("removed:${PlatformStorage.courseOverrideKey(course)}") {
                                 MotionCard(
                                     position = when {
-                                        removedCourses.size == 1 -> ItemPosition.Alone
-                                        index == 0 -> ItemPosition.Start
-                                        index == removedCourses.lastIndex -> ItemPosition.End
-                                        else -> ItemPosition.Middle
+                                        removedCourses.size == 1 -> MotionItemPosition.Alone
+                                        index == 0 -> MotionItemPosition.Start
+                                        index == removedCourses.lastIndex -> MotionItemPosition.End
+                                        else -> MotionItemPosition.Middle
                                     },
                                     contentPadding = 0.dp
                                 ) {
@@ -1240,8 +1304,8 @@ fun EditProviderSheet(
             }
         }
 
-        if (loginFields.getFields().isNotEmpty()) title("Provider credentials")
-        item {
+        if (loginFields.getFields().isNotEmpty()) Title("Provider credentials")
+        Item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 if (provider is WebtopPlatform) {
                     WebtopLoginMethodPicker(
@@ -1271,7 +1335,7 @@ fun EditProviderSheet(
                 )
             }
         }
-        item { Spacer(Modifier.height(16.dp)) }
+        Item { Spacer(Modifier.height(16.dp)) }
     }
 }
 
@@ -1431,57 +1495,53 @@ fun SettingsPage(
     onOpenCrashLogs: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val useDark = isDarkTheme()
+    val useDark = isMotionDarkTheme()
 
     MotionScaffold(
-        scaffoldModifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         topBar = { SettingsTopBar("Settings") }
     ) {
-        title("App")
-        section {
-            pageItem(
+        Title("App")
+        Section {
+            PageItem(
                 title = "Appearance",
                 description = "Theme, colors, motion, and orientation",
                 icon = painterResource(R.drawable.ic_settings),
-                backgroundColor = SettingsCategoryColor.APPEARANCE.container(useDark),
-                iconColor = SettingsCategoryColor.APPEARANCE.content(useDark),
+                iconStyle = MotionSectionDefaults.iconStyle(containerColor = SettingsCategoryColor.APPEARANCE.container(useDark), contentColor = SettingsCategoryColor.APPEARANCE.content(useDark)),
                 onClick = onOpenAppearance,
                 paneDestination = AppDest.Appearance
             )
-            pageItem(
+            PageItem(
                 title = "Navigation",
                 description = "Choose the pages in your navbar",
                 icon = painterResource(R.drawable.ic_menu),
-                backgroundColor = SettingsCategoryColor.NAVIGATION.container(useDark),
-                iconColor = SettingsCategoryColor.NAVIGATION.content(useDark),
+                iconStyle = MotionSectionDefaults.iconStyle(containerColor = SettingsCategoryColor.NAVIGATION.container(useDark), contentColor = SettingsCategoryColor.NAVIGATION.content(useDark)),
                 onClick = onOpenNavigation,
                 paneDestination = AppDest.NavigationSettings
             )
-            pageItem(
+            PageItem(
                 title = stringResource(R.string.crash_logs),
                 description = stringResource(R.string.crash_logs_description),
                 icon = painterResource(R.drawable.ic_bug_report),
-                backgroundColor = SettingsCategoryColor.SYSTEM.container(useDark),
-                iconColor = SettingsCategoryColor.SYSTEM.content(useDark),
+                iconStyle = MotionSectionDefaults.iconStyle(containerColor = SettingsCategoryColor.SYSTEM.container(useDark), contentColor = SettingsCategoryColor.SYSTEM.content(useDark)),
                 onClick = onOpenCrashLogs,
                 paneDestination = AppDest.CrashLogs
             )
         }
 
-        title("Providers")
-        section {
-            pageItem(
+        Title("Providers")
+        Section {
+            PageItem(
                 title = "Providers",
                 description = "Add, remove, edit, and reorder providers",
                 icon = painterResource(R.drawable.ic_account),
-                backgroundColor = SettingsCategoryColor.PLATFORMS.container(useDark),
-                iconColor = SettingsCategoryColor.PLATFORMS.content(useDark),
+                iconStyle = MotionSectionDefaults.iconStyle(containerColor = SettingsCategoryColor.PLATFORMS.container(useDark), contentColor = SettingsCategoryColor.PLATFORMS.content(useDark)),
                 onClick = onOpenPlatforms,
                 paneDestination = AppDest.Platforms
             )
         }
 
-        item {
+        Item {
             Spacer(Modifier.height(BottomBarSpacing()))
         }
     }
