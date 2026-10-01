@@ -143,6 +143,7 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation(libs.accompanist.swiperefresh)
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)

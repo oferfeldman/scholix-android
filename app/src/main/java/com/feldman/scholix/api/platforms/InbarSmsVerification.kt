@@ -12,22 +12,12 @@ internal val inbarSmsLoginMutex = Mutex()
 internal suspend fun verifyInbarSmsCandidates(
     codes: ReceiveChannel<String>,
     timeoutMs: Long,
-    resendAfterMs: Long? = null,
-    requestReplacement: suspend () -> Unit = {},
     verify: suspend (String) -> Unit
 ) {
     val completed = withTimeoutOrNull(timeoutMs) {
         val attempted = mutableSetOf<String>()
-        var nextCode: String? = if (resendAfterMs != null) {
-            withTimeoutOrNull(resendAfterMs) { codes.receive() } ?: run {
-                // Only one resend, only when no eligible message arrived, and inside the same deadline.
-                requestReplacement()
-                codes.receive()
-            }
-        } else codes.receive()
         while (attempted.size < 3) {
-            val code = nextCode ?: codes.receive()
-            nextCode = null
+            val code = codes.receive()
             if (!attempted.add(code)) continue
             try {
                 verify(code)

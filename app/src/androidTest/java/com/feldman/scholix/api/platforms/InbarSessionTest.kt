@@ -18,6 +18,44 @@ import org.junit.runner.RunWith
 /** Exercises the real Android Keystore, using synthetic sessions only. */
 @RunWith(AndroidJUnit4::class)
 class InbarSessionTest {
+    @Test fun emptyVerifiedAccountRetainsRecoveryAndAcademicScheduleFilters() {
+        val json = JSONObject().put("id", "EMPTY_ACCOUNT").put("identity", "synthetic-passport")
+            .put("mobile", "synthetic-mobile").put("loggedIn", false).put("verifiedAccount", true)
+            .put("courses", JSONArray()).put("encryptedSession", InbarSessionCipher.encrypt("[]"))
+            .put("scheduleYear", 2027).put("schedulePeriod", "3").put("scheduleYears", JSONArray(listOf(2027, 2026)))
+            .put("schedulePeriods", JSONObject().put("1", "Semester A").put("3", "Summer").put("5", "All semesters"))
+        val restored = InbarPlatform.fromJson(json) as InbarPlatform
+        assertTrue(restored.canRestoreSession)
+        assertTrue(restored.getCourses().isEmpty())
+        val next = restored.forSmsLogin()
+        assertTrue(next.canRestoreSession)
+        assertEquals("3", next.getInfo().getString("schedulePeriod"))
+        assertEquals(2027, next.getInfo().getInt("scheduleYear"))
+        assertEquals(2, next.getInfo().getJSONArray("scheduleYears").length())
+        assertEquals(3, next.getInfo().getJSONArray("schedulePeriods").length())
+        assertTrue(next.supportsSchedule)
+        assertEquals(7, next.getScheduleIndexes().length())
+        assertFalse(next.isLoggedIn())
+    }
+    @Test fun smsRequestWindowSurvivesControllerRecreationWithoutSavingCredentials() {
+        val target = InstrumentationRegistry.getInstrumentation().targetContext
+        val context = object : ContextWrapper(target) {
+            override fun getSharedPreferences(name: String, mode: Int) =
+                super.getSharedPreferences("inbar_request_gate_test_$name", mode)
+        }
+        val prefs = context.getSharedPreferences("inbar_sms_requests", Context.MODE_PRIVATE)
+        try {
+            prefs.edit().clear().commit()
+            reserveInbarSmsRequest(context, "synthetic-passport", "synthetic-mobile123")
+            assertThrows(java.io.IOException::class.java) {
+                reserveInbarSmsRequest(context, "synthetic-passport", "synthetic-mobile123")
+            }
+            assertEquals(1, prefs.all.size)
+            assertTrue(prefs.all.keys.single().matches(Regex("[a-f0-9]{64}")))
+        } finally {
+            prefs.edit().clear().commit()
+        }
+    }
     @Test fun savedLoginDetailsUseExistingProviderStorageAndSurviveSessionExpiry() {
         val target = InstrumentationRegistry.getInstrumentation().targetContext
         val context = object : ContextWrapper(target) {

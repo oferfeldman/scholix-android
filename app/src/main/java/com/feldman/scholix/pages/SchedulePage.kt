@@ -37,6 +37,8 @@ import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platformOptions
 import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.ui.HiddenInbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.ui.components.ChipPicker
 import com.feldman.scholix.ui.components.ProviderPickerBar
@@ -93,6 +95,14 @@ fun SchedulePage(
     platforms: List<Platform>,
     modifier: Modifier = Modifier,
 ) {
+    val schedulePlatforms = platforms.filter { it.supportsSchedule }
+    var selectedPlatformIndex by remember(schedulePlatforms.size) { mutableIntStateOf(0) }
+    var platformPickerExpanded by remember { mutableStateOf(false) }
+    var recoveredProviders by remember { mutableStateOf<Map<String, Platform>>(emptyMap()) }
+    val storedPlatform = schedulePlatforms.getOrNull(selectedPlatformIndex)
+    val platform = storedPlatform?.let { recoveredProviders[it.id] ?: it }
+    val scheduleInfo = platform?.getInfo()
+    val includesSaturday = scheduleInfo?.optBoolean("supportsSaturdaySchedule", false) == true
     val dayNames = listOf(
         stringResource(R.string.sunday),
         stringResource(R.string.monday),
@@ -100,7 +110,7 @@ fun SchedulePage(
         stringResource(R.string.wednesday),
         stringResource(R.string.thursday),
         stringResource(R.string.friday)
-    )
+    ) + if (includesSaturday) listOf(stringResource(R.string.saturday)) else emptyList()
     val fullDayNames = listOf(
         stringResource(R.string.sunday_full),
         stringResource(R.string.monday_full),
@@ -108,7 +118,7 @@ fun SchedulePage(
         stringResource(R.string.wednesday_full),
         stringResource(R.string.thursday_full),
         stringResource(R.string.friday_full)
-    )
+    ) + if (includesSaturday) listOf(stringResource(R.string.saturday_full)) else emptyList()
 
     val allSchedulesUpdated = remember { mutableStateMapOf<Int, List<JSONObject>>() }
     val allSchedulesOriginal = remember { mutableStateMapOf<Int, List<JSONObject>>() }
@@ -118,15 +128,15 @@ fun SchedulePage(
     val todayCalendar = Calendar.getInstance()
     val today = todayCalendar.get(Calendar.DAY_OF_WEEK)
     val currentHour = todayCalendar.get(Calendar.HOUR_OF_DAY)
-    val todayPage = if (today == Calendar.SATURDAY) -1 else (today + 6) % 7
+    val todayPage = if (today == Calendar.SATURDAY && !includesSaturday) -1 else (today + 6) % 7
 
     val tomorrowPage = when (today) {
-        Calendar.FRIDAY, Calendar.SATURDAY -> 0
-        else -> if (todayPage in 0..4) todayPage + 1 else 0
+        Calendar.SATURDAY -> 0
+        else -> if (todayPage in 0 until dayNames.lastIndex) todayPage + 1 else 0
     }
 
     val initialPage = when {
-        today == Calendar.SATURDAY -> 0
+        today == Calendar.SATURDAY && !includesSaturday -> 0
         currentHour >= 20 -> tomorrowPage
         else -> todayPage
     }
@@ -138,16 +148,13 @@ fun SchedulePage(
     val coroutineScope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
     var webtopRelogin by remember { mutableStateOf<WebtopPlatform?>(null) }
+    var inbarRelogin by remember { mutableStateOf<InbarPlatform?>(null) }
     var reloginAttempted by remember { mutableStateOf(false) }
     var scheduleReloadTrigger by remember { mutableIntStateOf(0) }
 
     val context = LocalContext.current
     // Every provider that can supply a schedule, so the page can switch between
     // them the same way Grades switches between courses.
-    val schedulePlatforms = platforms.filter { it.supportsSchedule }
-    var selectedPlatformIndex by remember(schedulePlatforms.size) { mutableIntStateOf(0) }
-    var platformPickerExpanded by remember { mutableStateOf(false) }
-    val platform = schedulePlatforms.getOrNull(selectedPlatformIndex)
     // Subjects the user marked as free periods for this provider.
     val windowSubjects = remember(platform?.id) {
         platform?.let { PlatformStorage.loadWindowSubjects(context, it.id) } ?: emptySet()
@@ -155,9 +162,20 @@ fun SchedulePage(
     // Providers differ: Webtop publishes a separate "original" timetable and lets
     // any grade/class be read, Mashov has one timetable for the signed-in student
     // only. Show a control only where the provider backs it.
-    val scheduleInfo = remember(platform?.id) { platform?.getInfo() }
     val supportsOriginal = scheduleInfo?.optBoolean("supportsOriginalSchedule", true) ?: true
     val supportsSelection = scheduleInfo?.optBoolean("supportsScheduleSelection", true) ?: true
+    val supportsAcademicSelection = scheduleInfo?.optBoolean("supportsAcademicScheduleSelection", false) == true
+    val numberedPeriods = scheduleInfo?.optBoolean("numberedLessonPeriods", true) ?: true
+    val academicYears = scheduleInfo?.optJSONArray("scheduleYears")?.let { years ->
+        (0 until years.length()).map { years.getInt(it).toString() }
+    }.orEmpty()
+    val academicPeriods = scheduleInfo?.optJSONArray("schedulePeriods")?.let { periods ->
+        (0 until periods.length()).associate { index ->
+            periods.getJSONObject(index).let { it.getString("id") to it.getString("label") }
+        }
+    }.orEmpty()
+    var academicYear by remember(platform?.id) { mutableStateOf(scheduleInfo?.optInt("scheduleYear")?.toString().orEmpty()) }
+    var academicPeriod by remember(platform?.id) { mutableStateOf(scheduleInfo?.optString("schedulePeriod", "1").orEmpty()) }
     val rawScheduleSelection = platform?.getInfo()?.optString("scheduleSelection")
     val accountSelection = remember(platform, rawScheduleSelection) {
         rawScheduleSelection
@@ -171,7 +189,7 @@ fun SchedulePage(
     var selectedClass by remember(accountSelectionKey) {
         mutableStateOf(accountSelection?.get(1) ?: "6")
     }
-    val selectedValue = "${selectedGrade}|${selectedClass}"
+    val selectedValue = if (supportsAcademicSelection) "$academicYear|$academicPeriod" else "$selectedGrade|$selectedClass"
 
     LaunchedEffect(accountSelection) {
         if (accountSelection != null && accountSelection.size == 2) {
@@ -181,7 +199,9 @@ fun SchedulePage(
     }
 
     LaunchedEffect(pagerState.currentPage, platform?.id, selectedValue, scheduleReloadTrigger) {
+        if (inbarRelogin != null) return@LaunchedEffect
         val page = pagerState.currentPage
+        if (page !in dayNames.indices) return@LaunchedEffect
         val platformSelection = "${platform?.id}:$selectedValue"
         if (loadedSelection != platformSelection) {
             allSchedulesUpdated.clear()
@@ -211,6 +231,10 @@ fun SchedulePage(
             Log.d("SchedulePage", "Fetching schedule for $selectedValue and page $page")
 
             if (platform != null) {
+                val requestPlatform = if (platform is InbarPlatform) withContext(Dispatchers.IO) {
+                    PlatformStorage.loadPlatforms(context).firstOrNull { it.id == platform.id } ?: platform
+                } else platform
+                if (requestPlatform is InbarPlatform) recoveredProviders = recoveredProviders + (requestPlatform.id to requestPlatform)
                 // Check if the page is STILL the current page before starting.
                 // This is a minimal guard, but the cancellation handling is more important.
 
@@ -224,11 +248,18 @@ fun SchedulePage(
                     // (e.g., using coroutineScope.ensureActive() inside the low-level logic,
                     // or using a cancellable HTTP client). Assuming the `platform.getSchedule` is blocking:
 
-                    val schedule = platform.getSchedule(page, null, selectedValue)
+                    val schedule = requestPlatform.getSchedule(page, null, selectedValue)
 
                     // detect if an error object is returned
                     if (schedule.has("error")) {
                         val errorCode = schedule.optString("error")
+                        val inbar = requestPlatform as? InbarPlatform
+                        if (errorCode == "login_failed" && inbar != null &&
+                            inbar.hasSavedLoginDetails() && !reloginAttempted && inbarRelogin == null) {
+                            reloginAttempted = true
+                            inbarRelogin = inbar.forSmsLogin()
+                            return@withContext emptyList()
+                        }
                         val webtop = platform as? WebtopPlatform
                         if (errorCode == "login_failed" && webtop != null &&
                             webtop.needsInteractiveRelogin() && !reloginAttempted
@@ -249,23 +280,26 @@ fun SchedulePage(
                         schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                     }
                 }
+                if (inbarRelogin != null) return@LaunchedEffect
                 // Update the state *after* the blocking call, back on the main thread (which LaunchedEffect runs on).
                 allSchedulesUpdated[page] = updated
 
                 // --- Original schedule ---
-                val original = withContext(Dispatchers.IO) {
-                    val schedule = platform.getOriginalSchedule(page, null, selectedValue)
+                val original = if (!supportsOriginal) updated else withContext(Dispatchers.IO) {
+                    val schedule = requestPlatform.getOriginalSchedule(page, null, selectedValue)
                     schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                 }
                 allSchedulesOriginal[page] = original
 
-                if ((platform is MashovPlatform || platform is WebtopPlatform) && errorMessages[page] == null) {
+                if ((platform is MashovPlatform || platform is WebtopPlatform ||
+                        scheduleInfo?.optString("scheduleKind") == "weekly") && errorMessages[page] == null) {
                     val remainingDays = withContext(Dispatchers.IO) {
                         dayNames.indices
                             .filter { it != page }
                             .associateWith { day ->
-                                val updatedSchedule = platform.getSchedule(day, null, selectedValue)
-                                val originalSchedule = platform.getOriginalSchedule(day, null, selectedValue)
+                                val updatedSchedule = requestPlatform.getSchedule(day, null, selectedValue)
+                                val originalSchedule = if (supportsOriginal) requestPlatform.getOriginalSchedule(day, null, selectedValue)
+                                    else updatedSchedule
                                 val updatedItems = updatedSchedule.keys().asSequence()
                                     .map { updatedSchedule.getJSONObject(it) }
                                     .toList()
@@ -301,7 +335,7 @@ fun SchedulePage(
     } finally {
         // This finally block always executes, whether cancelled or not,
         // ensuring the loading state is reset.
-        isLoading = false
+        isLoading = inbarRelogin != null || webtopRelogin != null
     }
     }
 
@@ -363,6 +397,29 @@ fun SchedulePage(
         }
     }
 
+    inbarRelogin?.let { pending ->
+        HiddenInbarLogin(account = pending,
+            reuseSavedSession = { withContext(Dispatchers.IO) { PlatformStorage.restoreVerifiedInbarSession(context, pending) } },
+            onSmsRequested = { account -> withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) } },
+            onResult = { account, error ->
+                if (account != null) {
+                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                    inbarRelogin = null
+                    recoveredProviders = recoveredProviders + (account.id to account)
+                    allSchedulesUpdated.clear()
+                    allSchedulesOriginal.clear()
+                    errorMessages.clear()
+                    loadedSelection = null
+                    reloginAttempted = false
+                    scheduleReloadTrigger++
+                } else {
+                    inbarRelogin = null
+                    errorMessages[pagerState.currentPage] = error ?: "Login failed.\nPlease re-login."
+                    isLoading = false
+                }
+            })
+    }
+
     webtopRelogin?.let { webtop ->
         HiddenWebtopMoeLogin(
             username = webtop.getUsername().orEmpty(),
@@ -422,6 +479,23 @@ fun SchedulePage(
             Spacer(Modifier.height(8.dp))
         }
 
+        if (supportsAcademicSelection) Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+        ) {
+            Box(Modifier.weight(1f)) {
+                ChipPicker(label = stringResource(R.string.year), options = (academicYears + academicYear).distinct(),
+                    selected = academicYear, onSelectedChange = { academicYear = it; reloginAttempted = false })
+            }
+            Box(Modifier.weight(1f)) {
+                ChipPicker(label = stringResource(R.string.semester), options = academicPeriods.values.toList(),
+                    selected = academicPeriods[academicPeriod].orEmpty(),
+                    onSelectedChange = { label ->
+                        academicPeriods.entries.firstOrNull { it.value == label }?.let { academicPeriod = it.key }
+                        reloginAttempted = false
+                    })
+            }
+        }
         if (supportsOriginal || supportsSelection) Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
@@ -504,8 +578,8 @@ fun SchedulePage(
                 ScheduleMode.Updated -> allSchedulesUpdated[page] ?: emptyList()
                 ScheduleMode.Original -> allSchedulesOriginal[page] ?: emptyList()
             }
-            val scheduleItems = remember(rawItems, windowSubjects, weekTimesByHour) {
-                withFreePeriods(rawItems, windowSubjects, weekTimesByHour)
+            val scheduleItems = remember(rawItems, windowSubjects, weekTimesByHour, numberedPeriods) {
+                withFreePeriods(rawItems, windowSubjects, weekTimesByHour, synthesizeGaps = numberedPeriods)
             }
 
             val errMessage = errorMessages[page]
@@ -517,6 +591,7 @@ fun SchedulePage(
                 }
                 errMessage != null -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = errMessage,
                             color = Color.Red,
@@ -526,6 +601,15 @@ fun SchedulePage(
                                 fontSize = 18.sp
                             )
                         )
+                        val inbar = platform as? InbarPlatform
+                        if (inbar != null && inbar.hasSavedLoginDetails()) {
+                            TextButton(onClick = {
+                                errorMessages[page] = null
+                                isLoading = true
+                                inbarRelogin = inbar.forSmsLogin()
+                            }) { Text("Retry login") }
+                        }
+                        }
                     }
                 }
                 scheduleItems.isEmpty() -> {
@@ -581,7 +665,7 @@ fun SchedulePage(
                                     }
                                 }
 
-                                HourLabel(hour = hourNum, time = time)
+                                HourLabel(hour = if (numberedPeriods) hourNum else -1, time = time)
                             }
 
                             Spacer(Modifier.height(2.dp))
@@ -912,6 +996,7 @@ fun withFreePeriods(
      * time hour 3 has on other days is the time hour 3 has today.
      */
     weekTimesByHour: Map<Int, String> = emptyMap(),
+    synthesizeGaps: Boolean = true,
 ): List<List<JSONObject>> {
     if (items.isEmpty()) return emptyList()
 
@@ -937,8 +1022,9 @@ fun withFreePeriods(
         }
         .maxOfOrNull { it.key } ?: (byHour.keys.maxOrNull() ?: 0)
 
-    val out = ArrayList<List<JSONObject>>(lastRealHour + 1)
-    for (hour in 0..lastRealHour) {
+    val out = ArrayList<List<JSONObject>>()
+    val hours = if (synthesizeGaps) (0..lastRealHour).toList() else byHour.keys.filter { it <= lastRealHour }.sorted()
+    for (hour in hours) {
         val lessons = byHour[hour]
         when {
             lessons.isNullOrEmpty() ->

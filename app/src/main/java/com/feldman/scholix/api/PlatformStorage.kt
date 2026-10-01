@@ -61,6 +61,14 @@ object PlatformStorage {
     private const val KEY_PROVIDER_COURSE_OVERRIDES_PREFIX = "provider_course_overrides_"
     private const val KEY_PROVIDER_WINDOW_SUBJECTS_PREFIX = "provider_window_subjects_"
 
+    /** Called inside the SMS flow mutex: a different page may already have saved a verified session. */
+    fun restoreVerifiedInbarSession(context: Context, expected: InbarPlatform): InbarPlatform? {
+        val current = loadPlatforms(context).filterIsInstance<InbarPlatform>().firstOrNull {
+            it.id == expected.id && it.getUsername() == expected.getUsername() && it.mobile == expected.mobile && it.isLoggedIn()
+        } ?: return null
+        return current.takeIf { it.refreshCookies() }
+    }
+
     // --- free periods ("חלונות") ---------------------------------------------
     // Subjects the user no longer attends (e.g. a bagrut already completed) are
     // shown in the schedule as free periods rather than lessons.

@@ -770,6 +770,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     inbarRelogin?.let { savedAccount ->
         val pending = remember(savedAccount) { savedAccount.forSmsLogin() }
         HiddenInbarLogin(account = pending,
+            reuseSavedSession = { withContext(Dispatchers.IO) { PlatformStorage.restoreVerifiedInbarSession(context, pending) } },
             onSmsRequested = { account ->
                 withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
             }, onResult = { account, error ->

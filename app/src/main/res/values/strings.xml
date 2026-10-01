@@ -23,6 +23,8 @@
     <string name="no_attendance_events_found">No attendance events found</string>
     <string name="final_grade">Final Grade</string>
     <string name="semester">Semester</string>
+    <string name="saturday">Sat</string>
+    <string name="saturday_full">Saturday</string>
     <string name="year">Year</string>
     <string name="grade">Grade</string>
     <string name="classroom">Classroom</string>

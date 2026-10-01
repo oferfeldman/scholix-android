@@ -4,47 +4,12 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
 
 class InbarSmsVerificationTest {
-    @Test fun missingDeliveryRequestsOneReplacementAndVerifiesIt() = runTest {
-        val codes = Channel<String>(Channel.BUFFERED)
-        var resends = 0
-        var verified = false
-        verifyInbarSmsCandidates(codes, 1000, resendAfterMs = 10, requestReplacement = {
-            resends++
-            codes.send("22222")
-        }) { verified = it == "22222" }
-        assertEquals(1, resends)
-        assertTrue(verified)
-        codes.close()
-    }
-
-    @Test fun timelyDeliveryDoesNotRequestAnotherSms() = runTest {
-        val codes = Channel<String>(Channel.BUFFERED)
-        codes.send("11111")
-        verifyInbarSmsCandidates(codes, 1000, resendAfterMs = 100, requestReplacement = {
-            fail("Code already received")
-        }) { assertEquals("11111", it) }
-        codes.close()
-    }
-
-    @Test fun missingReplacementTimesOutWithoutRepeatedResends() = runTest {
-        val codes = Channel<String>(Channel.BUFFERED)
-        var resends = 0
-        val failure = runCatching {
-            verifyInbarSmsCandidates(codes, 90_000, resendAfterMs = 45_100,
-                requestReplacement = { resends++ }) { fail("No SMS was delivered") }
-        }.exceptionOrNull()
-        assertTrue(failure is IOException)
-        assertEquals(1, resends)
-        codes.close()
-    }
-
     @Test fun delayedCodeThenCurrentCodeCompletesWithoutAnotherSmsRequest() = runBlocking<Unit> {
         val codes = Channel<String>(Channel.BUFFERED)
         codes.send("11111")

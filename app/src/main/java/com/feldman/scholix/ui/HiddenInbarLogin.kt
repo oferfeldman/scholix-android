@@ -20,6 +20,7 @@ import com.feldman.scholix.api.platforms.inbarAutomaticSmsCode
 import com.feldman.scholix.api.platforms.inbarSmsCode
 import com.feldman.scholix.api.platforms.inbarSmsLoginMutex
 import com.feldman.scholix.api.platforms.verifyInbarSmsCandidates
+import com.feldman.scholix.api.platforms.reserveInbarSmsRequest
 import com.google.android.gms.auth.api.phone.SmsRetriever
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Status
@@ -42,11 +43,13 @@ fun HiddenInbarLogin(
     account: InbarPlatform,
     onSmsRequested: suspend (InbarPlatform) -> Unit,
     onResult: suspend (InbarPlatform?, String?) -> Unit,
+    reuseSavedSession: suspend () -> InbarPlatform? = { null },
     timeoutMs: Long = 90_000
 ) {
     val context = LocalContext.current
     val saveAccount by rememberUpdatedState(onSmsRequested)
     val finish by rememberUpdatedState(onResult)
+    val reuseSession by rememberUpdatedState(reuseSavedSession)
     val codes = remember(account) { Channel<String>(Channel.BUFFERED) }
     val permission = remember(account) { CompletableDeferred<Boolean>() }
     val listening = remember(account) { AtomicBoolean(false) }
@@ -110,6 +113,14 @@ fun HiddenInbarLogin(
         Log.d("InbarLogin", "Starting sign-in")
         try {
             inbarSmsLoginMutex.withLock {
+                phase = "saved session"
+                val saved = reuseSession()
+                if (saved != null) {
+                    Log.d("InbarLogin", "Reused the already verified saved session")
+                    finish(saved, null)
+                    return@withLock
+                }
+                phase = "permission"
                 val hasPermission = directAvailable &&
                     ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
                 val useDirect = hasPermission || (directAvailable && run {
@@ -127,6 +138,7 @@ fun HiddenInbarLogin(
                     } == true
                     if (!started) throw IOException("SMS verification is unavailable. Please allow SMS access and try again.")
                 }
+                withContext(Dispatchers.IO) { reserveInbarSmsRequest(context, account.getUsername(), account.mobile) }
                 val startedAt = SystemClock.elapsedRealtime()
                 requestedAt.set(startedAt)
                 listening.set(true) // The receiver is registered before any SMS request; early delivery is buffered.
@@ -136,14 +148,7 @@ fun HiddenInbarLogin(
                 saveAccount(account)
                 phase = "SMS reception"
                 verifyInbarSmsCandidates(codes,
-                    timeoutMs = (timeoutMs - (SystemClock.elapsedRealtime() - startedAt)).coerceAtLeast(1),
-                    resendAfterMs = 45_100,
-                    requestReplacement = {
-                        phase = "SMS resend"
-                        withContext(Dispatchers.IO) { account.resendSms() }
-                        Log.d("InbarLogin", "Requested one replacement SMS after missing delivery")
-                        phase = "SMS reception"
-                    }) { code ->
+                    timeoutMs = (timeoutMs - (SystemClock.elapsedRealtime() - startedAt)).coerceAtLeast(1)) { code ->
                     val verifyingAt = SystemClock.elapsedRealtime()
                     phase = "verification"
                     Log.d("InbarLogin", "SMS candidate received after ${verifyingAt - startedAt} ms")

@@ -57,6 +57,8 @@ internal class InbarHttp(
     private var gradePage: InbarPage? = null
     private var gradeYear: Int? = null
     private var smsTime: Long = 0
+    private var schedulePage: InbarSchedulePage? = null
+    private var scheduleFetchedAt: Long = 0
 
     private fun request(initial: Request, allowAuthenticationRedirect: Boolean = true): InbarPage {
         var request = initial
@@ -88,7 +90,7 @@ internal class InbarHttp(
     }
 
     private fun get(url: String): InbarPage = request(Request.Builder().url(url).build(),
-        allowAuthenticationRedirect = url != GRADES)
+        allowAuthenticationRedirect = !isDataPath(url.toHttpUrl().encodedPath))
 
     private fun post(page: InbarPage, overrides: Map<String, String>): InbarPage {
         val form = page.document().selectFirst("form#form1") ?: throw IOException("Inbar form is missing")
@@ -98,7 +100,7 @@ internal class InbarHttp(
         val action = page.url.resolve(form.attr("action")) ?: throw IOException("Invalid Inbar form action")
         return request(Request.Builder().url(action).header("Referer", page.url.toString())
             .header("Origin", BASE).post(body.build()).build(),
-            allowAuthenticationRedirect = !page.url.encodedPath.equals("/Live/StudentGradesList.aspx", ignoreCase = true))
+            allowAuthenticationRedirect = !isDataPath(page.url.encodedPath))
     }
 
     @Synchronized fun requestSms(identity: String, phone: String) {
@@ -156,12 +158,40 @@ internal class InbarHttp(
         return result
     }
 
+    /** One timetable request serves every weekday; filters use the latest returned form state. */
+    @Synchronized fun schedule(year: Int? = null, period: String? = null): InbarSchedulePage {
+        schedulePage?.takeIf { (year == null || it.year == year) && (period == null || it.period == period) &&
+            System.nanoTime() - scheduleFetchedAt < TimeUnit.MINUTES.toNanos(5) }?.let { return it }
+        var page = get(SCHEDULE)
+        var result = InbarSchedule.parse(page.html)
+        if (year != null && year != result.year) {
+            if (year !in result.years) throw IOException("Academic year $year is not available in Inbar")
+            val name = page.document().selectFirst("select#cmbActiveYear")!!.attr("name")
+            page = post(page, mapOf(name to year.toString(), "__EVENTTARGET" to name, "__EVENTARGUMENT" to ""))
+            result = InbarSchedule.parse(page.html)
+            if (result.year != year) throw IOException("Inbar did not select schedule year $year")
+        }
+        if (period != null && period != result.period) {
+            if (period !in result.periods) throw IOException("Semester is not available in Inbar")
+            val name = page.document().selectFirst("select[id$=ddlPeriodTypeFilter2]")!!.attr("name")
+            page = post(page, mapOf(name to period, "__EVENTTARGET" to name, "__EVENTARGUMENT" to ""))
+            result = InbarSchedule.parse(page.html)
+            if (result.period != period) throw IOException("Inbar did not select schedule semester")
+        }
+        schedulePage = result
+        scheduleFetchedAt = System.nanoTime()
+        return result
+    }
+
     companion object {
         // Restored providers keep their own cookies while reusing HTTPS connections.
         private val SHARED_CLIENT = OkHttpClient()
         const val BASE = "https://inbar.biu.ac.il"
         const val LOGIN = "$BASE/Live/Login.aspx?ReturnUrl=%2fLive%2fStudentGradesList.aspx"
         const val GRADES = "$BASE/Live/StudentGradesList.aspx"
+        const val SCHEDULE = "$BASE/Live/StudentPeriodSchedule.aspx"
+        private fun isDataPath(path: String) = listOf("/Live/StudentGradesList.aspx", "/Live/StudentPeriodSchedule.aspx")
+            .any { path.equals(it, ignoreCase = true) }
 
         fun successfulControls(form: Element): List<Pair<String, String>> = buildList {
             for (element in form.select("input[name], select[name], textarea[name]")) {
