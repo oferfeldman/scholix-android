@@ -18,6 +18,8 @@ import androidx.core.content.ContextCompat
 import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.api.platforms.inbarAutomaticSmsCode
 import com.feldman.scholix.api.platforms.inbarSmsCode
+import com.feldman.scholix.api.platforms.inbarSmsLoginMutex
+import com.feldman.scholix.api.platforms.verifyInbarSmsCandidates
 import com.google.android.gms.auth.api.phone.SmsRetriever
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Status
@@ -28,6 +30,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -44,7 +47,7 @@ fun HiddenInbarLogin(
     val context = LocalContext.current
     val saveAccount by rememberUpdatedState(onSmsRequested)
     val finish by rememberUpdatedState(onResult)
-    val codes = remember(account) { Channel<String>(Channel.CONFLATED) }
+    val codes = remember(account) { Channel<String>(Channel.BUFFERED) }
     val permission = remember(account) { CompletableDeferred<Boolean>() }
     val listening = remember(account) { AtomicBoolean(false) }
     val requestedAt = remember(account) { AtomicLong(0L) }
@@ -86,6 +89,7 @@ fun HiddenInbarLogin(
                 val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
                 val code = inbarAutomaticSmsCode(messages.joinToString("") { it.messageBody.orEmpty() },
                     messages.firstOrNull()?.displayOriginatingAddress.orEmpty())
+                Log.d("InbarLogin", "SMS broadcast received; eligible=${code != null}")
                 if (code != null) codes.trySend(code)
             }
         }
@@ -105,40 +109,50 @@ fun HiddenInbarLogin(
         var phase = "permission"
         Log.d("InbarLogin", "Starting sign-in")
         try {
-            val hasPermission = directAvailable &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
-            val useDirect = hasPermission || (directAvailable && run {
-                permissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
-                permission.await()
-            })
-            if (!useDirect) {
-                phase = "consent listener"
-                val started = withTimeoutOrNull(5_000) {
-                    suspendCancellableCoroutine<Boolean> { continuation ->
-                        SmsRetriever.getClient(context).startSmsUserConsent(null)
-                            .addOnSuccessListener { if (continuation.isActive) continuation.resume(true) }
-                            .addOnFailureListener { if (continuation.isActive) continuation.resume(false) }
-                    }
-                } == true
-                if (!started) throw IOException("SMS verification is unavailable. Please allow SMS access and try again.")
+            inbarSmsLoginMutex.withLock {
+                val hasPermission = directAvailable &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                val useDirect = hasPermission || (directAvailable && run {
+                    permissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
+                    permission.await()
+                })
+                if (!useDirect) {
+                    phase = "consent listener"
+                    val started = withTimeoutOrNull(5_000) {
+                        suspendCancellableCoroutine<Boolean> { continuation ->
+                            SmsRetriever.getClient(context).startSmsUserConsent(null)
+                                .addOnSuccessListener { if (continuation.isActive) continuation.resume(true) }
+                                .addOnFailureListener { if (continuation.isActive) continuation.resume(false) }
+                        }
+                    } == true
+                    if (!started) throw IOException("SMS verification is unavailable. Please allow SMS access and try again.")
+                }
+                val startedAt = SystemClock.elapsedRealtime()
+                requestedAt.set(startedAt)
+                listening.set(true) // The receiver is registered before any SMS request; early delivery is buffered.
+                phase = "SMS request"
+                withContext(Dispatchers.IO) { account.requestSms(account.getUsername(), account.mobile) }
+                Log.d("InbarLogin", "SMS request completed in ${SystemClock.elapsedRealtime() - startedAt} ms")
+                saveAccount(account)
+                phase = "SMS reception"
+                verifyInbarSmsCandidates(codes,
+                    timeoutMs = (timeoutMs - (SystemClock.elapsedRealtime() - startedAt)).coerceAtLeast(1),
+                    resendAfterMs = 45_100,
+                    requestReplacement = {
+                        phase = "SMS resend"
+                        withContext(Dispatchers.IO) { account.resendSms() }
+                        Log.d("InbarLogin", "Requested one replacement SMS after missing delivery")
+                        phase = "SMS reception"
+                    }) { code ->
+                    val verifyingAt = SystemClock.elapsedRealtime()
+                    phase = "verification"
+                    Log.d("InbarLogin", "SMS candidate received after ${verifyingAt - startedAt} ms")
+                    withContext(Dispatchers.IO) { account.verifySms(code) }
+                    Log.d("InbarLogin", "Verification and grades completed in ${SystemClock.elapsedRealtime() - verifyingAt} ms")
+                }
+                listening.set(false)
+                finish(account, null)
             }
-            val startedAt = SystemClock.elapsedRealtime()
-            requestedAt.set(startedAt)
-            listening.set(true) // The receiver is registered before any SMS request; early delivery is buffered.
-            phase = "SMS request"
-            withContext(Dispatchers.IO) { account.requestSms(account.getUsername(), account.mobile) }
-            Log.d("InbarLogin", "SMS request completed in ${SystemClock.elapsedRealtime() - startedAt} ms")
-            saveAccount(account)
-            phase = "SMS reception"
-            val code = withTimeoutOrNull(timeoutMs) { codes.receive() }
-                ?: throw IOException("SMS verification timed out. Please try signing in again.")
-            listening.set(false) // Only one received code is submitted, with no retry loop.
-            val verifyingAt = SystemClock.elapsedRealtime()
-            phase = "verification"
-            Log.d("InbarLogin", "SMS received after ${verifyingAt - startedAt} ms")
-            withContext(Dispatchers.IO) { account.verifySms(code) }
-            Log.d("InbarLogin", "Verification and grades completed in ${SystemClock.elapsedRealtime() - verifyingAt} ms")
-            finish(account, null)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (exception: Exception) {

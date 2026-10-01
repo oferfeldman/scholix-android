@@ -48,6 +48,9 @@ interface Platform {
 
     fun isLoggedIn(): Boolean
 
+    /** A previously configured account can recover its session from the main UI. */
+    val canRestoreSession: Boolean get() = false
+
     @Throws(IOException::class, JSONException::class)
     fun refreshCookies(): Boolean
 

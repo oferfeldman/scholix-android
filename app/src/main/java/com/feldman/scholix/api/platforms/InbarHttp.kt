@@ -16,6 +16,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 internal class InbarSessionExpired : IOException("Inbar session expired. Sign in again with an SMS code.")
+internal class InbarSmsCodeRejected : IOException("The SMS code was not accepted. Please sign in again.")
 
 internal class InbarCookieJar : CookieJar {
     private val cookies = mutableListOf<Cookie>()
@@ -57,7 +58,7 @@ internal class InbarHttp(
     private var gradeYear: Int? = null
     private var smsTime: Long = 0
 
-    private fun request(initial: Request): InbarPage {
+    private fun request(initial: Request, allowAuthenticationRedirect: Boolean = true): InbarPage {
         var request = initial
         repeat(10) {
             if (request.url.scheme != "https" || request.url.host != "inbar.biu.ac.il" || request.url.port != 443) {
@@ -70,6 +71,11 @@ internal class InbarHttp(
                 if (response.code in listOf(301, 302, 303, 307, 308)) {
                     val location = response.header("Location") ?: throw IOException("Inbar redirect missing Location")
                     val destination = request.url.resolve(location) ?: throw IOException("Invalid Inbar redirect")
+                    if (!allowAuthenticationRedirect &&
+                        listOf("/Live/Login.aspx", "/Live/Authenticate.aspx").any { destination.encodedPath.equals(it, ignoreCase = true) }) {
+                        // Reading grades must not visit an endpoint that can create another SMS challenge.
+                        throw InbarSessionExpired()
+                    }
                     val builder = request.newBuilder().url(destination)
                     if (response.code == 303 || (response.code in listOf(301, 302) && request.method == "POST")) builder.get()
                     request = builder.build()
@@ -81,7 +87,8 @@ internal class InbarHttp(
         throw IOException("Too many Inbar redirects")
     }
 
-    private fun get(url: String): InbarPage = request(Request.Builder().url(url).build())
+    private fun get(url: String): InbarPage = request(Request.Builder().url(url).build(),
+        allowAuthenticationRedirect = url != GRADES)
 
     private fun post(page: InbarPage, overrides: Map<String, String>): InbarPage {
         val form = page.document().selectFirst("form#form1") ?: throw IOException("Inbar form is missing")
@@ -90,7 +97,8 @@ internal class InbarHttp(
         overrides.forEach { (key, value) -> body.add(key, value) }
         val action = page.url.resolve(form.attr("action")) ?: throw IOException("Invalid Inbar form action")
         return request(Request.Builder().url(action).header("Referer", page.url.toString())
-            .header("Origin", BASE).post(body.build()).build())
+            .header("Origin", BASE).post(body.build()).build(),
+            allowAuthenticationRedirect = !page.url.encodedPath.equals("/Live/StudentGradesList.aspx", ignoreCase = true))
     }
 
     @Synchronized fun requestSms(identity: String, phone: String) {
@@ -122,7 +130,7 @@ internal class InbarHttp(
         val next = post(page, mapOf("edtCode" to code, "btnVerify" to button.attr("value")))
         if (next.document().selectFirst("input[name=edtCode]") != null) {
             challenge = next // Keep fresh state for a manually corrected code.
-            throw IOException("The SMS code was not accepted. Please sign in again.")
+            throw InbarSmsCodeRejected()
         }
         val grades = if (next.url.encodedPath == "/Live/StudentGradesList.aspx") {
             InbarGrades.parse(next.html).also { gradePage = next; gradeYear = it.year }

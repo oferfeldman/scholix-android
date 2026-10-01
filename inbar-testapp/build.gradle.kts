@@ -13,7 +13,7 @@ val inbarSources = tasks.register<Sync>("prepareInbarSources") {
     into(layout.buildDirectory.dir("generated/inbar/main"))
 }
 val inbarTests = tasks.register<Sync>("prepareInbarTests") {
-    from("../app/src/test/java") { include("com/feldman/scholix/api/platforms/InbarHttpTest.kt") }
+    from("../app/src/test/java") { include("com/feldman/scholix/api/platforms/Inbar*Test.kt") }
     into(layout.buildDirectory.dir("generated/inbar/test"))
 }
 

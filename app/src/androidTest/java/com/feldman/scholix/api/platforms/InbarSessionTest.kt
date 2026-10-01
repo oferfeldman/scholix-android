@@ -47,6 +47,7 @@ class InbarSessionTest {
             assertEquals("Saved account", nextLogin.getName())
             assertEquals("Synthetic course", nextLogin.getCourses().single().getString("name"))
             assertFalse(nextLogin.isLoggedIn())
+            assertTrue(nextLogin.canRestoreSession)
             PlatformStorage.addPlatforms(context, listOf(nextLogin))
             assertEquals(1, PlatformStorage.loadPlatforms(context).size)
             assertEquals(overrides, PlatformStorage.loadProviderCourseOverrides(context, nextLogin.id))
@@ -67,6 +68,7 @@ class InbarSessionTest {
         assertEquals("synthetic-passport", account.getUsername())
         assertEquals("synthetic-mobile", account.mobile)
         assertFalse(account.isLoggedIn()) // Construction alone never requests an SMS.
+        assertFalse(account.canRestoreSession) // First-time setup still uses the shared login form.
     }
 
     @Test fun encryptedCookiesRoundTripWithRandomIv() {

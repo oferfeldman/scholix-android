@@ -32,6 +32,7 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
     }
 
     fun hasSavedLoginDetails() = identity.isNotBlank() && mobile.isNotBlank()
+    override val canRestoreSession: Boolean get() = hasSavedLoginDetails() && getCourses().isNotEmpty()
 
     /** Keep the saved account and courses while starting a fresh SMS challenge. */
     @Synchronized fun forSmsLogin(): InbarPlatform = InbarPlatform(id).also { next ->
