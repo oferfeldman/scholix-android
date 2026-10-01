@@ -23,17 +23,37 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Signing credentials come from outside version control: env vars, then
+    // local.properties, then ~/.gradle/gradle.properties. Keep secrets out of
+    // this file. See signing.properties.example for the property names.
+    val signingProps = Properties().apply {
+        val local = rootProject.file("local.properties")
+        if (local.exists()) local.inputStream().use { load(it) }
+        val home = file("${System.getProperty("user.home")}/.gradle/gradle.properties")
+        if (home.exists()) home.inputStream().use { load(it) }
+    }
+    fun signingValue(key: String): String? =
+        (System.getenv(key) ?: signingProps.getProperty(key))?.takeIf { it.isNotBlank() }
+
+    val storeFilePath = signingValue("SCHOLIX_STORE_FILE")
+    val storePass = signingValue("SCHOLIX_STORE_PASSWORD")
+    val keyAliasName = signingValue("SCHOLIX_KEY_ALIAS")
+    val keyPass = signingValue("SCHOLIX_KEY_PASSWORD")
+    val haveSigning = listOf(storeFilePath, storePass, keyAliasName, keyPass).all { it != null }
+
     signingConfigs {
-        create("release") {
-            storeFile = file("feldman.jks")
-            storePassword = "***REMOVED***"
-            keyAlias = "key0"
-            keyPassword = "***REMOVED***"
+        if (haveSigning) {
+            create("release") {
+                storeFile = file(storeFilePath!!)
+                storePassword = storePass
+                keyAlias = keyAliasName
+                keyPassword = keyPass
+            }
         }
     }
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            if (haveSigning) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -42,8 +62,8 @@ android {
             )
         }
         getByName("debug") {
-            // if you also want debug signed with release key:
-            signingConfig = signingConfigs.getByName("release")
+            // Sign debug with the release key only when credentials are available.
+            if (haveSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
     buildFeatures {

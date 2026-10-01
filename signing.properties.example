@@ -1,0 +1,6 @@
+# Copy these keys into local.properties (gitignored) or ~/.gradle/gradle.properties,
+# or set them as environment variables. Never commit the real values.
+SCHOLIX_STORE_FILE=app/feldman.jks
+SCHOLIX_STORE_PASSWORD=
+SCHOLIX_KEY_ALIAS=key0
+SCHOLIX_KEY_PASSWORD=
