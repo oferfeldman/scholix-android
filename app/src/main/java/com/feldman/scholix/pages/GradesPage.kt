@@ -235,6 +235,7 @@ private fun CoursePickerBar(
         contentDescription = "Choose course",
         previousDescription = "Previous course",
         nextDescription = "Next course",
+        menuContainerColor = MaterialTheme.colorScheme.secondaryContainer,
         modifier = modifier
     )
 }

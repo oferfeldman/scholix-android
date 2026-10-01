@@ -11,6 +11,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -447,7 +453,17 @@ fun DynamicLoginFields(
                         when (field.type) {
                             Type.Username, Type.Id -> Icon(Icons.Default.Person, null)
                             Type.Password -> Icon(Icons.Default.Lock, null)
-                            else -> {}
+                            Type.Email -> Icon(Icons.Default.Email, null)
+                            Type.Token -> Icon(Icons.Default.Key, null)
+                            is Type.Custom -> Icon(
+                                when (field.type.name) {
+                                    "mobile" -> Icons.Default.Phone
+                                    "schoolCode" -> Icons.Default.School
+                                    "schoolYear" -> Icons.Default.CalendarToday
+                                    else -> Icons.Default.Edit
+                                },
+                                null
+                            )
                         }
                     },
                     trailingIcon = if (field.type == Type.Password) {
@@ -488,7 +504,7 @@ fun DynamicLoginFields(
         AnimatedVisibility(visible = !isLoading, enter = fadeIn(), exit = fadeOut()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (useMotionButtons) {

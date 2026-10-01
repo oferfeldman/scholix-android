@@ -540,6 +540,7 @@ sealed class AppDest : MotionDest {
         @Transient
         override val bottomSheetEffects = MotionBottomSheetEffects(
             blurBackground = true,
+            blurSheet = false,
             darkenBackground = true,
             backdropScope = MotionBottomSheetBackdropScope.PANE
         )
@@ -577,6 +578,7 @@ sealed class AppDest : MotionDest {
         @Transient
         override val bottomSheetEffects = MotionBottomSheetEffects(
             blurBackground = true,
+            blurSheet = false,
             darkenBackground = true,
             backdropScope = MotionBottomSheetBackdropScope.PANE
         )

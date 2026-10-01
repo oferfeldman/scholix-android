@@ -5,7 +5,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import com.feldman.motion.MotionBlurBackdrop
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFF54B3FF),
@@ -45,8 +44,6 @@ fun AppTheme(
         colorScheme = baseScheme,
         typography = MaterialTheme.typography,
         shapes = MaterialTheme.shapes,
-        content = {
-            MotionBlurBackdrop(content = content)
-        }
+        content = content
     )
 }

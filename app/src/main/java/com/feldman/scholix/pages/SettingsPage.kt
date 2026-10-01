@@ -1179,6 +1179,7 @@ fun EditProviderSheet(
                     value = providerName,
                     onValueChange = { providerName = it },
                     label = { Text("Provider name") },
+                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )

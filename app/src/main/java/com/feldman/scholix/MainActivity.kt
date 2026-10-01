@@ -12,19 +12,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.rememberTransition
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -32,16 +21,11 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
@@ -56,7 +40,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -69,33 +52,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
-import android.view.View
-import android.view.WindowManager
-import androidx.compose.ui.platform.LocalView
-import com.feldman.motion.MotionBlurDefaults
-import com.feldman.motion.motionBlurBehind
-import com.feldman.motion.rememberMotionBlur
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.DpOffset
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupPositionProvider
-import androidx.compose.ui.window.PopupProperties
 import android.content.pm.ActivityInfo
 import androidx.core.app.ActivityCompat
 import androidx.glance.appwidget.GlanceAppWidgetManager
@@ -110,6 +71,7 @@ import androidx.compose.ui.draw.alpha
 import com.feldman.motion.MotionFloatingToolbarDefaults
 import com.feldman.motion.MotionDropdown
 import com.feldman.motion.MotionDropdownDefaults
+import com.feldman.motion.MotionDropdownDirection
 import com.feldman.motion.MotionDropdownMenuAlignment
 import com.feldman.motion.MotionBottomBarHost
 import com.feldman.motion.MotionFabConfig
@@ -123,6 +85,10 @@ import com.feldman.motion.MotionThemeRepository
 import com.feldman.lockerapp.ui.theme.AppTheme
 import com.feldman.motion.rememberMotionDestBackStack
 import com.feldman.motion.rememberMotionNavigationState
+import com.feldman.motion.rememberMotionBlurState
+import com.feldman.motion.MotionBlurBackdrop
+import com.feldman.motion.LocalMotionBlurState
+import com.feldman.motion.rememberMotionBlur
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.pages.LockerDatabase
@@ -132,7 +98,6 @@ import com.feldman.scholix.pages.LockerViewModelFactory
 import com.feldman.scholix.pages.LoginPage
 import com.feldman.scholix.pages.GradesLoadingIndicator
 import com.feldman.scholix.pages.MessagesViewModel
-import com.feldman.scholix.pages.isRtlText
 import com.feldman.scholix.services.GradeMonitorWorker
 import com.feldman.scholix.services.MessageMonitorWorker
 import com.feldman.scholix.storage.OrientationMode
@@ -145,7 +110,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import kotlin.math.max
 
 @Composable
 fun TopBarSpacing(): Dp {
@@ -456,19 +420,20 @@ fun MainScreen(
     val overflowPagesList = remember(navigationPages, visibleNavbarDestinations) {
         navigationPages.filter { it !in visibleNavbarDestinations }
     }
-    val moreFab = remember(overflowPagesList, selectedNavbarDest, motionLevel) {
+    val moreFab = remember(overflowPagesList, selectedNavbarDest) {
         MotionFabConfig(
             visible = true,
             content = {
                 OverflowMenuFab(
                     overflowPages = overflowPagesList,
                     selectedDest = selectedNavbarDest,
-                    motionLevel = motionLevel,
                     onNavigate = { dest -> backStack.navigateTo(dest) }
                 )
             }
         )
     }
+    val navigationBackdrop = rememberMotionBlurState()
+    val navigationBlurred = rememberMotionBlur()
     var bottomBarHeight by remember { mutableStateOf(0.dp) }
     val showNavigationRail = isLandscape && currentScreen.showNavigation
 
@@ -494,78 +459,85 @@ fun MainScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            if (showNavigationRail) {
-                NavigationRail(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    header = { moreFab.content?.invoke() }
-                ) {
-                    Spacer(Modifier.weight(1f))
-                    visibleNavbarDestinations.forEach { destination ->
-                        val selected = selectedNavbarDest == destination
-                        NavigationRailItem(
-                            selected = selected,
-                            onClick = { backStack.navigateTop(destination) },
-                            icon = {
-                                Icon(
-                                    painter = painterResource(
-                                        if (selected) destination.filledIcon else destination.outlineIcon
-                                    ),
-                                    contentDescription = destination.label
+        MotionBlurBackdrop(state = navigationBackdrop, modifier = Modifier.fillMaxSize()) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                if (showNavigationRail) {
+                    NavigationRail(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        header = { moreFab.content?.invoke() }
+                    ) {
+                        Spacer(Modifier.weight(1f))
+                        visibleNavbarDestinations.forEach { destination ->
+                            val selected = selectedNavbarDest == destination
+                            NavigationRailItem(
+                                selected = selected,
+                                onClick = { backStack.navigateTop(destination) },
+                                icon = {
+                                    Icon(
+                                        painter = painterResource(
+                                            if (selected) destination.filledIcon else destination.outlineIcon
+                                        ),
+                                        contentDescription = destination.label
+                                    )
+                                },
+                                label = { Text(destination.label) },
+                                colors = NavigationRailItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.onPrimary,
+                                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    indicatorColor = MaterialTheme.colorScheme.primary,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            },
-                            label = { Text(destination.label) },
-                            colors = NavigationRailItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                                indicatorColor = MaterialTheme.colorScheme.primary,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                ) {
+                    CompositionLocalProvider(LocalAppState provides appState) {
+                        MotionNavHost(
+                            backStack = backStack,
+                            destinations = destinations,
+                            navigationState = navigationState,
+                            modifier = Modifier.fillMaxSize(),
+                            onNavigate = { dest -> backStack.navigateTo(dest) },
+                            onRootBack = {}
                         )
                     }
-                    Spacer(Modifier.weight(1f))
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-            ) {
-                CompositionLocalProvider(LocalAppState provides appState) {
-                    MotionNavHost(
-                        backStack = backStack,
-                        destinations = destinations,
-                        navigationState = navigationState,
-                        modifier = Modifier.fillMaxSize(),
-                        onNavigate = { dest -> backStack.navigateTo(dest) },
-                        onRootBack = {}
-                    )
                 }
             }
         }
 
         if (!isLandscape && expressiveDesign) {
-            MotionBottomBarHost(
-                navigationState = navigationState,
-                visible = currentScreen.showNavigation,
-                bottomBarHeight = bottomBarHeight,
-                fullyDarkened = true,
-                darkeningHeight = 240.dp,
-                modifier = Modifier.align(Alignment.BottomCenter)
-            ) {
-                MotionNavigationBar(
-                    visible = true,
-                    currentDest = currentScreen,
-                    selectedDest = selectedNavbarDest,
-                    destinations = visibleNavbarDestinations,
-                    onNavigate = { dest -> backStack.navigateTop(dest) },
-                    floatingActionButton = moreFab.content,
-                    onHeightChanged = { bottomBarHeight = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    contrast = MotionNavigationBarDefaults.contrast(enabled = false, fullyDarkened = true, height = 180.dp)
-                )
+            CompositionLocalProvider(LocalMotionBlurState provides navigationBackdrop) {
+                MotionBottomBarHost(
+                    navigationState = navigationState,
+                    visible = currentScreen.showNavigation,
+                    bottomBarHeight = bottomBarHeight,
+                    backdropState = navigationBackdrop,
+                    contrastBlurEnabled = navigationBlurred,
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                ) {
+                    MotionNavigationBar(
+                        visible = true,
+                        currentDest = currentScreen,
+                        selectedDest = selectedNavbarDest,
+                        destinations = visibleNavbarDestinations,
+                        onNavigate = { dest -> backStack.navigateTop(dest) },
+                        floatingActionButton = moreFab.content,
+                        onHeightChanged = { bottomBarHeight = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = MotionNavigationBarDefaults.colors().let { colors ->
+                            colors.copy(container = colors.container.copy(alpha = if (navigationBlurred) 0.84f else 1f))
+                        },
+                        contrast = MotionNavigationBarDefaults.contrast(enabled = false)
+                    )
+                }
             }
         } else if (!isLandscape && currentScreen.showNavigation) {
             NavigationBar(
@@ -600,212 +572,39 @@ fun MainScreen(
 private fun OverflowMenuFab(
     overflowPages: List<AppDest>,
     selectedDest: MotionDest,
-    motionLevel: MotionLevel,
     onNavigate: (MotionDest) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val expandedStates = remember { MutableTransitionState(false) }
-    expandedStates.targetState = expanded
-
-    val density = LocalDensity.current
-    var opensAbove by remember { mutableStateOf(true) }
-
-    Box {
-        MotionFloatingToolbarDefaults.StandardFloatingActionButton(
-            onClick = { expanded = !expanded }
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_menu),
-                contentDescription = "More pages"
-            )
-        }
-
-        if (expandedStates.currentState || expandedStates.targetState) {
-            val positionProvider = remember(density) {
-                object : PopupPositionProvider {
-                    override fun calculatePosition(
-                        anchorBounds: IntRect,
-                        windowSize: IntSize,
-                        layoutDirection: LayoutDirection,
-                        popupContentSize: IntSize
-                    ): IntOffset {
-                        val offsetYPx = with(density) { 8.dp.roundToPx() }
-                        val below = anchorBounds.bottom + offsetYPx
-                        val above = anchorBounds.top - popupContentSize.height - offsetYPx
-                        val fitsBelow = below + popupContentSize.height <= windowSize.height
-                        val fitsAbove = above >= 0
-                        val openAbove = !fitsBelow && fitsAbove
-                        opensAbove = openAbove
-
-                        val y = when {
-                            fitsBelow -> below
-                            fitsAbove -> above
-                            else -> max(0, windowSize.height - popupContentSize.height)
-                        }
-
-                        val rtl = layoutDirection == LayoutDirection.Rtl
-                        val rawX = if (rtl) {
-                            anchorBounds.left
-                        } else {
-                            anchorBounds.right - popupContentSize.width
-                        }
-
-                        val x = rawX.coerceIn(0, max(0, windowSize.width - popupContentSize.width))
-                        return IntOffset(x, y)
-                    }
-                }
-            }
-
-            Popup(
-                popupPositionProvider = positionProvider,
-                onDismissRequest = { expanded = false },
-                properties = PopupProperties(focusable = true)
+    MotionDropdown(
+        options = overflowPages,
+        selected = selectedDest as? AppDest,
+        onSelected = onNavigate,
+        items = MotionDropdownDefaults.items(
+            label = { it.label },
+            icon = { painterResource(it.filledIcon) },
+            key = { it }
+        ),
+        sizes = MotionDropdownDefaults.sizes(
+            menuMinWidth = 200.dp,
+            menuMaxWidth = 280.dp,
+            menuMaxHeight = 380.dp
+        ),
+        menu = MotionDropdownDefaults.menu(
+            alignment = MotionDropdownMenuAlignment.End,
+            matchAnchorWidth = false,
+            darkenBackground = true
+        ),
+        direction = MotionDropdownDirection.Auto,
+        contentDescription = "More pages",
+        anchorContent = { _, toggle ->
+            MotionFloatingToolbarDefaults.StandardFloatingActionButton(
+                onClick = toggle,
+                modifier = Modifier.size(56.dp)
             ) {
-                val transition = rememberTransition(expandedStates, label = "OverflowDropdownMenu")
-                val scale by transition.animateFloat(
-                    transitionSpec = {
-                        when (motionLevel) {
-                            MotionLevel.NONE -> snap()
-                            MotionLevel.LOW -> tween(if (targetState) 150 else 100, easing = FastOutSlowInEasing)
-                            MotionLevel.MEDIUM -> spring(dampingRatio = 0.8f, stiffness = 600f)
-                            MotionLevel.HIGH -> spring(dampingRatio = 0.65f, stiffness = 450f)
-                        }
-                    },
-                    label = "scale"
-                ) { open -> if (open) 1f else 0.9f }
-                val alpha by transition.animateFloat(
-                    transitionSpec = {
-                        when (motionLevel) {
-                            MotionLevel.NONE -> snap()
-                            MotionLevel.LOW -> tween(if (targetState) 150 else 100, easing = FastOutSlowInEasing)
-                            MotionLevel.MEDIUM -> spring(dampingRatio = 0.8f, stiffness = 600f)
-                            MotionLevel.HIGH -> spring(dampingRatio = 0.65f, stiffness = 450f)
-                        }
-                    },
-                    label = "alpha"
-                ) { open -> if (open) 1f else 0f }
-
-                val view = LocalView.current
-                val targetDim = (0.32f * alpha).coerceIn(0f, 1f)
-                DisposableEffect(view, targetDim) {
-                    try {
-                        var targetView: View? = view
-                        while (targetView != null && targetView.layoutParams !is WindowManager.LayoutParams) {
-                            targetView = targetView.parent as? View
-                        }
-                        val params = targetView?.layoutParams as? WindowManager.LayoutParams
-                        if (params != null && targetView != null) {
-                            params.flags = params.flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND
-                            params.dimAmount = targetDim
-                            val wm = view.context.getSystemService(android.content.Context.WINDOW_SERVICE) as? WindowManager
-                            wm?.updateViewLayout(targetView, params)
-                        }
-                    } catch (_: Throwable) {}
-                    onDispose {}
-                }
-
-                val ambientLayoutDirection = LocalLayoutDirection.current
-                val originX = if (ambientLayoutDirection == LayoutDirection.Rtl) 0f else 1f
-                val menuTransformOrigin = TransformOrigin(originX, if (opensAbove) 1f else 0f)
-                val menuShape = RoundedCornerShape(20.dp)
-                val menuBlurred = rememberMotionBlur(true)
-
-                Box(
-                    modifier = Modifier.graphicsLayer {
-                        if (motionLevel != MotionLevel.NONE) {
-                            scaleX = scale
-                            scaleY = scale
-                            transformOrigin = menuTransformOrigin
-                            this.alpha = alpha
-                        }
-                    }
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .widthIn(min = 200.dp, max = 280.dp)
-                            .motionBlurBehind(
-                                shape = menuShape,
-                                enabled = menuBlurred
-                            ),
-                        shape = menuShape,
-                        color = MotionBlurDefaults.containerColor(
-                            MaterialTheme.colorScheme.surfaceContainerLow,
-                            menuBlurred
-                        ),
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                        shadowElevation = 6.dp,
-                        tonalElevation = 0.dp
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 380.dp)
-                                .verticalScroll(rememberScrollState())
-                                .padding(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            overflowPages.forEach { destination ->
-                                val isSelected = selectedDest == destination
-                                OverflowDropdownMenuItem(
-                                    title = destination.label,
-                                    icon = painterResource(destination.filledIcon),
-                                    isSelected = isSelected,
-                                    onClick = {
-                                        expanded = false
-                                        onNavigate(destination)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
+                Icon(
+                    painter = painterResource(R.drawable.ic_menu),
+                    contentDescription = "More pages"
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun OverflowDropdownMenuItem(
-    title: String,
-    icon: Painter,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val isRtl = isRtlText(title)
-    val itemBg = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-    val itemContentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-    val iconTint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-
-    CompositionLocalProvider(
-        LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(itemBg)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = ripple(),
-                    onClick = onClick
-                )
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                painter = icon,
-                contentDescription = null,
-                tint = iconTint,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = itemContentColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
+    )
 }

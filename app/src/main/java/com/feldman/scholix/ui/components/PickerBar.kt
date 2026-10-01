@@ -64,6 +64,7 @@ fun <T> PickerBar(
     modifier: Modifier = Modifier,
     optionDescription: (T) -> String = { "" },
     optionIcon: @Composable (T) -> Unit = {},
+    menuContainerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
 ) {
     val selected = options.getOrNull(selectedIndex) ?: return
     Row(
@@ -94,7 +95,7 @@ fun <T> PickerBar(
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
             ).copy(
-                menuContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                menuContainerColor = menuContainerColor,
                 menuItemTextColor = MaterialTheme.colorScheme.onSurface,
                 menuItemIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 menuItemDescriptionColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
