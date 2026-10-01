@@ -210,7 +210,7 @@ class MainActivity : ComponentActivity() {
                     val ctx = context
                     scope.launch(Dispatchers.IO) {
                         val newPlatforms = PlatformStorage.loadPlatforms(ctx)
-                        val valid = newPlatforms.any { it.isLoggedIn() }
+                        val valid = newPlatforms.any { it.isLoggedIn() || it.canRestoreSession }
                         withContext(Dispatchers.Main) {
                             platforms = newPlatforms
                             isLoggedIn = valid
@@ -260,7 +260,7 @@ class MainActivity : ComponentActivity() {
                     withContext(Dispatchers.IO) {
                         reloadPreloads(snackbarHostState)
                         val newPlatforms = PlatformStorage.loadPlatforms(context)
-                        val valid = newPlatforms.any { it.isLoggedIn() }
+                        val valid = newPlatforms.any { it.isLoggedIn() || it.canRestoreSession }
 
                         withContext(Dispatchers.Main) {
                             platforms = newPlatforms

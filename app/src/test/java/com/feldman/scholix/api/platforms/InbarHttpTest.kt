@@ -200,6 +200,35 @@ class InbarHttpTest {
         assertEquals(1, requests.size)
     }
 
+    @Test fun expiredGradesStopBeforeLoginOrSmsAuthenticationRedirect() {
+        for (path in listOf("/Live/Login.aspx", "/Live/Authenticate.aspx?AuthLevel=SmsAndNormal")) {
+            val requests = mutableListOf<Request>()
+            val client = OkHttpClient.Builder().addInterceptor {
+                requests += it.request()
+                Response.Builder().request(it.request()).protocol(Protocol.HTTP_1_1).code(302).message("Found")
+                    .header("Location", path).body("".toResponseBody()).build()
+            }.build()
+            assertThrows(InbarSessionExpired::class.java) { InbarHttp(transport = client).grades() }
+            assertEquals(1, requests.size)
+            assertEquals("/Live/StudentGradesList.aspx", requests.single().url.encodedPath)
+        }
+    }
+
+    @Test fun expiredYearPostbackDoesNotFollowAnotherSmsChallenge() {
+        val requests = mutableListOf<Request>()
+        val client = OkHttpClient.Builder().addInterceptor {
+            requests += it.request()
+            val response = Response.Builder().request(it.request()).protocol(Protocol.HTTP_1_1).message("OK")
+            if (requests.size == 1) response.code(200).body(grades(2027).toResponseBody())
+            else response.code(303).header("Location", "/Live/Authenticate.aspx").body("".toResponseBody())
+            response.build()
+        }.build()
+        val http = InbarHttp(transport = client)
+        http.grades()
+        assertThrows(InbarSessionExpired::class.java) { http.grades(2026) }
+        assertEquals(listOf("GET", "POST"), requests.map { it.method })
+    }
+
     @Test fun cookiesMatchTheirPortalAndSurviveSerialization() {
         val jar = InbarCookieJar()
         val url = InbarHttp.BASE.toHttpUrl()

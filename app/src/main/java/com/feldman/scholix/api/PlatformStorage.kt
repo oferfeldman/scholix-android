@@ -95,8 +95,7 @@ object PlatformStorage {
     /**
      * Serializes and saves the entire list of Platform objects.
      */
-    fun savePlatforms(context: Context, platforms: List<Platform>) {
-        println(platforms)
+    @Synchronized fun savePlatforms(context: Context, platforms: List<Platform>) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val array = JSONArray()
         for (p in platforms) {
@@ -142,7 +141,7 @@ object PlatformStorage {
         return platforms
     }
 
-    fun addPlatforms(context: Context, newPlatforms: List<Platform>) {
+    @Synchronized fun addPlatforms(context: Context, newPlatforms: List<Platform>) {
         if (newPlatforms.isEmpty()) return
         val platforms = loadPlatforms(context)
         for (np in newPlatforms) {
@@ -262,7 +261,10 @@ object PlatformStorage {
     }
 
     suspend fun refreshCookies(context: Context): List<String> = coroutineScope {
-        val platforms = loadPlatforms(context)
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val (snapshot, platforms) = synchronized(this@PlatformStorage) {
+            JSONArray(prefs.getString(KEY_PLATFORMS, "[]")) to loadPlatforms(context)
+        }
 
         val results = platforms.map { p ->
             async {
@@ -284,7 +286,12 @@ object PlatformStorage {
         val failed = results.awaitAll().filterNotNull()
         if (failed.isNotEmpty()) Log.w("Refresh", "Failed to refresh: $failed")
 
-        savePlatforms(context, platforms)
+        val refreshed = JSONArray(platforms.map { it.toJson() })
+        synchronized(this@PlatformStorage) {
+            val current = JSONArray(prefs.getString(KEY_PLATFORMS, "[]"))
+            // A sign-in or settings save made while requests ran takes precedence.
+            prefs.edit { putString(KEY_PLATFORMS, mergeRefreshedPlatforms(snapshot, current, refreshed).toString()) }
+        }
         failed // return list of failed platform names
     }
 
