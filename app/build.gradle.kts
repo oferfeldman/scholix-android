@@ -73,6 +73,10 @@ android {
     buildFeatures {
         compose = true
     }
+    // Explicit opt-in for a privately sideloaded debug build; never added to release.
+    if (providers.gradleProperty("scholix.directSms").orNull == "true") {
+        sourceSets["debug"].manifest.srcFile("src/directSms/AndroidManifest.xml")
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

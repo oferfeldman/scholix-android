@@ -179,4 +179,12 @@ class InbarHttpTest {
         assertNull(inbarSmsCode("Phone 0501234567"))
         assertNull(inbarSmsCode("No verification code"))
     }
+
+    @Test fun automaticVerificationAcceptsOnlyBrandedSingleCodeMessages() {
+        assertEquals("01234", inbarAutomaticSmsCode("Inbar verification code: 01234", "Portal"))
+        assertEquals("01234", inbarAutomaticSmsCode("קוד האימות לאינ-בר הוא 01234", "Portal"))
+        assertEquals("01234", inbarAutomaticSmsCode("Verification code: 01234", "Bar-Ilan"))
+        assertNull(inbarAutomaticSmsCode("Bank verification code: 01234", "Bank"))
+        assertNull(inbarAutomaticSmsCode("Inbar codes 01234 and 56789", "Portal"))
+    }
 }

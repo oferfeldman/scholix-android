@@ -44,6 +44,7 @@ import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.MashovSchool
 import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.ui.HiddenMoeLogin
 import com.feldman.scholix.ui.InbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
@@ -75,6 +76,11 @@ fun LoginPage(
     var loginFields by remember { mutableStateOf<LoginFields?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    val savedInbar = remember(selectedPlatform) {
+        if (selectedPlatform?.name == "Inbar (Bar-Ilan)")
+            PlatformStorage.loadPlatforms(context).filterIsInstance<InbarPlatform>().lastOrNull()
+        else null
+    }
 
     // Webtop can be added either with a username/password or via Ministry-of-
     // Education (MOE) SSO. This picks which; it is only shown for Webtop.
@@ -186,6 +192,10 @@ fun LoginPage(
                     run {
                     if (platform.name == "Inbar (Bar-Ilan)") {
                         InbarLogin(
+                            initialAccount = savedInbar,
+                            onSmsRequested = { account ->
+                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                            },
                             onSuccess = { account ->
                                 withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
                                 onLoginSuccess()

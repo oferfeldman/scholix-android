@@ -1,6 +1,10 @@
 package com.feldman.scholix.ui
 
 import android.app.Activity
+import android.Manifest
+import android.content.pm.PackageManager
+import android.provider.Telephony
+import android.os.SystemClock
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -18,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.api.platforms.inbarSmsCode
+import com.feldman.scholix.api.platforms.inbarAutomaticSmsCode
 import com.google.android.gms.auth.api.phone.SmsRetriever
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Status
@@ -34,22 +39,39 @@ fun InbarLogin(
     initialAccount: InbarPlatform? = null,
     onSuccess: suspend (InbarPlatform) -> Unit,
     onCancel: () -> Unit,
+    onSmsRequested: suspend (InbarPlatform) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val account = remember(initialAccount?.id) {
-        if (initialAccount == null) InbarPlatform() else InbarPlatform(initialAccount.id).apply { setName(initialAccount.getName()) }
+        initialAccount?.forSmsLogin() ?: InbarPlatform()
     }
     var identity by remember { mutableStateOf(initialAccount?.getUsername().orEmpty()) }
     var mobile by remember { mutableStateOf(initialAccount?.mobile.orEmpty()) }
     var code by remember { mutableStateOf("") }
     var waitingForCode by remember { mutableStateOf(false) }
+    var showCredentials by remember { mutableStateOf(!account.hasSavedLoginDetails()) }
     var busy by remember { mutableStateOf(false) }
     var autofill by remember { mutableStateOf(true) }
     var secondsLeft by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var autofillNotice by remember { mutableStateOf<String?>(null) }
+    val directSmsAvailable = remember(context) {
+        context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+            .requestedPermissions.orEmpty().contains(Manifest.permission.RECEIVE_SMS)
+    }
+    var directSms by remember {
+        mutableStateOf(directSmsAvailable && ContextCompat.checkSelfPermission(context,
+            Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED)
+    }
+    var receivedAutomatically by remember { mutableStateOf(false) }
+    var smsRequestedAt by remember { mutableLongStateOf(0L) }
+    var verifyingCode by remember { mutableStateOf(false) }
+    val smsPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        directSms = granted
+        if (!granted) autofillNotice = "SMS permission was not granted. Single-message consent is still available."
+    }
 
     val consentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
@@ -60,6 +82,27 @@ fun InbarLogin(
         }
     }
     val canReceive by rememberUpdatedState(autofill && (busy || waitingForCode))
+    val canReceiveDirectly by rememberUpdatedState(directSms && !verifyingCode && (busy || waitingForCode))
+    val requestedAt by rememberUpdatedState(smsRequestedAt)
+    DisposableEffect(context, directSms) {
+        if (!directSms) return@DisposableEffect onDispose { }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (!canReceiveDirectly || intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
+                if (requestedAt == 0L || SystemClock.elapsedRealtime() - requestedAt > 300_000L) return
+                val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
+                val sender = messages.firstOrNull()?.displayOriginatingAddress.orEmpty()
+                val received = inbarAutomaticSmsCode(messages.joinToString("") { it.messageBody.orEmpty() }, sender)
+                if (received != null) {
+                    code = received
+                    receivedAutomatically = true
+                }
+            }
+        }
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(Telephony.Sms.Intents.SMS_RECEIVED_ACTION),
+            Manifest.permission.BROADCAST_SMS, null, ContextCompat.RECEIVER_EXPORTED)
+        onDispose { context.unregisterReceiver(receiver) }
+    }
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
@@ -84,6 +127,9 @@ fun InbarLogin(
     }
 
     suspend fun startAutofill() {
+        if (directSms && ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS)
+            == PackageManager.PERMISSION_GRANTED) return
+        directSms = false
         if (!autofill) return
         val started = suspendCancellableCoroutine<Boolean> { continuation ->
             SmsRetriever.getClient(context).startSmsUserConsent(null)
@@ -98,6 +144,8 @@ fun InbarLogin(
         busy = true
         error = null
         code = ""
+        receivedAutomatically = false
+        smsRequestedAt = SystemClock.elapsedRealtime()
         scope.launch {
             try {
                 startAutofill() // Listen before the server sends the SMS.
@@ -106,6 +154,7 @@ fun InbarLogin(
                 }
                 waitingForCode = true
                 secondsLeft = 45
+                if (!resend) onSmsRequested(account)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (exception: Exception) {
@@ -114,8 +163,39 @@ fun InbarLogin(
         }
     }
 
+    fun verifyCode() {
+        if (busy || code.length !in 4..10) return
+        busy = true
+        verifyingCode = true
+        error = null
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { account.verifySms(code.trim()) }
+                code = ""
+                waitingForCode = false
+                onSuccess(account)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (exception: Exception) {
+                error = exception.localizedMessage ?: "Could not verify the SMS code"
+            } finally { busy = false; verifyingCode = false }
+        }
+    }
+
+    LaunchedEffect(code, waitingForCode, busy, receivedAutomatically) {
+        if (directSms && receivedAutomatically && waitingForCode && !busy) {
+            receivedAutomatically = false // A rejected code never triggers an automatic retry loop.
+            verifyCode()
+        }
+    }
+
+    LaunchedEffect(account) {
+        // Only an opened sign-in UI requests SMS. Background refresh never does.
+        if (account.hasSavedLoginDetails()) sendSms()
+    }
+
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (!waitingForCode) {
+        if (!waitingForCode && showCredentials) {
             Text("Sign in with your ID/passport and the mobile number registered with Bar-Ilan.")
             OutlinedTextField(identity, { identity = it }, label = { Text("ID or passport") },
                 enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -126,34 +206,33 @@ fun InbarLogin(
                 Checkbox(checked = autofill, onCheckedChange = { autofill = it }, enabled = !busy)
                 Text("Fill SMS code automatically", modifier = Modifier.padding(top = 12.dp))
             }
-            if (autofill) Text("Android will ask you to share the single verification message.", style = MaterialTheme.typography.bodySmall)
+            if (autofill && !directSms) Text("Android will ask you to share the single verification message.", style = MaterialTheme.typography.bodySmall)
             Button(onClick = { sendSms() }, enabled = !busy && identity.isNotBlank() && mobile.isNotBlank()) { Text("Send SMS code") }
-        } else {
+        } else if (waitingForCode) {
             Text("Enter the verification code sent to your registered mobile.")
             OutlinedTextField(code, { code = it.filter(Char::isDigit).take(10) }, label = { Text("SMS verification code") },
                 enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
-            Button(onClick = {
-                if (!busy) {
-                    busy = true
-                    error = null
-                    scope.launch {
-                        try {
-                            withContext(Dispatchers.IO) { account.verifySms(code.trim()) }
-                            code = ""
-                            onSuccess(account)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (exception: Exception) {
-                            error = exception.localizedMessage ?: "Could not verify the SMS code"
-                        } finally { busy = false }
-                    }
-                }
-            }, enabled = !busy && code.length in 4..10) { Text("Verify and add Inbar") }
+            Button(onClick = { verifyCode() }, enabled = !busy && code.length in 4..10) { Text("Verify and continue") }
             TextButton(onClick = { sendSms(resend = true) }, enabled = !busy && secondsLeft == 0) {
                 Text(if (secondsLeft > 0) "Resend code in ${secondsLeft}s" else "Resend SMS code")
             }
-            TextButton(onClick = { waitingForCode = false; code = ""; error = null }, enabled = !busy) { Text("Change login details") }
+        } else {
+            Text("Using your saved Inbar login details.")
+            Button(onClick = { sendSms() }, enabled = !busy && secondsLeft == 0) { Text("Send SMS code") }
+        }
+        TextButton(onClick = { showCredentials = true; waitingForCode = false; code = ""; error = null },
+            enabled = !busy) { Text("Change login details") }
+        if (directSmsAvailable) {
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Checkbox(checked = directSms, enabled = !busy, onCheckedChange = { enabled ->
+                    if (enabled) smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
+                    else { directSms = false; receivedAutomatically = false }
+                })
+                Text("Automatically verify this sign-in")
+            }
+            if (directSms) Text("Receives new Inbar verification messages while sign-in is open.",
+                style = MaterialTheme.typography.bodySmall)
         }
         if (busy) CircularProgressIndicator()
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

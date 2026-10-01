@@ -6,7 +6,6 @@ import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.Type
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.IOException
 
 /** Inbar is separate from the existing Bar-Ilan math/Michlol provider. */
 class InbarPlatform(override val id: String = generateId()) : Platform {
@@ -26,6 +25,22 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
         .addField("id", Type.Id, getter = { it.getUsername() }, setter = { p, v -> p.setUsername(v.orEmpty()) })
         .addField("mobile", Type.Custom("mobile"), getter = { (it as InbarPlatform).mobile },
             setter = { p, v -> (p as InbarPlatform).mobile = v.orEmpty() })
+
+    constructor(fields: LoginFields) : this() {
+        identity = fields.getValueByType(Type.Id).orEmpty().trim()
+        mobile = fields.getValue("mobile").orEmpty().trim()
+    }
+
+    fun hasSavedLoginDetails() = identity.isNotBlank() && mobile.isNotBlank()
+
+    /** Keep the saved account and courses while starting a fresh SMS challenge. */
+    @Synchronized fun forSmsLogin(): InbarPlatform = InbarPlatform(id).also { next ->
+        next.identity = identity
+        next.mobile = mobile
+        next.displayName = displayName
+        next.platformDisplayName = platformDisplayName
+        next.courses += getCourses()
+    }
 
     fun requestSms(identity: String, mobile: String) {
         this.identity = identity

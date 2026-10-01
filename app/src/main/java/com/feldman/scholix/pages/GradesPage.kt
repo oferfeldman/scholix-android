@@ -8,6 +8,8 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
@@ -66,6 +68,8 @@ import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.ui.HiddenMoeLogin
 import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.ui.InbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.storage.expressiveDesignFlow
 import com.feldman.scholix.ui.components.ChipPicker
@@ -475,12 +479,16 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     // request instead of showing "please re-login" for a recoverable session.
     // Providers by id, so a course with no subject icon can borrow its logo.
     var providersById by remember { mutableStateOf<Map<String, Platform>>(emptyMap()) }
+    var inbarRelogin by remember { mutableStateOf<InbarPlatform?>(null) }
     LaunchedEffect(Unit) {
         providersById = withContext(Dispatchers.IO) {
             runCatching {
                 PlatformStorage.loadPlatforms(context).associateBy { it.id }
             }.getOrDefault(emptyMap())
         }
+        // A saved account may still be waiting for its first SMS verification.
+        if (courses.isEmpty()) inbarRelogin = providersById.values.filterIsInstance<InbarPlatform>()
+            .firstOrNull { !it.isLoggedIn() && it.hasSavedLoginDetails() }
     }
     var portalRelogin by remember { mutableStateOf<StudentsPortalPlatform?>(null) }
     var webtopRelogin by remember { mutableStateOf<WebtopPlatform?>(null) }
@@ -568,6 +576,16 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
             }
 
             if (currentId == requestId) {
+                val inbar = requestPlatform as? InbarPlatform
+                if (requestErrorCode == "login_failed" && inbar != null &&
+                    inbar.hasSavedLoginDetails() && !reloginAttempted) {
+                    reloginAttempted = true
+                    inbarRelogin = inbar
+                    isLoading = false
+                    errorMessage = "Verify your Inbar SMS code to continue."
+                    loadedKey = keyFor(course, year, semester)
+                    return@launch
+                }
                 val portal = requestPlatform as? StudentsPortalPlatform
                 if (requestErrorCode == "login_failed" && portal != null &&
                     portal.needsInteractiveRelogin() && !reloginAttempted
@@ -740,6 +758,44 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                     errorMessage = err
                     if (err == null) reloginAttempted = false
                 }
+            }
+        }
+    }
+
+    inbarRelogin?.let { savedAccount ->
+        fun dismissInbarLogin() {
+            inbarRelogin = null
+            isLoading = false
+            errorMessage = "Sign in to Inbar with an SMS code to continue."
+        }
+        ModalBottomSheet(
+            onDismissRequest = { dismissInbarLogin() },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(20.dp)) {
+                Text("Verify Inbar", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(12.dp))
+                InbarLogin(initialAccount = savedAccount,
+                    onSmsRequested = { account ->
+                        withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                    },
+                    onSuccess = { account ->
+                        val selectedKey = courses.getOrNull(selectedTab)?.optString("courseKey")
+                        val refreshed = withContext(Dispatchers.IO) {
+                            PlatformStorage.addPlatforms(context, listOf(account))
+                            PlatformStorage.getCourses(context)
+                        }
+                        inbarRelogin = null
+                        providersById = providersById + (account.id to account)
+                        courses = refreshed
+                        selectedTab = refreshed.indexOfFirst {
+                            it.optString("platformId") == account.id && it.optString("courseKey") == selectedKey
+                        }.coerceAtLeast(0)
+                        loadedKey = null
+                        isLoading = false
+                        errorMessage = null
+                        reloginAttempted = false
+                    }, onCancel = { dismissInbarLogin() })
             }
         }
     }
@@ -1073,6 +1129,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                         modifier = Modifier.fillMaxWidth(),
                                         textAlign = TextAlign.Center
                                     )
+                                    val savedInbar = providersById[selectedCourse?.optString("platformId")] as? InbarPlatform
+                                    if (savedInbar?.hasSavedLoginDetails() == true) {
+                                        TextButton(onClick = { inbarRelogin = savedInbar }) { Text("Sign in with SMS") }
+                                    }
                                 }
                             }
 
