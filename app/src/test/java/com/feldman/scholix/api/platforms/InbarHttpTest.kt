@@ -90,6 +90,42 @@ class InbarHttpTest {
         assertEquals("", sent["__EVENTARGUMENT"])
     }
 
+    @Test fun verificationReusesGradesLandingInsteadOfFetchingItAgain() {
+        val requests = mutableListOf<Request>()
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            requests += chain.request()
+            val index = requests.lastIndex
+            check(index <= 3) { "Redundant grades request after verification" }
+            val response = Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .message("OK")
+            if (index == 2) response.code(302).header("Location", InbarHttp.GRADES).body("".toResponseBody())
+            else response.code(200).body(when (index) {
+                0 -> login
+                1 -> challenge()
+                else -> grades()
+            }.toResponseBody())
+            response.build()
+        }.build()
+        val http = InbarHttp(transport = client)
+        http.requestSms("test", "test")
+        assertEquals(2026, http.verifySms("12345").year)
+        assertEquals(4, requests.size)
+        assertEquals("/Live/StudentGradesList.aspx", requests.last().url.encodedPath)
+        assertEquals("/Live/StudentGradesList.aspx", requests.first().url.queryParameter("ReturnUrl"))
+    }
+
+    @Test fun successiveYearSwitchesReuseLatestFormAndSameYearRefreshStillFetches() {
+        val requests = mutableListOf<Request>()
+        val http = InbarHttp(transport = transport(requests, grades(2027), grades(2026), grades(2027), grades(2027)))
+        http.grades()
+        http.grades(2026)
+        http.grades(2027)
+        http.grades(2027)
+        assertEquals(listOf("GET", "POST", "POST", "GET"), requests.map { it.method })
+        assertEquals("grades-state-2027", fields(requests[1])["__PageDataKey"])
+        assertEquals("grades-state-2026", fields(requests[2])["__PageDataKey"])
+    }
+
     @Test fun parsesCourseRowsHiddenAssignmentsFinalGradesAndPendingCourses() {
         val parsed = InbarGrades.parse(grades())
         assertEquals(listOf(2026, 2027), parsed.years)

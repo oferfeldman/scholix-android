@@ -8,7 +8,7 @@ plugins {
 val inbarSources = tasks.register<Sync>("prepareInbarSources") {
     from("../app/src/main/java") {
         include("com/feldman/scholix/api/Platform.kt", "com/feldman/scholix/api/LoginFields.kt",
-            "com/feldman/scholix/api/platforms/Inbar*.kt", "com/feldman/scholix/ui/InbarLogin.kt")
+            "com/feldman/scholix/api/platforms/Inbar*.kt", "com/feldman/scholix/ui/HiddenInbarLogin.kt")
     }
     into(layout.buildDirectory.dir("generated/inbar/main"))
 }

@@ -46,7 +46,7 @@ import com.feldman.scholix.api.platforms.MashovSchool
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.ui.HiddenMoeLogin
-import com.feldman.scholix.ui.InbarLogin
+import com.feldman.scholix.ui.HiddenInbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.ui.components.ProviderPickerList
 import com.feldman.scholix.ui.components.WebtopLoginMethodPicker
@@ -76,6 +76,7 @@ fun LoginPage(
     var loginFields by remember { mutableStateOf<LoginFields?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var inbarLogin by remember { mutableStateOf<InbarPlatform?>(null) }
     val savedInbar = remember(selectedPlatform) {
         if (selectedPlatform?.name == "Inbar (Bar-Ilan)")
             PlatformStorage.loadPlatforms(context).filterIsInstance<InbarPlatform>().lastOrNull()
@@ -121,7 +122,11 @@ fun LoginPage(
                     providers = platformOptions,
                     onSelect = { option ->
                         selectedPlatform = option
-                        loginFields = option.factory().getLoginFields()
+                        val draft = option.factory()
+                        loginFields = draft.getLoginFields().apply {
+                            if (draft is InbarPlatform) PlatformStorage.loadPlatforms(context)
+                                .filterIsInstance<InbarPlatform>().lastOrNull()?.let { loadFrom(it) }
+                        }
                         errorMessage = null
                     }
                 )
@@ -129,7 +134,7 @@ fun LoginPage(
         }
 
         // ─── Inner Login Page ──────────────────────────────
-        AnimatedVisibility(visible = showLoginPage, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(visible = showLoginPage && inbarLogin == null, enter = fadeIn(), exit = fadeOut()) {
             selectedPlatform?.let { platform ->
                 val fields = loginFields ?: platform.factory().getLoginFields()
 
@@ -190,19 +195,7 @@ fun LoginPage(
                         Spacer(Modifier.height(16.dp))
                     }
                     run {
-                    if (platform.name == "Inbar (Bar-Ilan)") {
-                        InbarLogin(
-                            initialAccount = savedInbar,
-                            onSmsRequested = { account ->
-                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
-                            },
-                            onSuccess = { account ->
-                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
-                                onLoginSuccess()
-                            },
-                            onCancel = { selectedPlatform = null; loginFields = null; errorMessage = null }
-                        )
-                    } else DynamicLoginFields(
+                    DynamicLoginFields(
                         fields = fields,
                         onFieldsChanged = { loginFields = it },
                         isLoading = isLoading,
@@ -216,6 +209,13 @@ fun LoginPage(
 
                             isLoading = true
                             errorMessage = null
+
+                            if (platform.name == "Inbar (Bar-Ilan)") {
+                                inbarLogin = (savedInbar?.forSmsLogin() ?: InbarPlatform(fields)).apply {
+                                    applyLoginFields(fields)
+                                }
+                                return@DynamicLoginFields
+                            }
 
                             if (isPortal) {
                                 // Relayed to the MOE page off-screen; no browser UI.
@@ -314,6 +314,21 @@ fun LoginPage(
                     }
                 }
             }
+        }
+
+        inbarLogin?.let { pending ->
+            HiddenInbarLogin(account = pending,
+                onSmsRequested = { account ->
+                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                }, onResult = { account, error ->
+                    if (account != null) withContext(Dispatchers.IO) {
+                        PlatformStorage.addPlatforms(context, listOf(account))
+                    }
+                    inbarLogin = null
+                    isLoading = false
+                    errorMessage = error
+                    if (account != null) onLoginSuccess()
+                })
         }
 
         // Off-screen MOE sign-in for the Education Portal (1dp, invisible).
@@ -421,6 +436,7 @@ fun DynamicLoginFields(
             CompositionLocalProvider(LocalAutofillHighlightColor provides Color.Transparent) {
                 OutlinedTextField(
                     value = value,
+                    enabled = !isLoading,
                     onValueChange = {
                         value = it
                         mutableFields.setValue(field.id, it)

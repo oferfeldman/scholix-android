@@ -49,10 +49,12 @@ internal class InbarHttp(
     val cookieJar: InbarCookieJar = InbarCookieJar(),
     transport: OkHttpClient? = null
 ) {
-    private val client = (transport?.newBuilder() ?: OkHttpClient.Builder())
+    private val client = (transport ?: SHARED_CLIENT).newBuilder()
         .cookieJar(cookieJar).followRedirects(false).followSslRedirects(false)
         .callTimeout(45, TimeUnit.SECONDS).build()
     private var challenge: InbarPage? = null
+    private var gradePage: InbarPage? = null
+    private var gradeYear: Int? = null
     private var smsTime: Long = 0
 
     private fun request(initial: Request): InbarPage {
@@ -120,15 +122,18 @@ internal class InbarHttp(
         val next = post(page, mapOf("edtCode" to code, "btnVerify" to button.attr("value")))
         if (next.document().selectFirst("input[name=edtCode]") != null) {
             challenge = next // Keep fresh state for a manually corrected code.
-            throw IOException("The SMS code was not accepted. Check the code and try again.")
+            throw IOException("The SMS code was not accepted. Please sign in again.")
         }
-        val grades = grades()
+        val grades = if (next.url.encodedPath == "/Live/StudentGradesList.aspx") {
+            InbarGrades.parse(next.html).also { gradePage = next; gradeYear = it.year }
+        } else grades()
         challenge = null
         return grades
     }
 
     @Synchronized fun grades(year: Int? = null): InbarGradePage {
-        var page = get(GRADES)
+        // A year switch posts the latest form directly. Refreshing the same year still GETs it.
+        var page = gradePage?.takeIf { year != null && gradeYear != year } ?: get(GRADES)
         var result = InbarGrades.parse(page.html)
         if (year != null && result.year != year) {
             if (year !in result.years) throw IOException("Academic year $year is not available in Inbar")
@@ -138,12 +143,16 @@ internal class InbarHttp(
             result = InbarGrades.parse(page.html)
             if (result.year != year) throw IOException("Inbar did not select year $year")
         }
+        gradePage = page
+        gradeYear = result.year
         return result
     }
 
     companion object {
+        // Restored providers keep their own cookies while reusing HTTPS connections.
+        private val SHARED_CLIENT = OkHttpClient()
         const val BASE = "https://inbar.biu.ac.il"
-        const val LOGIN = "$BASE/Live/Login.aspx?ReturnUrl=%2fLive%2fmain.aspx"
+        const val LOGIN = "$BASE/Live/Login.aspx?ReturnUrl=%2fLive%2fStudentGradesList.aspx"
         const val GRADES = "$BASE/Live/StudentGradesList.aspx"
 
         fun successfulControls(form: Element): List<Pair<String, String>> = buildList {

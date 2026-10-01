@@ -60,7 +60,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.ui.HiddenMoeLogin
-import com.feldman.scholix.ui.InbarLogin
+import com.feldman.scholix.ui.HiddenInbarLogin
 import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.api.platforms.WebtopPlatform
@@ -356,6 +356,7 @@ fun AddPlatformSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var selectedPlatform by remember { mutableStateOf<PlatformInfo?>(null) }
+    var inbarLogin by remember { mutableStateOf<InbarPlatform?>(null) }
     val savedInbar = remember(selectedPlatform) {
         if (selectedPlatform?.name == "Inbar (Bar-Ilan)")
             PlatformStorage.loadPlatforms(context).filterIsInstance<InbarPlatform>().lastOrNull()
@@ -376,6 +377,21 @@ fun AddPlatformSheet(
     val addStatus = when {
         webtopMoeCreds != null || portalCreds != null -> "Signing in with the Ministry of Education"
         else -> "Signing in"
+    }
+
+    inbarLogin?.let { pending ->
+        HiddenInbarLogin(account = pending,
+            onSmsRequested = { account ->
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+            }, onResult = { account, error ->
+                if (account != null) withContext(Dispatchers.IO) {
+                    PlatformStorage.addPlatforms(context, listOf(account))
+                }
+                inbarLogin = null
+                isLoading = false
+                errorMessage = error
+                if (account != null) { onAdded(); onClose() }
+            })
     }
 
     // Off-screen MOE sign-in: the user types into this sheet's own fields and no
@@ -461,6 +477,12 @@ fun AddPlatformSheet(
         }
         isLoading = true
         errorMessage = null
+        if (selectedPlatform!!.name == "Inbar (Bar-Ilan)") {
+            inbarLogin = (savedInbar?.forSmsLogin() ?: InbarPlatform(fields)).apply {
+                applyLoginFields(fields)
+            }
+            return
+        }
         // Read the picker's state here, not a value captured when this function was
         // created: onSubmit outlives the composition that built it, so a snapshot
         // would send Ministry-of-Education credentials down the Webtop password
@@ -581,7 +603,11 @@ fun AddPlatformSheet(
                 providers = platformOptions,
                 onSelect = { option ->
                     selectedPlatform = option
-                    loginFields = option.factory().getLoginFields()
+                    val draft = option.factory()
+                    loginFields = draft.getLoginFields().apply {
+                        if (draft is InbarPlatform) PlatformStorage.loadPlatforms(context)
+                            .filterIsInstance<InbarPlatform>().lastOrNull()?.let { loadFrom(it) }
+                    }
                     errorMessage = null
                 }
             )
@@ -638,20 +664,7 @@ fun AddPlatformSheet(
                 }
                 Spacer(Modifier.height(12.dp))
             }
-            if (selectedPlatform!!.name == "Inbar (Bar-Ilan)") {
-                InbarLogin(
-                    initialAccount = savedInbar,
-                    onSmsRequested = { account ->
-                        withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
-                    },
-                    onSuccess = { account ->
-                        withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
-                        onAdded()
-                        onClose()
-                    },
-                    onCancel = onClose
-                )
-            } else DynamicLoginFields(
+            DynamicLoginFields(
                 fields = loginFields ?: selectedPlatform!!.factory().getLoginFields(),
                 onFieldsChanged = { loginFields = it },
                 isLoading = isLoading,
@@ -926,6 +939,23 @@ fun EditProviderSheet(
         }
     }
 
+    inbarRelogin?.let { pending ->
+        HiddenInbarLogin(account = pending,
+            onSmsRequested = { account ->
+                if (providerName.isNotBlank()) account.setName(providerName)
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+            }, onResult = { account, error ->
+                if (account != null) {
+                    if (providerName.isNotBlank()) account.setName(providerName)
+                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                }
+                inbarRelogin = null
+                busy = false
+                errorMessage = error
+                if (account != null) { onChanged(); courseOverridesChanged = false; onClose() }
+            })
+    }
+
     val orderedCourses = orderedCoursesState.value
     val hiddenCourseKeys = hiddenCourseKeysState.value
     val visibleCourses = orderedCourses.filter {
@@ -977,6 +1007,10 @@ fun EditProviderSheet(
             errorMessage = "Please fill in all fields"
             return
         }
+        if (provider is InbarPlatform && loginFields.getFields().any { it.value.isNullOrBlank() }) {
+            errorMessage = "Please fill in all fields"
+            return
+        }
 
         savingStatus = "Verifying changes"
         busy = true
@@ -984,10 +1018,12 @@ fun EditProviderSheet(
 
         val currentMethod = (provider as? WebtopPlatform)?.let { webtopLoginMethod.value }
         val savedMethod = (provider as? WebtopPlatform)?.loginMethod
-        val credsChanged = provider !is InbarPlatform &&
-            (user != provider.getUsername() || pass != provider.getPassword())
+        val credsChanged = if (provider is InbarPlatform)
+            loginFields.getValue("id").orEmpty().trim() != provider.getUsername() ||
+                loginFields.getValue("mobile").orEmpty().trim() != provider.mobile
+        else user != provider.getUsername() || pass != provider.getPassword()
 
-        if (!credsChanged && (provider.isLoggedIn() || provider is InbarPlatform)) {
+        if (!credsChanged && provider.isLoggedIn()) {
             scope.launch {
                 var dismissing = false
                 try {
@@ -1023,6 +1059,12 @@ fun EditProviderSheet(
                     if (!dismissing) busy = false
                 }
             }
+            return
+        }
+
+        if (provider is InbarPlatform) {
+            savingStatus = "Signing in"
+            inbarRelogin = provider.forSmsLogin().apply { applyLoginFields(loginFields) }
             return
         }
 
@@ -1262,7 +1304,7 @@ fun EditProviderSheet(
             }
         }
 
-        if (loginFields.getFields().isNotEmpty()) Title(if (provider is InbarPlatform) "Inbar sign-in" else "Provider credentials")
+        if (loginFields.getFields().isNotEmpty()) Title("Provider credentials")
         Item {
             Column(modifier = Modifier.fillMaxWidth()) {
                 if (provider is WebtopPlatform) {
@@ -1281,33 +1323,7 @@ fun EditProviderSheet(
                     }
                     Spacer(Modifier.height(12.dp))
                 }
-                if (provider is InbarPlatform) {
-                    val signInAccount = inbarRelogin
-                    if (signInAccount == null) {
-                        Text("Your ID and registered mobile are saved. Use an SMS code to sign in again.")
-                        TextButton(onClick = {
-                            inbarRelogin = PlatformStorage.loadPlatforms(context)
-                                .filterIsInstance<InbarPlatform>().firstOrNull { it.id == provider.id } ?: provider
-                        }) { Text("Sign in with SMS") }
-                        Button(onClick = ::submitEdit, enabled = !busy) { Text("Update provider") }
-                        TextButton(onClick = onClose) { Text("Cancel") }
-                        errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    } else {
-                        InbarLogin(initialAccount = signInAccount,
-                            onSmsRequested = { account ->
-                                if (providerName.isNotBlank()) account.setName(providerName)
-                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
-                                loginFields = account.getLoginFields().apply { loadFrom(account) }
-                            },
-                            onSuccess = { account ->
-                                if (providerName.isNotBlank()) account.setName(providerName)
-                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
-                                onChanged()
-                                courseOverridesChanged = false
-                                onClose()
-                            }, onCancel = { inbarRelogin = null })
-                    }
-                } else DynamicLoginFields(
+                DynamicLoginFields(
                     fields = loginFields,
                     onFieldsChanged = { loginFields = it },
                     isLoading = busy,
