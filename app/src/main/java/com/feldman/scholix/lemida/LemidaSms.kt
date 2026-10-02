@@ -14,7 +14,7 @@ object LemidaSms {
     // The OTC field takes priority, so an existing SMS challenge is never resent.
     fun selectScript(alternativeClicked: Boolean, smsSelected: Boolean) = """
         (() => {
-          if (location.hostname !== 'login.microsoftonline.com') return 'other';
+          if (location.origin !== 'https://login.microsoftonline.com') return 'other';
           const visible = e => e && !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
           if (visible(document.querySelector('#idTxtBx_SAOTCC_OTC'))) return 'otp';
           if (!$smsSelected) {
@@ -22,21 +22,36 @@ object LemidaSms {
             const fallback = [...document.querySelectorAll('[role="button"], button, a')].find(e =>
               /^(Text\b|Send.*(?:text|SMS)|שלח.*(?:SMS|מסרון)|הודעת טקסט)/i.test(e.textContent.trim()));
             const sms = options.find(visible) || (visible(fallback) ? fallback : null);
-            if (sms) { sms.click(); return 'sms'; }
+            if (sms) { window.__scholixMfaChoice = {element: sms, action: 'sms'}; return 'sms'; }
           }
           if (!$alternativeClicked) {
             const other = document.querySelector('#signInAnotherWay');
-            if (visible(other)) { other.click(); return 'alternative'; }
+            if (visible(other)) { window.__scholixMfaChoice = {element: other, action: 'alternative'}; return 'alternative'; }
           }
           return 'waiting';
         })()
     """.trimIndent()
 
+    // The native caller records the attempt before this click can navigate the page.
+    fun chooseScript(action: String): String {
+        require(action in setOf("alternative", "sms"))
+        return """
+            (() => {
+              if (location.origin !== 'https://login.microsoftonline.com') return false;
+              const choice = window.__scholixMfaChoice;
+              delete window.__scholixMfaChoice;
+              if (!choice || choice.action !== '$action' || !choice.element.isConnected
+                  || !choice.element.getClientRects().length) return false;
+              choice.element.click(); return true;
+            })()
+        """.trimIndent()
+    }
+
     fun submitScript(code: String): String {
         require(Regex("[0-9]{6,8}").matches(code))
         return """
             (() => {
-              if (location.hostname !== 'login.microsoftonline.com') return false;
+              if (location.origin !== 'https://login.microsoftonline.com') return false;
               const input = document.querySelector('#idTxtBx_SAOTCC_OTC');
               const submit = document.querySelector('#idSubmit_SAOTCC_Continue');
               if (!input || !submit || !input.getClientRects().length) return false;

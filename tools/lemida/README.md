@@ -104,3 +104,13 @@ expired-session tests. Activity details and grade tables remain HTML reads.
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
+
+The Android Microsoft picker can also be checked with mocked browser pages:
+
+```powershell
+.\.venv\Scripts\python.exe verify_phone_sms.py
+```
+
+This intercepts every HTTP request and sends no SMS. It checks selection without
+clicking, one request despite a delayed page transition, detached candidates,
+code submission, and HTTPS origin restrictions.

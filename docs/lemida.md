@@ -7,6 +7,10 @@ Microsoft offers it. In the direct-SMS development build, allow SMS reception
 and a fresh Microsoft verification code is entered and submitted automatically.
 Other senders and ambiguous messages are ignored; codes are not logged, and no
 automatic resend is made. CAPTCHA still requires interactive completion.
+The picker is first inspected without clicking. Native request flags are recorded
+before clicking a discovered method, so a page navigation cannot turn a lost
+JavaScript callback into a repeated automatic SMS request. A changed/detached
+picker leaves manual method selection available.
 Ordinary builds start Android's SMS User Consent listener before selecting SMS.
 When Android offers the verification message, accepting the single-message consent
 fills and submits the code. Denied consent, unavailable Play services, and messages

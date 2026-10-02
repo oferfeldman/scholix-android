@@ -82,20 +82,30 @@ class LemidaLoginActivity : ComponentActivity() {
             browser.evaluateJavascript(LemidaSms.selectScript(alternativeClicked, smsSelected)) { raw ->
                 if (isFinishing || isDestroyed) return@evaluateJavascript
                 when (runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()) {
-                    "alternative" -> alternativeClicked = true
+                    "alternative" -> {
+                        alternativeClicked = true
+                        browser.evaluateJavascript(LemidaSms.chooseScript("alternative"), null)
+                    }
                     "sms" -> {
                         smsSelected = true
                         challengeStarted = SystemClock.elapsedRealtime()
                         status.text = "SMS requested. Waiting for the Microsoft verification code…"
+                        browser.evaluateJavascript(LemidaSms.chooseScript("sms")) { result ->
+                            if (result == "false" && !isFinishing && !isDestroyed)
+                                status.text = "The verification page changed. Select SMS in the browser to continue."
+                        }
                     }
                     "otp" -> {
                         if (challengeStarted == 0L) challengeStarted = SystemClock.elapsedRealtime()
+                        if (!currentChallenge()) pendingCode = null
                         val code = pendingCode
                         if (code != null && !codeSubmitted) {
                             codeSubmitted = true // Submit once. Rejected codes remain editable in the browser.
                             pendingCode = null
                             browser.evaluateJavascript(LemidaSms.submitScript(code)) { result ->
+                                if (isFinishing || isDestroyed) return@evaluateJavascript
                                 if (result == "true") status.text = "Microsoft SMS code submitted. Completing sign-in…"
+                                else if (result == "false") status.text = "The verification page changed. Enter the code in the browser to continue."
                             }
                         }
                     }

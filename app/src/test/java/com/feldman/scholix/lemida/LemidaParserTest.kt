@@ -4,6 +4,11 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun nestedInstructionContainersDoNotDuplicateParagraphs() {
+        val detail = LemidaParser.detail("""<main id="region-main"><div class="activity-description">
+            <div id="intro" class="generalbox"><p>Submit a PDF</p></div></div></main>""")
+        assertEquals("Submit a PDF", detail.description)
+    }
     @Test fun instructionsPreserveParagraphsAndListItems() {
         val detail = LemidaParser.detail("""<main id="region-main"><div id="intro">
             <p>הנחיות הגשה</p><p>Upload a PDF<br>Include your name</p>

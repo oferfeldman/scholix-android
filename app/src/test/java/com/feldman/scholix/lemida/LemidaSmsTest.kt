@@ -15,7 +15,8 @@ class LemidaSmsTest {
         assertNull(LemidaSms.code("Microsoft verification 1234567890", "Microsoft"))
     }
     @Test fun submitCannotInjectJavascript() {
+        assertThrows(IllegalArgumentException::class.java) { LemidaSms.chooseScript("'); alert('x") }
         assertThrows(IllegalArgumentException::class.java) { LemidaSms.submitScript("'); alert('x") }
-        assertTrue(LemidaSms.submitScript("123456").contains("location.hostname"))
+        assertTrue(LemidaSms.submitScript("123456").contains("location.origin"))
     }
 }

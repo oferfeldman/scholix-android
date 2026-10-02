@@ -89,7 +89,9 @@ object LemidaParser {
         val tables = main.select("table").map { table -> table.select("tr").map { row ->
             row.select("th, td").map { it.text() }
         }.filter { it.isNotEmpty() } }
-        return HomeworkDetail(main.select(".activity-description, #intro, .generalbox").joinToString("\n\n") { readableText(it) },
+        val descriptions = main.select(".activity-description, #intro, .generalbox")
+        val topLevelDescriptions = descriptions.filter { element -> element.parents().none { it in descriptions } }
+        return HomeworkDetail(topLevelDescriptions.joinToString("\n\n") { readableText(it) },
             main.select("[data-region=activity-dates], .activity-dates").text(), tables, main.text())
     }
     private fun readableText(element: Element): String {
