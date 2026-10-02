@@ -653,15 +653,7 @@ fun AddPlatformSheet(
                     state = webtopLoginMethod,
                     onSelectedChange = { errorMessage = null }
                 )
-                if (webtopMoe) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Enter your Ministry of Education username and password. " +
-                            "Signing in happens in the background.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+
                 Spacer(Modifier.height(12.dp))
             }
             DynamicLoginFields(
@@ -1313,15 +1305,7 @@ fun EditProviderSheet(
                         state = webtopLoginMethod,
                         onSelectedChange = { errorMessage = null }
                     )
-                    if (webtopLoginMethod.value == "moe") {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "Enter your Ministry of Education username and password. " +
-                                "Signing in happens in the background.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+
                     Spacer(Modifier.height(12.dp))
                 }
                 DynamicLoginFields(

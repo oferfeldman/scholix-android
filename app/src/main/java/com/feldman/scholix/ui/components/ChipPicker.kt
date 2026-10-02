@@ -29,6 +29,9 @@ fun ChipPicker(
         labelPosition = MotionDropdownLabelPosition.Inside,
         direction = if (isMostlyRtl(selected)) MotionDropdownDirection.Rtl else MotionDropdownDirection.Ltr,
         colors = MotionDropdownDefaults.colors(
+            expandedTextColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            expandedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            expandedTrailingIconColor = MaterialTheme.colorScheme.onTertiaryContainer,
             menuContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
             menuItemTextColor = MaterialTheme.colorScheme.onTertiaryContainer,
             menuItemIconColor = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -36,7 +39,6 @@ fun ChipPicker(
             selectedMenuItemTextColor = MaterialTheme.colorScheme.tertiaryContainer,
             selectedMenuItemIconColor = MaterialTheme.colorScheme.tertiaryContainer,
             expandedBorderColor = MaterialTheme.colorScheme.tertiaryContainer,
-            expandedLabelColor = MaterialTheme.colorScheme.tertiaryContainer,
         ),
         items = MotionDropdownDefaults.items(icon = optionIcon),
         text = MotionDropdownDefaults.text(value = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), label = MaterialTheme.typography.labelMedium),
