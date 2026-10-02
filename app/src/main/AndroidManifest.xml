@@ -30,6 +30,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".pages.GradesActivity" />
+        <activity android:name=".lemida.LemidaLoginActivity" android:exported="false" />
         <activity
             android:name=".widgets.GradesWidgetConfigureActivity"
             android:exported="true">

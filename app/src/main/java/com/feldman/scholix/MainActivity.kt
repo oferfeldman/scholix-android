@@ -354,6 +354,7 @@ fun MainScreen(
             AppDest.TiktekBook(bookId = "", bookName = "", subjectId = ""),
             AppDest.TiktekSolution(imageUrl = ""),
             AppDest.Locker,
+            AppDest.Homework,
             AppDest.Settings,
             AppDest.Platforms,
             AppDest.AddPlatform,
@@ -378,7 +379,7 @@ fun MainScreen(
     val navbarPages by remember(context) { context.navbarPagesFlow() }
         .collectAsState(initial = defaultNavbarPages)
     val navigationPages = remember(destinations) {
-        destinations.filter { it in listOf(AppDest.Grades, AppDest.Schedule, AppDest.Attendance, AppDest.Tiktek, AppDest.Settings, AppDest.Messages, AppDest.Locker) }
+        destinations.filter { it in listOf(AppDest.Grades, AppDest.Schedule, AppDest.Attendance, AppDest.Tiktek, AppDest.Settings, AppDest.Messages, AppDest.Locker, AppDest.Homework) }
     }
     val bottomBarDestinations = navigationPages.filter { it.label in navbarPages }.ifEmpty { listOf(AppDest.Tiktek, AppDest.Settings) }
 
@@ -386,6 +387,7 @@ fun MainScreen(
         val activity = context as? android.app.Activity
         if (activity?.intent?.getBooleanExtra("open_crash_logs", false) == true) AppDest.CrashLogs
         else if (activity?.intent?.getBooleanExtra("open_messages", false) == true) AppDest.Messages
+        else if (activity?.intent?.getBooleanExtra("open_homework", false) == true) AppDest.Homework
         else if (hasGrades) AppDest.Grades else AppDest.Tiktek
     }
 

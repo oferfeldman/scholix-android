@@ -48,6 +48,19 @@ sealed class AppDest : MotionDest {
 
     @Serializable
     @Parcelize
+    data object Homework : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Homework"
+        @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
+        @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_docs_outline
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.lemida.LemidaPage(searchQuery)
+        }
+    }
+
+    @Serializable
+    @Parcelize
     data object More : AppDest() {
         @IgnoredOnParcel
         @Transient

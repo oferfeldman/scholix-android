@@ -1,0 +1,147 @@
+package com.feldman.scholix.lemida
+
+import android.content.Context
+import android.webkit.WebView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.IOException
+
+class LemidaSessionExpired : IOException("Sign in to Lemida again to resume automatic updates.")
+
+class LemidaRepository(context: Context) {
+    private val prefs = context.applicationContext.getSharedPreferences("lemida_sync", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    fun enabled() = prefs.getBoolean("enabled", false)
+    fun setEnabled(value: Boolean) { prefs.edit().putBoolean("enabled", value).apply() }
+    fun status() = prefs.getString("status", "Sign in to Lemida to sync homework.").orEmpty()
+    fun lastSync() = prefs.getLong("last_sync", 0L)
+    fun cached() = LemidaParser.decode(prefs.getString("homework", "[]") ?: "[]")
+    fun setUserAgent(value: String) { prefs.edit().putString("user_agent", value).apply() }
+    private fun detailKey(item: Homework) = "detail:${prefs.getString("user_id", "")}:${item.id}"
+    fun cachedDetail(item: Homework): HomeworkDetail? = prefs.getString(detailKey(item), null)?.let {
+        runCatching { HomeworkDetail.fromJson(it) }.getOrNull()
+    }
+    suspend fun detail(item: Homework): HomeworkDetail = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val browser = withContext(Dispatchers.Main) { LemidaBrowser(appContext, prefs.getString("user_agent", null)) }
+            try {
+                browser.prepare()
+                val html = browser.get(item.url)
+                if (!LemidaParser.authenticated(html)) throw LemidaSessionExpired()
+                check(LemidaParser.config(html, "userId") == prefs.getString("user_id", null)) {
+                    "The signed-in account changed. Refresh your homework list first."
+                }
+                val result = LemidaParser.detail(html)
+                val items = cached().map { cached ->
+                    if (cached.id == item.id && result.dates.isNotBlank()) cached.copy(dates = result.dates) else cached
+                }
+                prefs.edit().putString(detailKey(item), result.json().toString())
+                    .putString("homework", LemidaParser.encode(items)).commit()
+                result
+            } finally { browser.close() }
+        }
+    }
+
+    suspend fun sync(view: WebView? = null): List<Homework> = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val browser = withContext(Dispatchers.Main) { LemidaBrowser(appContext, prefs.getString("user_agent", null), view) }
+            try {
+                browser.prepare()
+                val homepage = browser.get("${LemidaParser.BASE}/my/")
+                android.util.Log.d("LemidaSync", "Homepage authenticated=${LemidaParser.authenticated(homepage)}; page=${org.jsoup.Jsoup.parse(homepage).body().id()}")
+                if (!LemidaParser.authenticated(homepage)) throw LemidaSessionExpired()
+                val user = LemidaParser.config(homepage, "userId")
+                    ?: throw IOException("Could not identify the signed-in Lemida account.")
+                val key = LemidaParser.config(homepage, "sesskey")
+                    ?: throw IOException("Could not discover the Moodle session key.")
+                val courses = linkedMapOf<Int, String>()
+                var offset = 0
+                var complete = false
+                for (page in 0 until 100) {
+                    val payload = JSONArray().put(JSONObject().put("index", 0)
+                        .put("methodname", "core_course_get_enrolled_courses_by_timeline_classification")
+                        .put("args", JSONObject().put("classification", "allincludinghidden")
+                            .put("limit", 50).put("offset", offset).put("sort", "fullname")))
+                    val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
+                    val envelope = try { JSONArray(raw).getJSONObject(0) } catch (_: Exception) {
+                        throw IOException("Unexpected Moodle course response; sign in again if needed.")
+                    }
+                    if (envelope.optBoolean("error")) {
+                        val code = envelope.optJSONObject("exception")?.optString("errorcode").orEmpty()
+                        if (code in setOf("invalidsesskey", "requireloginerror", "servicerequireslogin")) throw LemidaSessionExpired()
+                        throw IOException("Moodle course discovery is unavailable ($code).")
+                    }
+                    val data = envelope.getJSONObject("data")
+                    val batch = data.getJSONArray("courses")
+                    for (i in 0 until batch.length()) {
+                        val c = batch.getJSONObject(i)
+                        courses[c.getInt("id")] = c.getString("fullname")
+                    }
+                    val next = data.getInt("nextoffset")
+                    if (next <= offset) { complete = true; break }
+                    offset = next
+                }
+                if (!complete) throw IOException("Course pagination did not finish; previous data preserved.")
+                val sameAccount = prefs.getString("user_id", null) == user
+                val previous = if (sameAccount) cached().associateBy { it.id } else emptyMap()
+                val items = courses.flatMap { (id, name) ->
+                    val payload = JSONArray().put(JSONObject().put("index", 0)
+                        .put("methodname", "core_courseformat_get_state").put("args", JSONObject().put("courseid", id)))
+                    val response = JSONArray(browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())).getJSONObject(0)
+                    if (response.optBoolean("error")) {
+                        val code = response.optJSONObject("exception")?.optString("errorcode").orEmpty()
+                        if (code in setOf("invalidsesskey", "requireloginerror", "servicerequireslogin")) throw LemidaSessionExpired()
+                        throw IOException("Moodle activity API is unavailable ($code). Previous homework preserved.")
+                    }
+                    LemidaParser.stateHomework(response.getString("data"), id, name).map { item ->
+                        item.copy(dates = previous[item.id]?.dates.orEmpty())
+                    }
+                }
+                val seen = if (sameAccount) prefs.getStringSet("seen", null)?.toSet() else null
+                val newItems = LemidaParser.newItems(items, seen)
+                val pending = if (sameAccount) LemidaParser.decode(prefs.getString("pending", "[]") ?: "[]") else emptyList()
+                val alerts = (pending + newItems).distinctBy { it.id }
+                // Commit only after every course succeeded. Never turn an error into an empty baseline.
+                check(prefs.edit().putString("homework", LemidaParser.encode(items)).putString("user_id", user)
+                    .putStringSet("seen", seen.orEmpty() + items.map { it.id })
+                    .putString("pending", LemidaParser.encode(alerts))
+                    .putLong("last_sync", System.currentTimeMillis()).putBoolean("needs_login", false)
+                    .putBoolean("login_notified", false)
+                    .putString("status", "${courses.size} courses • ${items.size} homework items • automatic sync every 30 minutes")
+                    .commit()) { "Could not save homework." }
+                alerts
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: LemidaSessionExpired) {
+                prefs.edit().putBoolean("needs_login", true).putString("status", e.message).commit()
+                throw e
+            } catch (e: IOException) {
+                prefs.edit().putString("status", "Update failed. Previous homework is still available. ${e.message}").commit()
+                throw e
+            } catch (e: Exception) {
+                prefs.edit().putString("status", "Update failed. Previous homework is still available. Try Refresh.").commit()
+                throw e
+            } finally {
+                browser.close()
+            }
+        }
+    }
+    fun needsLogin() = prefs.getBoolean("needs_login", false)
+    suspend fun clearPending(notifiedIds: Set<String>) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val pending = LemidaParser.decode(prefs.getString("pending", "[]") ?: "[]")
+            prefs.edit().putString("pending", LemidaParser.encode(pending.filter { it.id !in notifiedIds })).commit()
+        }
+    }
+    fun loginNotified() = prefs.getBoolean("login_notified", false)
+    fun markLoginNotified(value: Boolean) { prefs.edit().putBoolean("login_notified", value).commit() }
+
+    companion object {
+        private val mutex = Mutex()
+    }
+}
