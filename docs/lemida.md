@@ -7,6 +7,10 @@ Microsoft offers it. In the direct-SMS development build, allow SMS reception
 and a fresh Microsoft verification code is entered and submitted automatically.
 Other senders and ambiguous messages are ignored; codes are not logged, and no
 automatic resend is made. CAPTCHA still requires interactive completion.
+Ordinary builds start Android's SMS User Consent listener before selecting SMS.
+When Android offers the verification message, accepting the single-message consent
+fills and submits the code. Denied consent, unavailable Play services, and messages
+that do not match leave manual code entry available in the visible browser.
 This session lives on the phone; no desktop Python
 process or server is required. Homework can also be pinned using Customize
 navigation.
@@ -23,6 +27,8 @@ WorkManager checks about every 30 minutes when network access is available.
 Android battery restrictions can delay a check. The **Refresh** button queues
 an immediate check. Cached homework and last-successful-update time remain
 visible offline or after failed updates.
+The refresh icon shows progress during a read. A manual refresh replaces a delayed
+retry so the user does not have to wait for the background retry interval.
 
 The homework overflow menu pauses/resumes automatic updates.
 Search and separate course/type filters narrow the list. Activities are grouped

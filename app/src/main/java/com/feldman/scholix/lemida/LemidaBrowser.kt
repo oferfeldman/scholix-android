@@ -14,6 +14,7 @@ import org.json.JSONTokener
 import java.io.IOException
 import java.util.UUID
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /** Moodle's anti-bot session is browser-bound: keep both reads and AJAX in WebView. */
 class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null) {
@@ -39,12 +40,12 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
         val existing = cm.getCookie(LemidaParser.BASE).orEmpty().split(';')
             .map { it.trim().substringBefore('=') }.toSet()
         cookies.load()?.split(';')?.map { it.trim() }?.filter { it.contains('=') && it.substringBefore('=') !in existing }?.forEach { cookie ->
-                suspendCancellableCoroutine<Unit> { continuation ->
-                    cm.setCookie(LemidaParser.BASE, "$cookie; Path=/; Secure") {
-                        if (continuation.isActive) continuation.resume(Unit)
-                    }
+            suspendCancellableCoroutine<Unit> { continuation ->
+                cm.setCookie(LemidaParser.BASE, "$cookie; Path=/; Secure") {
+                    if (continuation.isActive) continuation.resume(Unit)
                 }
             }
+        }
         cm.flush()
     }
     private suspend fun evaluate(script: String): String = withContext(Dispatchers.Main) {
@@ -62,8 +63,13 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
                         override fun onPageFinished(web: WebView, finished: String) {
                             // Perfdrive may complete an automatic browser check and redirect itself.
                             // Wait for Moodle; a CAPTCHA that needs a person will time out visibly.
-                            if (android.net.Uri.parse(finished).host != "lemida.biu.ac.il") return
-                            web.evaluateJavascript("location.hostname === 'lemida.biu.ac.il' ? document.documentElement.outerHTML : null") { raw ->
+                            val host = android.net.Uri.parse(finished).host
+                            if (host in setOf("login.microsoftonline.com", "login.live.com")) {
+                                if (continuation.isActive) continuation.resumeWithException(LemidaSessionExpired())
+                                return
+                            }
+                            if (host != "lemida.biu.ac.il") return
+                            web.evaluateJavascript("location.origin === '${LemidaParser.BASE}' ? document.documentElement.outerHTML : null") { raw ->
                                 val result = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
                                 if (result != null && continuation.isActive) continuation.resume(result)
                             }
@@ -76,7 +82,8 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
                 html
             }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            throw IOException("Lemida browser verification did not finish. Open Sign in to Lemida and complete the check.")
+            if (android.net.Uri.parse(view.url).host != "lemida.biu.ac.il") throw LemidaVerificationRequired()
+            throw IOException("Lemida page load timed out. Check your connection and try Refresh.")
         }
     }
     suspend fun post(url: String, body: String): String = withContext(Dispatchers.Main) {
@@ -101,7 +108,7 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
                         val result = JSONObject(value)
                         if (result.optBoolean("error")) throw IOException("Moodle browser request failed.")
                         if (android.net.Uri.parse(result.optString("url")).host != "lemida.biu.ac.il")
-                            throw IOException("Lemida requires browser verification. Open Sign in to Lemida.")
+                            throw LemidaVerificationRequired()
                         if (result.optInt("status") !in 200..299) throw IOException("Moodle returned HTTP ${result.optInt("status")}")
                         snapshot()
                         return@withTimeout result.getString("body")

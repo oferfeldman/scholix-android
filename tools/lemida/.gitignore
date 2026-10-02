@@ -1,0 +1,5 @@
+.venv/
+.lemida-profile/
+exports/
+__pycache__/
+*.html

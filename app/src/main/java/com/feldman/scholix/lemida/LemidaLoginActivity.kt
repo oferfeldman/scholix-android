@@ -1,6 +1,7 @@
 package com.feldman.scholix.lemida
 
-import android.app.Activity
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -21,9 +22,12 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import org.json.JSONTokener
 import kotlinx.coroutines.*
+import com.google.android.gms.auth.api.phone.SmsRetriever
+import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.android.gms.common.api.Status
 
 /** Visible Microsoft login, including SMS, Authenticator, and CAPTCHA. */
-class LemidaLoginActivity : Activity() {
+class LemidaLoginActivity : ComponentActivity() {
     private lateinit var browser: WebView
     private var checking = false
     private var syncing = false
@@ -37,10 +41,34 @@ class LemidaLoginActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var retry: Button
     private var receiverRegistered = false
+    private var consentRegistered = false
+    private var smsReady = false
+    private var consentLaunched = false
+    private fun currentChallenge() = challengeStarted != 0L &&
+        SystemClock.elapsedRealtime() - challengeStarted <= 180_000 && !codeSubmitted
+    private val consentLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (currentChallenge() && result.resultCode == RESULT_OK) {
+            pendingCode = LemidaSms.code(result.data?.getStringExtra(SmsRetriever.EXTRA_SMS_MESSAGE).orEmpty(), "")
+        }
+        if (pendingCode == null && !isFinishing) status.text = "Enter the Microsoft verification code in the browser to continue."
+    }
+    private val consentReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != SmsRetriever.SMS_RETRIEVED_ACTION || !currentChallenge() || consentLaunched || pendingCode != null) return
+            val result = intent.extras?.get(SmsRetriever.EXTRA_STATUS) as? Status ?: return
+            if (result.statusCode == CommonStatusCodes.SUCCESS) {
+                val consent = intent.extras?.getParcelable<Intent>(SmsRetriever.EXTRA_CONSENT_INTENT) ?: return
+                consentLaunched = true
+                runCatching { consentLauncher.launch(consent) }.onFailure {
+                    status.text = "Enter the Microsoft verification code in the browser to continue."
+                }
+            }
+        }
+    }
     private val smsReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION ||
-                challengeStarted == 0L || SystemClock.elapsedRealtime() - challengeStarted > 180_000 || codeSubmitted) return
+                !currentChallenge()) return
             val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
             val code = LemidaSms.code(messages.joinToString("") { it.messageBody.orEmpty() },
                 messages.firstOrNull()?.displayOriginatingAddress.orEmpty()) ?: return
@@ -50,6 +78,7 @@ class LemidaLoginActivity : Activity() {
     private val poll = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
+            if (!smsReady) { handler.postDelayed(this, 250); return }
             browser.evaluateJavascript(LemidaSms.selectScript(alternativeClicked, smsSelected)) { raw ->
                 if (isFinishing || isDestroyed) return@evaluateJavascript
                 when (runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()) {
@@ -148,6 +177,9 @@ class LemidaLoginActivity : Activity() {
         }
         layout.addView(browser, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(layout)
+        ContextCompat.registerReceiver(this, consentReceiver, IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION),
+            SmsRetriever.SEND_PERMISSION, null, ContextCompat.RECEIVER_EXPORTED)
+        consentRegistered = true
         val supportsSms = packageManager.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
             .requestedPermissions.orEmpty().contains(Manifest.permission.RECEIVE_SMS)
         if (supportsSms) {
@@ -158,7 +190,15 @@ class LemidaLoginActivity : Activity() {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED)
                 requestPermissions(arrayOf(Manifest.permission.RECEIVE_SMS), 73122)
         } else {
-            status.text = "SMS will be selected automatically. Enter the received code in the browser."
+            status.text = "SMS will be selected automatically. Android may ask to share the verification message; you can also enter the code here."
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED) {
+            smsReady = true
+        } else {
+            // Start listening before the picker can request an SMS; failure keeps manual entry available.
+            runCatching {
+                SmsRetriever.getClient(this).startSmsUserConsent(null).addOnCompleteListener { smsReady = true }
+            }.onFailure { smsReady = true }
         }
         browser.loadUrl("${LemidaParser.BASE}/my/")
         handler.postDelayed(poll, 750)
@@ -167,6 +207,7 @@ class LemidaLoginActivity : Activity() {
         handler.removeCallbacksAndMessages(null)
         loginScope.cancel()
         if (receiverRegistered) unregisterReceiver(smsReceiver)
+        if (consentRegistered) unregisterReceiver(consentReceiver)
         pendingCode = null
         browser.stopLoading()
         browser.destroy()

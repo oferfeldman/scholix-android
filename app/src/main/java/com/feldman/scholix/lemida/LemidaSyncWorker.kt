@@ -64,11 +64,12 @@ class LemidaSyncWorker(private val context: Context, params: WorkerParameters) :
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork("lemida_homework_sync", ExistingPeriodicWorkPolicy.KEEP, request)
         }
-        fun refresh(context: Context) {
+        fun refresh(context: Context, manual: Boolean = false) {
             val request = OneTimeWorkRequestBuilder<LemidaSyncWorker>()
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
-            WorkManager.getInstance(context).enqueueUniqueWork("lemida_homework_refresh", ExistingWorkPolicy.KEEP, request)
+            WorkManager.getInstance(context).enqueueUniqueWork("lemida_homework_refresh",
+                if (manual) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, request)
         }
     }
 }

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -33,15 +34,16 @@ import java.util.Date
 fun LemidaPage(searchQuery: String = "") {
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
+    val syncing by repo.syncing.collectAsState()
     var homework by remember { mutableStateOf(repo.cached()) }
     var status by remember { mutableStateOf(repo.status()) }
     var updated by remember { mutableLongStateOf(repo.lastSync()) }
     var enabled by remember { mutableStateOf(repo.enabled()) }
     var needsLogin by remember { mutableStateOf(repo.needsLogin()) }
     var selected by remember { mutableStateOf<Homework?>(null) }
-    var courseFilter by remember { mutableStateOf<Int?>(null) }
-    var typeFilter by remember { mutableStateOf("all") }
-    var query by remember { mutableStateOf("") }
+    var courseFilter by rememberSaveable { mutableStateOf<Int?>(null) }
+    var typeFilter by rememberSaveable { mutableStateOf("all") }
+    var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { enabled = repo.enabled() }
@@ -60,13 +62,16 @@ fun LemidaPage(searchQuery: String = "") {
     val courses = homework.distinctBy { it.courseId }.sortedBy { it.course }
     MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = {
         CenterAlignedTopAppBar(title = { Text("Homework", fontWeight = FontWeight.Bold) }, actions = {
-            IconButton(onClick = { LemidaSyncWorker.refresh(context) }, enabled = enabled) { Icon(Icons.Default.Refresh, "Refresh") }
+            IconButton(onClick = { LemidaSyncWorker.refresh(context, manual = true) }, enabled = enabled && !syncing && !needsLogin) {
+                if (syncing) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Default.Refresh, "Refresh")
+            }
             Box {
                 IconButton(onClick = { options = true }) { Icon(Icons.Default.MoreVert, "Homework settings") }
                 DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
                     DropdownMenuItem(text = { Text(if (enabled) "Pause automatic updates" else "Resume automatic updates") }, onClick = {
                         enabled = !enabled; repo.setEnabled(enabled); options = false
-                        if (enabled) { permission.launch(Manifest.permission.POST_NOTIFICATIONS); LemidaSyncWorker.schedule(context); LemidaSyncWorker.refresh(context) }
+                        if (enabled) { permission.launch(Manifest.permission.POST_NOTIFICATIONS); LemidaSyncWorker.schedule(context); LemidaSyncWorker.refresh(context, manual = true) }
                     })
                 }
             }
