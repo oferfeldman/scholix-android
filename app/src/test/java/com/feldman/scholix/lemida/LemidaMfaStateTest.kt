@@ -6,6 +6,30 @@ import org.junit.Test
 class LemidaMfaStateTest {
     private val message = "Use verification code 123456 for Microsoft authentication."
 
+    @Test fun formPreparationKeepsTheCodeUntilVerifyIsReady() {
+        val state = LemidaMfaState()
+        state.observeOtp(1_000)
+        state.acceptCode(message, "Microsoft", 1_500)
+        assertEquals("123456", state.pendingCode(2_000))
+        assertEquals("123456", state.pendingCode(3_000))
+        assertFalse(state.submitted)
+        assertTrue(state.hasPending)
+        assertEquals("123456", state.consumeCode(3_000))
+        assertTrue(state.submitted)
+        assertNull(state.pendingCode(3_500))
+    }
+
+    @Test fun disabledFormCannotKeepACodeBeyondTheOriginalDeadline() {
+        val state = LemidaMfaState()
+        state.observeOtp(1_000)
+        state.acceptCode(message, "Microsoft", 1_500)
+        assertEquals("123456", state.pendingCode(181_000))
+        state.observeOtp(181_001)
+        assertNull(state.pendingCode(181_001))
+        assertFalse(state.hasPending)
+        assertFalse(state.submitted)
+    }
+
     @Test fun existingOtpPreventsAnotherAutomaticMethodRequest() {
         val state = LemidaMfaState()
         state.observeOtp(1_000)

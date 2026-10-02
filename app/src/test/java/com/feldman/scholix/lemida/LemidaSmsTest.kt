@@ -17,6 +17,7 @@ class LemidaSmsTest {
     @Test fun submitCannotInjectJavascript() {
         assertThrows(IllegalArgumentException::class.java) { LemidaSms.chooseScript("'); alert('x") }
         assertThrows(IllegalArgumentException::class.java) { LemidaSms.submitScript("'); alert('x") }
+        assertThrows(IllegalArgumentException::class.java) { LemidaSms.prepareCodeScript("'); alert('x") }
         assertTrue(LemidaSms.submitScript("123456").contains("location.origin"))
     }
 }

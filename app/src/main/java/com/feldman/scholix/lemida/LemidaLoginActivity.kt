@@ -89,14 +89,21 @@ class LemidaLoginActivity : ComponentActivity() {
                             }
                         }
                     }
-                    "otp" -> {
+                    "otp", "otp-waiting" -> {
                         mfa.observeOtp(SystemClock.elapsedRealtime())
-                        val code = mfa.consumeCode(SystemClock.elapsedRealtime())
+                        val code = mfa.pendingCode(SystemClock.elapsedRealtime())
                         if (code != null) {
-                            browser.evaluateJavascript(LemidaSms.submitScript(code)) { result ->
-                                if (isFinishing || isDestroyed) return@evaluateJavascript
-                                if (result == "true") status.text = "Microsoft SMS code submitted. Completing sign-in…"
-                                else if (result == "false") status.text = "The verification page changed. Enter the code in the browser to continue."
+                            // Filling may enable Verify asynchronously. Keep the code until it can be submitted.
+                            browser.evaluateJavascript(LemidaSms.prepareCodeScript(code)) ready@{ ready ->
+                                if (isFinishing || isDestroyed) return@ready
+                                if (ready != "true") return@ready
+                                if (mfa.pendingCode(SystemClock.elapsedRealtime()) != code) return@ready
+                                val toSubmit = mfa.consumeCode(SystemClock.elapsedRealtime()) ?: return@ready
+                                browser.evaluateJavascript(LemidaSms.submitScript(toSubmit)) submitted@{ result ->
+                                    if (isFinishing || isDestroyed) return@submitted
+                                    if (result == "true") status.text = "Microsoft SMS code submitted. Completing sign-in…"
+                                    else if (result == "false") status.text = "The verification page changed. Enter the code in the browser to continue."
+                                }
                             }
                         }
                     }

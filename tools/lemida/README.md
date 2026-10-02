@@ -113,4 +113,5 @@ The Android Microsoft picker can also be checked with mocked browser pages:
 
 This intercepts every HTTP request and sends no SMS. It checks selection without
 clicking, one request despite a delayed page transition, detached candidates,
+hidden/disabled candidates, disabled OTP fields, deferred Verify validation,
 code submission, and HTTPS origin restrictions.

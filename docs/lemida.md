@@ -105,6 +105,11 @@ and observed Moodle config casing. A device test has verified the saved phone
 session can load both enrolled courses and all 19 homework items after process
 restart. New CAPTCHA or Microsoft verification still requires the account
 holder's interactive session when the university asks for it.
+Microsoft picker inspection ignores hidden/disabled controls. An existing disabled
+OTP field still prevents another SMS request. Received codes stay buffered while
+the form is disabled or Verify awaits input validation, within the original fixed
+challenge deadline; readiness checks fill the field without clicking Verify.
+The native one-submit guard is recorded only once the form is ready.
 
 `LemidaHomeworkLayoutTest` is an offline device regression test for separate search,
 course-filter and type-filter bounds at normal and 2× font scale on a narrow screen.

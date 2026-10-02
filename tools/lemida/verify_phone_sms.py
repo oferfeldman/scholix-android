@@ -8,7 +8,9 @@ source = (Path(__file__).resolve().parents[2] /
           'app/src/main/java/com/feldman/scholix/lemida/LemidaSms.kt').read_text(encoding='utf-8')
 select = re.search(r'fun selectScript.*?= """(.*?)"""', source, re.S).group(1)
 choose = re.search(r'fun chooseScript.*?return """(.*?)"""', source, re.S).group(1)
-submit = re.search(r'fun submitScript.*?return """(.*?)"""', source, re.S).group(1)
+code_script = re.search(r'private fun codeScript.*?return """(.*?)"""', source, re.S).group(1)
+prepare = code_script.replace('$click', 'false')
+submit = code_script.replace('$click', 'true')
 fixture = '''
 <a id="signInAnotherWay" href="#">Use another method</a>
 <script>
@@ -69,11 +71,61 @@ with sync_playwright() as runtime:
     assert probe(True, True) == 'waiting'
     assert page.evaluate('requests') == 1
 
+    # Hidden or disabled matches cannot mask a later usable SMS option.
+    page.set_content('''<button style="display:none">Text hidden</button>
+        <button disabled data-value="OneWaySMS">Text disabled</button>
+        <div aria-disabled="true"><button>Text unavailable</button></div>
+        <button id="available">Text phone</button>
+        <script>window.requests = 0; available.onclick = () => requests++;</script>''')
+    assert probe() == 'sms'
+    assert click('sms') is True
+    assert page.evaluate('requests') == 1
+    assert probe() == 'sms'
+    page.locator('#available').evaluate("e => e.disabled = true")
+    assert click('sms') is False  # Recheck after the native attempt is recorded.
+    assert probe() == 'waiting'
+    assert page.evaluate('requests') == 1
+
+    # OTP remains the active challenge even when its form is temporarily disabled.
+    for attribute in ('disabled', 'readonly'):
+        page.set_content(f'''<input id="idTxtBx_SAOTCC_OTC" {attribute}>
+            <button id="idSubmit_SAOTCC_Continue">Verify</button>
+            <button data-value="OneWaySMS">Text</button>''')
+        assert probe() == 'otp-waiting'
+        assert page.evaluate(prepare.replace('$code', '123456')) is False
+        assert page.evaluate(submit.replace('$code', '123456')) is False
+        assert page.locator('#idTxtBx_SAOTCC_OTC').input_value() == ''
+
+    # Some forms enable Verify after input validation. Preparation does not click or
+    # consume the native pending code, and polling must not retrigger validation.
+    page.set_content('''<input id="idTxtBx_SAOTCC_OTC">
+        <button id="idSubmit_SAOTCC_Continue" disabled>Verify</button>
+        <script>
+        window.inputs = 0; window.submissions = 0;
+        document.querySelector('input').oninput = () => {
+            inputs++; document.querySelector('button').disabled = true;
+        };
+        document.querySelector('button').onclick = () => submissions++;
+        </script>''')
+    assert probe() == 'otp'
+    assert page.evaluate(prepare.replace('$code', '123456')) is False
+    assert page.evaluate('inputs === 1 && submissions === 0')
+    page.locator('button').evaluate('e => e.disabled = false')
+    assert page.evaluate(prepare.replace('$code', '123456')) is True
+    assert page.evaluate('inputs === 1 && submissions === 0')
+    assert page.evaluate(submit.replace('$code', '123456')) is True
+    assert page.evaluate('inputs === 1 && submissions === 1')
+
+    page.set_content('''<fieldset disabled><button data-value="OneWaySMS">Text</button></fieldset>
+        <a id="signInAnotherWay" style="visibility:hidden">Other method</a>''')
+    assert probe() == 'waiting'
+
     for url in ('https://example.test/', 'http://login.microsoftonline.com/test'):
         page.goto(url)
         assert probe() == 'other'
         assert click('sms') is False
+        assert page.evaluate(prepare.replace('$code', '123456')) is False
         assert page.evaluate(submit.replace('$code', '123456')) is False
     browser.close()
 
-print('SMS probe/click separation, single request, detached choice, code submission, and HTTPS origin guards passed.')
+print('SMS single-request selection, hidden/disabled controls, deferred Verify, code submission and HTTPS origin guards passed.')

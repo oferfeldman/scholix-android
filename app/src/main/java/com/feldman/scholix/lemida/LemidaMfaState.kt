@@ -46,9 +46,13 @@ internal class LemidaMfaState {
         return true
     }
 
+    fun pendingCode(now: Long): String? {
+        if (!active(now)) pending = null
+        return pending
+    }
+
     fun consumeCode(now: Long): String? {
-        if (!active(now)) { pending = null; return null }
-        val code = pending ?: return null
+        val code = pendingCode(now) ?: return null
         pending = null
         submitted = true // Record before JavaScript can submit/navigate, even if its callback is lost.
         return code
