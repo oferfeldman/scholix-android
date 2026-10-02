@@ -7,6 +7,11 @@ import org.json.JSONObject
 
 data class Homework(val id: String, val courseId: Int, val course: String,
                     val title: String, val type: String, val url: String, val dates: String) {
+    fun matchesSearch(vararg queries: String): Boolean {
+        val searchable = "$title $course"
+        return queries.all { query -> query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            .all { searchable.contains(it, ignoreCase = true) } }
+    }
     fun json() = JSONObject().put("id", id).put("courseId", courseId).put("course", course)
         .put("title", title).put("type", type).put("url", url).put("dates", dates)
     companion object {

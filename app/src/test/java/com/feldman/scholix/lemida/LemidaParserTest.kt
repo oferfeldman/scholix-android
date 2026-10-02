@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun combinedSearchMatchesWordsAcrossCourseAndTitleInAnyOrder() {
+        val item = Homework("1:assign:9", 1, "Linear Algebra", "Exercise 10 — וקטורים", "assign", "", "")
+        assertTrue(item.matchesSearch("  ALGEBRA  exercise ", "וקטורים 10"))
+        assertTrue(item.matchesSearch("", "  "))
+        assertFalse(item.matchesSearch("exercise", "quiz"))
+    }
     @Test fun queuedAlertsUseCurrentTitlesAndDiscardWithdrawnHomework() {
         val old = Homework("1:assign:9", 1, "Math", "Old title", "assign", "", "")
         val updated = old.copy(title = "Corrected title", dates = "Due Friday")

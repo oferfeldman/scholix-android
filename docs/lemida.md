@@ -38,12 +38,20 @@ The refresh icon shows progress during a read. A manual refresh replaces a delay
 retry so the user does not have to wait for the background retry interval.
 
 The homework overflow menu pauses/resumes automatic updates.
+Manual **Refresh** still works for a signed-in account while automatic updates are
+paused; it updates the list without delivering queued homework notifications.
+The page shows **Automatic updates paused** beside the sync summary.
 Search and separate course/type filters narrow the list. Activities are grouped
 by course and type, then exercise number. Search and filters use separate measured
 rows, including at enlarged font sizes. Both list and detail screens reserve space
 for Scholix's floating navigation bar. The sign-in row disappears after a successful
 sync and returns when the session expires. Dates learned from a detail page remain
 in the cached list across subsequent JSON updates.
+Search matches all entered words across the course and activity title, independently
+of their order, and combines the homework field with Scholix's app search. The field
+has a clear button. Course filters are reset when the selected course no longer has
+homework in the complete snapshot. The selected detail survives screen recreation;
+failed detail reads keep cached content visible and offer **Retry loading homework**.
 If Microsoft/Moodle expires the session, the app retains the cache and sends
 one sign-in reminder, then waits for interactive sign-in. No SMS resend,
 password replay, or CAPTCHA bypass occurs in the background.

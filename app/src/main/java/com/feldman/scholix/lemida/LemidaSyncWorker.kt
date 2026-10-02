@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
 class LemidaSyncWorker(private val context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val repo = LemidaRepository(context)
-        if (!repo.enabled()) return Result.success()
+        if (!repo.enabled() && !inputData.getBoolean(MANUAL_REFRESH, false)) return Result.success()
         return try {
             val account = if (repo.needsLogin()) null else try {
                 repo.sync()
@@ -38,6 +38,7 @@ class LemidaSyncWorker(private val context: Context, params: WorkerParameters) :
     }
     companion object {
         private const val CHANNEL = "lemida_homework"
+        private const val MANUAL_REFRESH = "manual_refresh"
         fun notify(context: Context, id: Int, title: String, content: String): Boolean {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
                 return false
@@ -64,6 +65,7 @@ class LemidaSyncWorker(private val context: Context, params: WorkerParameters) :
         }
         fun refresh(context: Context, manual: Boolean = false) {
             val request = OneTimeWorkRequestBuilder<LemidaSyncWorker>()
+                .setInputData(workDataOf(MANUAL_REFRESH to manual))
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
             WorkManager.getInstance(context).enqueueUniqueWork("lemida_homework_refresh",

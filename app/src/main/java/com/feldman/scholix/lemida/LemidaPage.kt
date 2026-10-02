@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -19,6 +20,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -45,14 +47,20 @@ fun LemidaPage(searchQuery: String = "") {
     var updated by remember { mutableLongStateOf(repo.lastSync()) }
     var enabled by remember { mutableStateOf(repo.enabled()) }
     var needsLogin by remember { mutableStateOf(repo.needsLogin()) }
-    var selected by remember { mutableStateOf<Homework?>(null) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var courseFilter by rememberSaveable { mutableStateOf<Int?>(null) }
     var typeFilter by rememberSaveable { mutableStateOf("all") }
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { enabled = repo.enabled() }
-    selected?.let { item -> LemidaHomeworkDetail(item, repo) { selected = null }; return }
+    LaunchedEffect(homework, courseFilter, selectedId) {
+        if (courseFilter != null && homework.none { it.courseId == courseFilter }) courseFilter = null
+        if (selectedId != null && homework.none { it.id == selectedId }) selectedId = null
+    }
+    homework.firstOrNull { it.id == selectedId }?.let { item ->
+        LemidaHomeworkDetail(item, repo) { selectedId = null }; return
+    }
     LaunchedEffect(lifecycle) {
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             if (repo.enabled() && !repo.needsLogin() && !repo.syncing.value) LemidaSyncWorker.refresh(context)
@@ -63,14 +71,13 @@ fun LemidaPage(searchQuery: String = "") {
             }
         }
     }
-    val search = "$query $searchQuery".trim()
     val visible = homework.filter { (courseFilter == null || it.courseId == courseFilter) &&
         (typeFilter == "all" || it.type == typeFilter) &&
-        (search.isBlank() || "${it.title} ${it.course}".contains(search, true)) }
+        it.matchesSearch(query, searchQuery) }
     val courses = homework.distinctBy { it.courseId }.sortedBy { it.course }
     MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = {
         CenterAlignedTopAppBar(title = { Text("Homework", fontWeight = FontWeight.Bold) }, actions = {
-            IconButton(onClick = { LemidaSyncWorker.refresh(context, manual = true) }, enabled = enabled && !syncing && !needsLogin) {
+            IconButton(onClick = { LemidaSyncWorker.refresh(context, manual = true) }, enabled = updated > 0L && !syncing && !needsLogin) {
                 if (syncing) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Default.Refresh, "Refresh")
             }
@@ -91,6 +98,7 @@ fun LemidaPage(searchQuery: String = "") {
                 query = query, onQueryChange = { query = it },
                 courseFilter = courseFilter, onCourseChange = { courseFilter = it },
                 typeFilter = typeFilter, onTypeChange = { typeFilter = it },
+                automaticUpdates = enabled,
             )
         }
         if (updated == 0L || needsLogin) Section {
@@ -99,7 +107,11 @@ fun LemidaPage(searchQuery: String = "") {
             })
         }
         if (status.startsWith("Update failed")) Item { Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-        if (visible.isEmpty()) Item { Text(if (updated == 0L) "Connect Lemida to see your homework." else "No homework matches these filters.", modifier = Modifier.padding(24.dp)) }
+        if (visible.isEmpty()) Item { Text(when {
+            updated == 0L -> "Connect Lemida to see your homework."
+            homework.isEmpty() -> "No homework available yet. New activities will appear after an update."
+            else -> "No homework matches. Try another search or choose All courses and All."
+        }, modifier = Modifier.padding(24.dp)) }
         visible.groupBy { it.courseId }.toSortedMap().forEach { (courseId, group) ->
             val color = MotionThemeDefaults.VibrantIconBackgrounds[Math.floorMod(courseId, MotionThemeDefaults.VibrantIconBackgrounds.size)]
             Title(group.first().course)
@@ -113,7 +125,7 @@ fun LemidaPage(searchQuery: String = "") {
                     Section { items.forEach { item ->
                         PageItem(key = item.id, title = item.title, description = item.dates.takeIf { it.isNotBlank() },
                             icon = painterResource(if (type == "quiz") R.drawable.ic_schedule else R.drawable.ic_docs),
-                            iconStyle = MotionSectionDefaults.iconStyle(containerColor = color.color, contentColor = color.onColor), onClick = { selected = item })
+                            iconStyle = MotionSectionDefaults.iconStyle(containerColor = color.color, contentColor = color.onColor), onClick = { selectedId = item.id })
                     } }
                 }
             }
@@ -129,16 +141,22 @@ internal fun LemidaHomeworkFilters(
     query: String, onQueryChange: (String) -> Unit,
     courseFilter: Int?, onCourseChange: (Int?) -> Unit,
     typeFilter: String, onTypeChange: (String) -> Unit,
+    automaticUpdates: Boolean = true,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("$count items", style = MaterialTheme.typography.labelLarge)
             Text(if (updated > 0) "Updated ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(updated))}" else "Not synced",
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (updated > 0 && !automaticUpdates) Text("Automatic updates paused",
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         OutlinedTextField(value = query, onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth().testTag("homework-search"),
-            singleLine = true, placeholder = { Text("Search homework") }, shape = MaterialTheme.shapes.large)
+            singleLine = true, placeholder = { Text("Search homework") }, shape = MaterialTheme.shapes.large,
+            trailingIcon = if (query.isNotEmpty()) {
+                { IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Clear homework search") } }
+            } else null)
         Row(Modifier.fillMaxWidth().testTag("homework-course-filters").horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = courseFilter == null, onClick = { onCourseChange(null) }, label = { Text("All courses") })
@@ -160,7 +178,10 @@ private fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack:
     var detail by remember(item.id) { mutableStateOf(repo.cachedDetail(item)) }
     var loading by remember(item.id) { mutableStateOf(true) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
-    LaunchedEffect(item.id) {
+    var retry by remember(item.id) { mutableIntStateOf(0) }
+    LaunchedEffect(item.id, retry) {
+        loading = true
+        error = null
         try { detail = repo.detail(item) }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) { error = e.message ?: "Could not update homework details." }
@@ -172,7 +193,10 @@ private fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack:
             Text(item.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         } }
-        error?.let { message -> Item { Text(message, color = MaterialTheme.colorScheme.error) } }
+        error?.let { message -> Section {
+            Item { Text(message, color = MaterialTheme.colorScheme.error) }
+            PageItem(title = "Retry loading homework", icon = rememberVectorPainter(Icons.Default.Refresh), onClick = { retry++ })
+        } }
         detail?.let { data ->
             if (data.dates.isNotBlank()) { Title("Dates"); Section { Item { Text(data.dates, style = MaterialTheme.typography.bodyMedium) } } }
             if (data.description.isNotBlank()) { Title("Instructions"); Section { Item { Text(data.description, style = MaterialTheme.typography.bodyMedium) } } }
@@ -183,7 +207,9 @@ private fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack:
                     if (cells.size > 1) Text(cells.drop(1).joinToString("\n"), style = MaterialTheme.typography.bodyMedium)
                 }
             } } } }
-            if (data.description.isBlank() && data.tables.isEmpty()) Section { Item { Text(data.text, style = MaterialTheme.typography.bodyMedium) } }
+            if (data.description.isBlank() && data.tables.isEmpty()) Section { Item {
+                Text(data.text.ifBlank { "This activity has no instructions yet." }, style = MaterialTheme.typography.bodyMedium)
+            } }
         }
         BottomBarSpacer(minMargin = 24.dp)
     }
