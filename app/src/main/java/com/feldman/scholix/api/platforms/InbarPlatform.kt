@@ -13,7 +13,7 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
     override var editing = false
     override var loggedIn = false
     override val suportsGrades = true
-    override val supportsSchedule = false
+    override val supportsSchedule = true
     override val supportsAttendance = false
     private var identity = ""
     var mobile = ""
@@ -21,6 +21,11 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
     private var displayName = "Inbar"
     private val http = InbarHttp()
     private val courses = mutableListOf<JSONObject>()
+    private var verifiedAccount = false
+    @Volatile private var scheduleYears = emptyList<Int>()
+    @Volatile private var scheduleYear = currentAcademicYear()
+    @Volatile private var schedulePeriod = "1"
+    @Volatile private var schedulePeriods = linkedMapOf("1" to "Semester A", "2" to "Semester B", "3" to "Summer", "5" to "All semesters")
     private val loginFields = LoginFields()
         .addField("id", Type.Id, getter = { it.getUsername() }, setter = { p, v -> p.setUsername(v.orEmpty()) })
         .addField("mobile", Type.Custom("mobile"), getter = { (it as InbarPlatform).mobile },
@@ -32,6 +37,7 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
     }
 
     fun hasSavedLoginDetails() = identity.isNotBlank() && mobile.isNotBlank()
+    override val canRestoreSession: Boolean get() = hasSavedLoginDetails() && verifiedAccount
 
     /** Keep the saved account and courses while starting a fresh SMS challenge. */
     @Synchronized fun forSmsLogin(): InbarPlatform = InbarPlatform(id).also { next ->
@@ -40,6 +46,11 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
         next.displayName = displayName
         next.platformDisplayName = platformDisplayName
         next.courses += getCourses()
+        next.verifiedAccount = verifiedAccount
+        next.scheduleYears = scheduleYears
+        next.scheduleYear = scheduleYear
+        next.schedulePeriod = schedulePeriod
+        next.schedulePeriods = LinkedHashMap(schedulePeriods)
     }
 
     fun requestSms(identity: String, mobile: String) {
@@ -52,10 +63,12 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
         val current = http.verifySms(code)
         update(current)
         loggedIn = true
+        verifiedAccount = true
         // Discover each available year so older courses are visible immediately.
         for (year in current.years.filter { it != current.year }) update(http.grades(year))
     }
     private fun update(page: InbarGradePage) {
+        scheduleYears = page.years
         courses.removeAll { it.optInt("year") == page.year }
         courses += page.courses.map { it.put("platformId", id) }
     }
@@ -105,23 +118,53 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
     override fun stopEditing() { editing = false }
     override fun getLoginFields() = loginFields
     override fun getInfo() = JSONObject().put("name", "Inbar").put("supportsGrades", true)
-        .put("supportsSchedule", false).put("supportsAttendance", false)
+        .put("supportsSchedule", true).put("supportsAttendance", false)
+        .put("supportsOriginalSchedule", false).put("supportsScheduleSelection", false)
+        .put("supportsAcademicScheduleSelection", true).put("numberedLessonPeriods", false)
+        .put("supportsSaturdaySchedule", true)
+        .put("scheduleKind", "weekly").put("scheduleYear", scheduleYear).put("schedulePeriod", schedulePeriod)
+        .put("scheduleYears", JSONArray((scheduleYears.ifEmpty { listOf(scheduleYear) }).sortedDescending()))
+        .put("schedulePeriods", JSONArray(schedulePeriods.map { (id, label) -> JSONObject().put("id", id).put("label", label) }))
         .put("loginVariables", JSONArray(listOf("id", "mobile", "smsCode")))
-        .put("supportsEndpoints", JSONArray(listOf("grades")))
+        .put("supportsEndpoints", JSONArray(listOf("grades", "schedule")))
     override fun getAttendanceEvents(period: String) = JSONObject()
     override fun getAttendanceEvents(year: Int, period: String) = JSONObject()
-    override fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?) = JSONObject()
-    override fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?) = JSONObject()
-    override fun getScheduleIndexes() = JSONArray()
+    @Synchronized override fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
+        require(dayIndex in 0..6) { "Invalid schedule day" }
+        if (!loggedIn) return JSONObject().put("error", "login_failed")
+        val selection = selectedValue?.split('|', limit = 2)
+        val year = selection?.getOrNull(0)?.toIntOrNull() ?: scheduleYear
+        val period = selection?.getOrNull(1)?.takeIf { it in schedulePeriods } ?: schedulePeriod
+        val page = try { http.schedule(year, period) } catch (_: InbarSessionExpired) {
+            loggedIn = false
+            return JSONObject().put("error", "login_failed")
+        }
+        scheduleYears = page.years
+        scheduleYear = page.year
+        schedulePeriod = page.period
+        schedulePeriods = LinkedHashMap(page.periods)
+        return JSONObject().apply {
+            page.lessons.filter { it.optInt("day") == dayIndex }.forEach { lesson ->
+                put(lesson.getString("id"), JSONObject(lesson.toString()).put("platformId", id))
+            }
+        }
+    }
+    override fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?) =
+        getSchedule(dayIndex, institutionCode, selectedValue)
+    override fun getScheduleIndexes() = JSONArray((0..6).toList())
     override fun getMessages(page: Int) = JSONArray()
     override fun getMessageDetails(messageId: String) = JSONObject()
     override suspend fun downloadAttachment(context: Context, attachment: JSONObject) = false
     @Synchronized override fun toJson(): JSONObject = JSONObject().put("class", javaClass.name).put("id", id)
         .put("platformDisplayName", platformDisplayName).put("name", displayName).put("identity", identity)
         .put("mobile", mobile).put("loggedIn", loggedIn).put("courses", JSONArray(courses))
+        .put("verifiedAccount", verifiedAccount)
+        .put("scheduleYear", scheduleYear).put("schedulePeriod", schedulePeriod).put("scheduleYears", JSONArray(scheduleYears))
+        .put("schedulePeriods", JSONObject(schedulePeriods as Map<*, *>))
         .put("encryptedSession", InbarSessionCipher.encrypt(http.cookieJar.toJson().toString()))
 
     companion object : Platform.Companion {
+        private fun currentAcademicYear(): Int = java.time.LocalDate.now().let { it.year + if (it.monthValue >= 9) 1 else 0 }
         @JvmStatic override fun fromJson(obj: JSONObject): Platform = InbarPlatform(obj.optString("id").ifBlank { generateId() }).apply {
             identity = obj.optString("identity")
             mobile = obj.optString("mobile")
@@ -129,6 +172,14 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
             platformDisplayName = obj.optString("platformDisplayName", "Inbar (Bar-Ilan)")
             obj.optJSONArray("courses")?.let { source ->
                 courses += InbarGrades.combineTeachingGroups((0 until source.length()).map { source.getJSONObject(it) })
+            }
+            verifiedAccount = obj.optBoolean("verifiedAccount", obj.optBoolean("loggedIn", false) || courses.isNotEmpty())
+            scheduleYear = obj.optInt("scheduleYear", currentAcademicYear())
+            schedulePeriod = obj.optString("schedulePeriod", "1")
+            scheduleYears = obj.optJSONArray("scheduleYears")?.let { years -> (0 until years.length()).map { years.getInt(it) } }
+                ?.takeIf { it.isNotEmpty() } ?: (courses.map { it.optInt("year") }.filter { it > 0 } + scheduleYear).distinct()
+            obj.optJSONObject("schedulePeriods")?.let { periods ->
+                schedulePeriods = LinkedHashMap(periods.keys().asSequence().associateWith { periods.getString(it) })
             }
             loggedIn = runCatching {
                 http.cookieJar.restore(JSONArray(InbarSessionCipher.decrypt(obj.getString("encryptedSession"))))

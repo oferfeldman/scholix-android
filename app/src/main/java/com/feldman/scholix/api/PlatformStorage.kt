@@ -61,6 +61,14 @@ object PlatformStorage {
     private const val KEY_PROVIDER_COURSE_OVERRIDES_PREFIX = "provider_course_overrides_"
     private const val KEY_PROVIDER_WINDOW_SUBJECTS_PREFIX = "provider_window_subjects_"
 
+    /** Called inside the SMS flow mutex: a different page may already have saved a verified session. */
+    fun restoreVerifiedInbarSession(context: Context, expected: InbarPlatform): InbarPlatform? {
+        val current = loadPlatforms(context).filterIsInstance<InbarPlatform>().firstOrNull {
+            it.id == expected.id && it.getUsername() == expected.getUsername() && it.mobile == expected.mobile && it.isLoggedIn()
+        } ?: return null
+        return current.takeIf { it.refreshCookies() }
+    }
+
     // --- free periods ("חלונות") ---------------------------------------------
     // Subjects the user no longer attends (e.g. a bagrut already completed) are
     // shown in the schedule as free periods rather than lessons.
@@ -95,8 +103,7 @@ object PlatformStorage {
     /**
      * Serializes and saves the entire list of Platform objects.
      */
-    fun savePlatforms(context: Context, platforms: List<Platform>) {
-        println(platforms)
+    @Synchronized fun savePlatforms(context: Context, platforms: List<Platform>) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val array = JSONArray()
         for (p in platforms) {
@@ -142,7 +149,7 @@ object PlatformStorage {
         return platforms
     }
 
-    fun addPlatforms(context: Context, newPlatforms: List<Platform>) {
+    @Synchronized fun addPlatforms(context: Context, newPlatforms: List<Platform>) {
         if (newPlatforms.isEmpty()) return
         val platforms = loadPlatforms(context)
         for (np in newPlatforms) {
@@ -262,7 +269,10 @@ object PlatformStorage {
     }
 
     suspend fun refreshCookies(context: Context): List<String> = coroutineScope {
-        val platforms = loadPlatforms(context)
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val (snapshot, platforms) = synchronized(this@PlatformStorage) {
+            JSONArray(prefs.getString(KEY_PLATFORMS, "[]")) to loadPlatforms(context)
+        }
 
         val results = platforms.map { p ->
             async {
@@ -284,7 +294,12 @@ object PlatformStorage {
         val failed = results.awaitAll().filterNotNull()
         if (failed.isNotEmpty()) Log.w("Refresh", "Failed to refresh: $failed")
 
-        savePlatforms(context, platforms)
+        val refreshed = JSONArray(platforms.map { it.toJson() })
+        synchronized(this@PlatformStorage) {
+            val current = JSONArray(prefs.getString(KEY_PLATFORMS, "[]"))
+            // A sign-in or settings save made while requests ran takes precedence.
+            prefs.edit { putString(KEY_PLATFORMS, mergeRefreshedPlatforms(snapshot, current, refreshed).toString()) }
+        }
         failed // return list of failed platform names
     }
 

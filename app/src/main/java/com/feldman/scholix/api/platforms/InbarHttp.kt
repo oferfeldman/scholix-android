@@ -16,6 +16,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 internal class InbarSessionExpired : IOException("Inbar session expired. Sign in again with an SMS code.")
+internal class InbarSmsCodeRejected : IOException("The SMS code was not accepted. Please sign in again.")
 
 internal class InbarCookieJar : CookieJar {
     private val cookies = mutableListOf<Cookie>()
@@ -56,8 +57,10 @@ internal class InbarHttp(
     private var gradePage: InbarPage? = null
     private var gradeYear: Int? = null
     private var smsTime: Long = 0
+    private var schedulePage: InbarSchedulePage? = null
+    private var scheduleFetchedAt: Long = 0
 
-    private fun request(initial: Request): InbarPage {
+    private fun request(initial: Request, allowAuthenticationRedirect: Boolean = true): InbarPage {
         var request = initial
         repeat(10) {
             if (request.url.scheme != "https" || request.url.host != "inbar.biu.ac.il" || request.url.port != 443) {
@@ -70,6 +73,11 @@ internal class InbarHttp(
                 if (response.code in listOf(301, 302, 303, 307, 308)) {
                     val location = response.header("Location") ?: throw IOException("Inbar redirect missing Location")
                     val destination = request.url.resolve(location) ?: throw IOException("Invalid Inbar redirect")
+                    if (!allowAuthenticationRedirect &&
+                        listOf("/Live/Login.aspx", "/Live/Authenticate.aspx").any { destination.encodedPath.equals(it, ignoreCase = true) }) {
+                        // Reading grades must not visit an endpoint that can create another SMS challenge.
+                        throw InbarSessionExpired()
+                    }
                     val builder = request.newBuilder().url(destination)
                     if (response.code == 303 || (response.code in listOf(301, 302) && request.method == "POST")) builder.get()
                     request = builder.build()
@@ -81,7 +89,8 @@ internal class InbarHttp(
         throw IOException("Too many Inbar redirects")
     }
 
-    private fun get(url: String): InbarPage = request(Request.Builder().url(url).build())
+    private fun get(url: String): InbarPage = request(Request.Builder().url(url).build(),
+        allowAuthenticationRedirect = !isDataPath(url.toHttpUrl().encodedPath))
 
     private fun post(page: InbarPage, overrides: Map<String, String>): InbarPage {
         val form = page.document().selectFirst("form#form1") ?: throw IOException("Inbar form is missing")
@@ -90,7 +99,8 @@ internal class InbarHttp(
         overrides.forEach { (key, value) -> body.add(key, value) }
         val action = page.url.resolve(form.attr("action")) ?: throw IOException("Invalid Inbar form action")
         return request(Request.Builder().url(action).header("Referer", page.url.toString())
-            .header("Origin", BASE).post(body.build()).build())
+            .header("Origin", BASE).post(body.build()).build(),
+            allowAuthenticationRedirect = !isDataPath(page.url.encodedPath))
     }
 
     @Synchronized fun requestSms(identity: String, phone: String) {
@@ -122,7 +132,7 @@ internal class InbarHttp(
         val next = post(page, mapOf("edtCode" to code, "btnVerify" to button.attr("value")))
         if (next.document().selectFirst("input[name=edtCode]") != null) {
             challenge = next // Keep fresh state for a manually corrected code.
-            throw IOException("The SMS code was not accepted. Please sign in again.")
+            throw InbarSmsCodeRejected()
         }
         val grades = if (next.url.encodedPath == "/Live/StudentGradesList.aspx") {
             InbarGrades.parse(next.html).also { gradePage = next; gradeYear = it.year }
@@ -148,12 +158,40 @@ internal class InbarHttp(
         return result
     }
 
+    /** One timetable request serves every weekday; filters use the latest returned form state. */
+    @Synchronized fun schedule(year: Int? = null, period: String? = null): InbarSchedulePage {
+        schedulePage?.takeIf { (year == null || it.year == year) && (period == null || it.period == period) &&
+            System.nanoTime() - scheduleFetchedAt < TimeUnit.MINUTES.toNanos(5) }?.let { return it }
+        var page = get(SCHEDULE)
+        var result = InbarSchedule.parse(page.html)
+        if (year != null && year != result.year) {
+            if (year !in result.years) throw IOException("Academic year $year is not available in Inbar")
+            val name = page.document().selectFirst("select#cmbActiveYear")!!.attr("name")
+            page = post(page, mapOf(name to year.toString(), "__EVENTTARGET" to name, "__EVENTARGUMENT" to ""))
+            result = InbarSchedule.parse(page.html)
+            if (result.year != year) throw IOException("Inbar did not select schedule year $year")
+        }
+        if (period != null && period != result.period) {
+            if (period !in result.periods) throw IOException("Semester is not available in Inbar")
+            val name = page.document().selectFirst("select[id$=ddlPeriodTypeFilter2]")!!.attr("name")
+            page = post(page, mapOf(name to period, "__EVENTTARGET" to name, "__EVENTARGUMENT" to ""))
+            result = InbarSchedule.parse(page.html)
+            if (result.period != period) throw IOException("Inbar did not select schedule semester")
+        }
+        schedulePage = result
+        scheduleFetchedAt = System.nanoTime()
+        return result
+    }
+
     companion object {
         // Restored providers keep their own cookies while reusing HTTPS connections.
         private val SHARED_CLIENT = OkHttpClient()
         const val BASE = "https://inbar.biu.ac.il"
         const val LOGIN = "$BASE/Live/Login.aspx?ReturnUrl=%2fLive%2fStudentGradesList.aspx"
         const val GRADES = "$BASE/Live/StudentGradesList.aspx"
+        const val SCHEDULE = "$BASE/Live/StudentPeriodSchedule.aspx"
+        private fun isDataPath(path: String) = listOf("/Live/StudentGradesList.aspx", "/Live/StudentPeriodSchedule.aspx")
+            .any { path.equals(it, ignoreCase = true) }
 
         fun successfulControls(form: Element): List<Pair<String, String>> = buildList {
             for (element in form.select("input[name], select[name], textarea[name]")) {

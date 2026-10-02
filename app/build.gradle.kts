@@ -137,11 +137,13 @@ dependencies {
 
     // Tests
     testImplementation(libs.junit)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.ui.test.junit4)
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation(libs.accompanist.swiperefresh)
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)

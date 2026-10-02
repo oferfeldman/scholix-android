@@ -479,6 +479,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     // Providers by id, so a course with no subject icon can borrow its logo.
     var providersById by remember { mutableStateOf<Map<String, Platform>>(emptyMap()) }
     var inbarRelogin by remember { mutableStateOf<InbarPlatform?>(null) }
+    var reloginAttempted by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         providersById = withContext(Dispatchers.IO) {
             runCatching {
@@ -489,12 +490,11 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
         if (courses.isEmpty()) {
             inbarRelogin = providersById.values.filterIsInstance<InbarPlatform>()
                 .firstOrNull { !it.isLoggedIn() && it.hasSavedLoginDetails() }
-            if (inbarRelogin != null) isLoading = true
+            if (inbarRelogin != null) { reloginAttempted = true; isLoading = true }
         }
     }
     var portalRelogin by remember { mutableStateOf<StudentsPortalPlatform?>(null) }
     var webtopRelogin by remember { mutableStateOf<WebtopPlatform?>(null) }
-    var reloginAttempted by remember { mutableStateOf(false) }
     fun keyFor(course: JSONObject?, year: Int, semester: String) =
         course?.let {
             "${it.optString("courseKey").ifBlank { it.optString("name") }}|$year|${semester.lowercase()}"
@@ -509,6 +509,8 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
         semester: String = initialSemester,
         onResult: (List<JSONObject>, Float, String?) -> Unit
     ) {
+        // Cached-course/preload updates must not replace the active SMS challenge.
+        if (inbarRelogin?.id == course.optString("platformId")) return
         val currentId = ++requestId
         isLoading = true
         grades = emptyList()
@@ -580,7 +582,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
             if (currentId == requestId) {
                 val inbar = requestPlatform as? InbarPlatform
                 if (requestErrorCode == "login_failed" && inbar != null &&
-                    inbar.hasSavedLoginDetails() && !reloginAttempted) {
+                    inbar.hasSavedLoginDetails() && !reloginAttempted && inbarRelogin == null) {
                     reloginAttempted = true
                     inbarRelogin = inbar
                     isLoading = true
@@ -620,6 +622,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     var sortBy by rememberSaveable { mutableStateOf("Date") }
 
     LaunchedEffect(courses, selectedTab, semesterState, yearState) {
+        if (inbarRelogin != null) return@LaunchedEffect
         val selectedCourse = courses.getOrNull(selectedTab)
         val selectedKey = keyFor(selectedCourse, yearState, semesterState)
         if (selectedCourse != null && selectedKey != loadedKey) {
@@ -767,6 +770,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
     inbarRelogin?.let { savedAccount ->
         val pending = remember(savedAccount) { savedAccount.forSmsLogin() }
         HiddenInbarLogin(account = pending,
+            reuseSavedSession = { withContext(Dispatchers.IO) { PlatformStorage.restoreVerifiedInbarSession(context, pending) } },
             onSmsRequested = { account ->
                 withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
             }, onResult = { account, error ->

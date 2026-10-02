@@ -13,7 +13,7 @@ val inbarSources = tasks.register<Sync>("prepareInbarSources") {
     into(layout.buildDirectory.dir("generated/inbar/main"))
 }
 val inbarTests = tasks.register<Sync>("prepareInbarTests") {
-    from("../app/src/test/java") { include("com/feldman/scholix/api/platforms/InbarHttpTest.kt") }
+    from("../app/src/test/java") { include("com/feldman/scholix/api/platforms/Inbar*Test.kt") }
     into(layout.buildDirectory.dir("generated/inbar/test"))
 }
 
@@ -51,5 +51,6 @@ dependencies {
     implementation(libs.jsoup)
     implementation("com.google.android.gms:play-services-auth-api-phone:18.2.0")
     testImplementation(libs.junit)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("org.json:json:20240303")
 }
