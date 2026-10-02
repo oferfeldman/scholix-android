@@ -67,6 +67,10 @@ Android Keystore encrypted file, so background sync survives process restarts.
 All Moodle page reads and AJAX run through the Android WebView using this
 browser session. Lemida's Perfdrive anti-bot verification rejects native HTTP
 replays even with the same cookies, so OkHttp is not used for Lemida reads.
+Main-page network and HTTP errors fail promptly without treating broken images
+as sync failures. AJAX requests have a deadline covering startup and polling,
+are aborted on timeout/cancellation, and detect navigation during an update.
+Cookie file encryption and reads run on an IO dispatcher.
 The sign-in window loads homework through its own browser before closing; a
 failure remains visible instead of returning silently to an empty page.
 Encrypted-session saves run inside the same recovery flow on an IO dispatcher,
@@ -105,3 +109,6 @@ sync, native cached detail reads, and sign-in closing only after a successful lo
 `LemidaAlertsTest` uses isolated preferences and fake notification callbacks to check
 concurrent delivery, account switching, paused/failed delivery, and stale sign-in
 reminders. These tests send no notifications and read no saved account session.
+`tools/lemida/verify_browser_requests.py` exercises the Android request scripts
+in Chromium with intercepted traffic, including late completion after cancellation,
+network failure, page navigation and HTTPS origin checks; no live account is used.

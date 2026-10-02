@@ -4,11 +4,15 @@ import android.content.Context
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.IOException
@@ -39,7 +43,8 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
         cm.setAcceptThirdPartyCookies(view, true)
         val existing = cm.getCookie(LemidaParser.BASE).orEmpty().split(';')
             .map { it.trim().substringBefore('=') }.toSet()
-        cookies.load()?.split(';')?.map { it.trim() }?.filter { it.contains('=') && it.substringBefore('=') !in existing }?.forEach { cookie ->
+        val savedCookies = withContext(Dispatchers.IO) { cookies.load() }
+        savedCookies?.split(';')?.map { it.trim() }?.filter { it.contains('=') && it.substringBefore('=') !in existing }?.forEach { cookie ->
             suspendCancellableCoroutine<Unit> { continuation ->
                 cm.setCookie(LemidaParser.BASE, "$cookie; Path=/; Secure") {
                     if (continuation.isActive) continuation.resume(Unit)
@@ -56,72 +61,82 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
         }
     }
     suspend fun get(url: String): String = withContext(Dispatchers.Main) {
-        try {
-            withTimeout(60_000) {
-                val html = suspendCancellableCoroutine<String> { continuation ->
-                    view.webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(web: WebView, finished: String) {
-                            // Perfdrive may complete an automatic browser check and redirect itself.
-                            // Wait for Moodle; a CAPTCHA that needs a person will time out visibly.
-                            val host = android.net.Uri.parse(finished).host
-                            if (host in setOf("login.microsoftonline.com", "login.live.com")) {
-                                if (continuation.isActive) continuation.resumeWithException(LemidaSessionExpired())
-                                return
-                            }
-                            if (host != "lemida.biu.ac.il") return
-                            web.evaluateJavascript("location.origin === '${LemidaParser.BASE}' ? document.documentElement.outerHTML : null") { raw ->
-                                val result = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
-                                if (result != null && continuation.isActive) continuation.resume(result)
-                            }
+        withTimeoutOrNull(60_000) {
+            val html = suspendCancellableCoroutine<String> { continuation ->
+                view.webViewClient = object : WebViewClient() {
+                    override fun onReceivedError(web: WebView, request: WebResourceRequest, error: WebResourceError) {
+                        // Broken images/resources must not discard an otherwise usable page.
+                        if (request.isForMainFrame && continuation.isActive) {
+                            continuation.resumeWithException(IOException("Lemida could not load. Check your connection and try Refresh."))
                         }
                     }
-                    view.loadUrl(url)
-                    continuation.invokeOnCancellation { view.post { view.stopLoading() } }
+                    override fun onReceivedHttpError(web: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                        if (request.isForMainFrame && response.statusCode >= 400 && continuation.isActive) {
+                            continuation.resumeWithException(IOException("Lemida returned HTTP ${response.statusCode}. Try Refresh."))
+                        }
+                    }
+                    override fun onPageFinished(web: WebView, finished: String) {
+                        // Perfdrive may complete an automatic browser check and redirect itself.
+                        // Wait for Moodle; a CAPTCHA that needs a person will time out visibly.
+                        val host = android.net.Uri.parse(finished).host
+                        if (host in setOf("login.microsoftonline.com", "login.live.com")) {
+                            if (continuation.isActive) continuation.resumeWithException(LemidaSessionExpired())
+                            return
+                        }
+                        if (host != "lemida.biu.ac.il") return
+                        web.evaluateJavascript("location.origin === '${LemidaParser.BASE}' ? document.documentElement.outerHTML : null") { raw ->
+                            val result = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
+                            if (result != null && continuation.isActive) continuation.resume(result)
+                        }
+                    }
                 }
-                snapshot()
-                html
+                view.loadUrl(url)
+                continuation.invokeOnCancellation { view.post { view.stopLoading() } }
             }
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            snapshot()
+            html
+        } ?: run {
             if (android.net.Uri.parse(view.url).host != "lemida.biu.ac.il") throw LemidaVerificationRequired()
             throw IOException("Lemida page load timed out. Check your connection and try Refresh.")
         }
     }
     suspend fun post(url: String, body: String): String = withContext(Dispatchers.Main) {
         val slot = "lemida_" + UUID.randomUUID().toString().replace("-", "")
-        val started = evaluate("""(() => {
-            if (location.origin !== '${LemidaParser.BASE}') return false;
-            window['$slot'] = null;
-            fetch(${JSONObject.quote(url)}, {method: 'POST', credentials: 'same-origin',
-                headers: {'Content-Type': 'application/json'}, body: ${JSONObject.quote(body)}})
-              .then(async r => {window['$slot'] = {status:r.status, url:r.url, body:await r.text()};})
-              .catch(() => {window['$slot'] = {error:true};});
-            return true;
-        })()""")
-        if (started != "true") throw LemidaSessionExpired()
         try {
-            withTimeout(45_000) {
+            withTimeoutOrNull(45_000) {
+                val started = evaluate(LemidaRequestScript.start(slot, url, body))
+                if (started != "true") throw LemidaSessionExpired()
                 while (true) {
-                    val raw = evaluate("JSON.stringify(window['$slot'] || null)")
+                    val raw = evaluate(LemidaRequestScript.poll(slot))
                     val value = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
                     if (value != null && value != "null") {
-                        evaluate("delete window['$slot']")
                         val result = JSONObject(value)
+                        if (result.optBoolean("verification")) throw LemidaVerificationRequired()
+                        if (result.optBoolean("lost")) throw IOException("Lemida navigated during an update. Try Refresh.")
                         if (result.optBoolean("error")) throw IOException("Moodle browser request failed.")
-                        if (android.net.Uri.parse(result.optString("url")).host != "lemida.biu.ac.il")
+                        val responseUrl = android.net.Uri.parse(result.optString("url"))
+                        if (responseUrl.scheme != "https" || responseUrl.host != "lemida.biu.ac.il" ||
+                            responseUrl.port !in setOf(-1, 443) || responseUrl.userInfo != null)
                             throw LemidaVerificationRequired()
                         if (result.optInt("status") !in 200..299) throw IOException("Moodle returned HTTP ${result.optInt("status")}")
                         snapshot()
-                        return@withTimeout result.getString("body")
+                        return@withTimeoutOrNull result.getString("body")
                     }
                     delay(250)
                 }
                 @Suppress("UNREACHABLE_CODE") ""
+            } ?: throw IOException("Moodle course request timed out. Try Refresh.")
+        } finally {
+            // Also abort when a worker is replaced/cancelled. Cleanup cannot delay shutdown indefinitely.
+            withContext(NonCancellable) {
+                runCatching { withTimeoutOrNull(1_000) { evaluate(LemidaRequestScript.cleanup(slot)) } }
             }
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) { throw IOException("Moodle course request timed out.") }
+        }
     }
-    private fun snapshot() {
+    private suspend fun snapshot() {
         CookieManager.getInstance().flush()
-        CookieManager.getInstance().getCookie("${LemidaParser.BASE}/my/")?.let { cookies.save(it) }
+        val value = CookieManager.getInstance().getCookie("${LemidaParser.BASE}/my/")
+        if (value != null) withContext(Dispatchers.IO) { cookies.save(value) }
     }
     suspend fun close() = withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
         view.webViewClient = previousClient
