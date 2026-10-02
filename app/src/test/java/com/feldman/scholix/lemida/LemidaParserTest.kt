@@ -4,6 +4,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun instructionsPreserveParagraphsAndListItems() {
+        val detail = LemidaParser.detail("""<main id="region-main"><div id="intro">
+            <p>הנחיות הגשה</p><p>Upload a PDF<br>Include your name</p>
+            <ul><li>First question</li><li>Second question</li></ul></div></main>""")
+        assertEquals("הנחיות הגשה\nUpload a PDF\nInclude your name\n• First question\n• Second question", detail.description)
+    }
     @Test fun jsonActivityStateFiltersHomeworkAndPreservesStableIds() {
         val state = """{"cm":[
             {"id":"9","name":"תרגיל &amp; תשובות","url":"https://lemida.biu.ac.il/mod/assign/view.php?id=9","uservisible":true},

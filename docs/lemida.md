@@ -22,6 +22,9 @@ resource links alone do not count as homework. Tapping an item opens a native
 Scholix detail screen with instructions, dates, and submission/grading tables.
 Details are refreshed through the phone's browser session and cached for offline
 reading. The app does not submit assignments or start quiz attempts.
+Instructions retain paragraph breaks and list items instead of collapsing into a
+single block. Screen cache polling pauses when the app is in the background;
+WorkManager remains responsible for scheduled checks.
 
 WorkManager checks about every 30 minutes when network access is available.
 Android battery restrictions can delay a check. The **Refresh** button queues

@@ -14,6 +14,10 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -34,7 +38,8 @@ import java.util.Date
 fun LemidaPage(searchQuery: String = "") {
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
-    val syncing by repo.syncing.collectAsState()
+    val lifecycle = LocalLifecycleOwner.current
+    val syncing by repo.syncing.collectAsStateWithLifecycle()
     var homework by remember { mutableStateOf(repo.cached()) }
     var status by remember { mutableStateOf(repo.status()) }
     var updated by remember { mutableLongStateOf(repo.lastSync()) }
@@ -48,11 +53,14 @@ fun LemidaPage(searchQuery: String = "") {
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { enabled = repo.enabled() }
     selected?.let { item -> LemidaHomeworkDetail(item, repo) { selected = null }; return }
-    LaunchedEffect(Unit) {
-        if (repo.enabled()) LemidaSyncWorker.refresh(context)
-        while (true) {
-            homework = repo.cached(); status = repo.status(); updated = repo.lastSync(); needsLogin = repo.needsLogin()
-            delay(2000)
+    LaunchedEffect(lifecycle) {
+        lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (repo.enabled() && !repo.needsLogin() && !repo.syncing.value) LemidaSyncWorker.refresh(context)
+            while (true) {
+                homework = repo.cached(); status = repo.status(); updated = repo.lastSync(); needsLogin = repo.needsLogin()
+                enabled = repo.enabled()
+                delay(2000)
+            }
         }
     }
     val search = "$query $searchQuery".trim()

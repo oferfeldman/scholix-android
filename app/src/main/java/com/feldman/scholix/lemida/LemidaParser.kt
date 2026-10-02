@@ -1,6 +1,7 @@
 package com.feldman.scholix.lemida
 
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -88,8 +89,16 @@ object LemidaParser {
         val tables = main.select("table").map { table -> table.select("tr").map { row ->
             row.select("th, td").map { it.text() }
         }.filter { it.isNotEmpty() } }
-        return HomeworkDetail(main.select(".activity-description, #intro, .generalbox").text(),
+        return HomeworkDetail(main.select(".activity-description, #intro, .generalbox").joinToString("\n\n") { readableText(it) },
             main.select("[data-region=activity-dates], .activity-dates").text(), tables, main.text())
+    }
+    private fun readableText(element: Element): String {
+        val content = element.clone()
+        content.select("br").forEach { it.before("\n"); it.remove() }
+        content.select("li").forEach { it.prependText("• ") }
+        content.select("p, div, li, h1, h2, h3, tr").forEach { it.appendText("\n") }
+        return content.wholeText().lineSequence().map { it.trim().replace(Regex("[\\t ]+"), " ") }
+            .filter { it.isNotBlank() }.joinToString("\n")
     }
     fun encode(items: List<Homework>) = JSONArray().apply { items.forEach { put(it.json()) } }.toString()
     // Keep the union: an activity temporarily hidden and later visible isn't new again.
