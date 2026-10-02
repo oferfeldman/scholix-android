@@ -4,6 +4,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun ajaxSupportsCourseObjectsAndEncodedActivityState() {
+        val courses = LemidaParser.ajaxData("""[{"error":false,"data":{"courses":[],"nextoffset":0}}]""") as org.json.JSONObject
+        assertEquals(0, courses.getJSONArray("courses").length())
+        assertEquals("{\"cm\":[]}", LemidaParser.ajaxData("""[{"error":false,"data":"{\"cm\":[]}"}]"""))
+    }
+    @Test fun ajaxLoginErrorsAndHtmlLoginPagesRequireRecovery() {
+        listOf("invalidsesskey", "requireloginerror", "servicerequireslogin").forEach { code ->
+            assertThrows(LemidaSessionExpired::class.java) {
+                LemidaParser.ajaxData("""[{"error":true,"exception":{"errorcode":"$code"}}]""")
+            }
+        }
+        listOf("<body class='notloggedin'>Login</body>", "<body id='page-login-index'>Login</body>").forEach { html ->
+            assertThrows(LemidaSessionExpired::class.java) { LemidaParser.ajaxData(html) }
+        }
+    }
+    @Test fun unavailableAjaxAndUnknownHtmlDoNotFalselyExpireTheSession() {
+        listOf("""[{"error":true,"exception":{"errorcode":"servicenotavailable"}}]""",
+            "<body><div class='errorbox'>Unavailable</div></body>").forEach { raw ->
+            val error = assertThrows(java.io.IOException::class.java) { LemidaParser.ajaxData(raw) }
+            assertFalse(error is LemidaSessionExpired)
+        }
+    }
+    @Test fun incompleteAjaxResponsesCannotBecomeEmptySuccessfulSnapshots() {
+        listOf("[]", "{}", "not json", "[null]", "[{}]", "[{\"data\":null}]",
+            "[{\"data\":{}},{\"data\":{}}]").forEach { raw ->
+            val error = assertThrows(java.io.IOException::class.java) { LemidaParser.ajaxData(raw) }
+            assertFalse(error is LemidaSessionExpired)
+        }
+    }
     @Test fun activityQueryOrderingAndFragmentsDoNotChangeIdentity() {
         val url = "https://lemida.biu.ac.il/mod/assign/view.php?forceview=1&id=900#submission"
         val html = page().replace("https://lemida.biu.ac.il/mod/assign/view.php?id=900", url.replace("&", "&amp;"))

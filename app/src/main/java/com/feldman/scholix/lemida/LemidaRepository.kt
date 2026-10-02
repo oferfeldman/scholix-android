@@ -77,15 +77,8 @@ class LemidaRepository(context: Context, preferencesName: String = "lemida_sync"
                             .put("args", JSONObject().put("classification", "allincludinghidden")
                                 .put("limit", 50).put("offset", offset).put("sort", "fullname")))
                         val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
-                        val envelope = try { JSONArray(raw).getJSONObject(0) } catch (_: Exception) {
-                            throw IOException("Unexpected Moodle course response; sign in again if needed.")
-                        }
-                        if (envelope.optBoolean("error")) {
-                            val code = envelope.optJSONObject("exception")?.optString("errorcode").orEmpty()
-                            if (code in setOf("invalidsesskey", "requireloginerror", "servicerequireslogin")) throw LemidaSessionExpired()
-                            throw IOException("Moodle course discovery is unavailable ($code).")
-                        }
-                        val data = envelope.getJSONObject("data")
+                        val data = LemidaParser.ajaxData(raw) as? JSONObject
+                            ?: throw IOException("Unexpected Moodle course data. Previous homework preserved.")
                         val batch = data.getJSONArray("courses")
                         for (i in 0 until batch.length()) {
                             val c = batch.getJSONObject(i)
@@ -101,13 +94,10 @@ class LemidaRepository(context: Context, preferencesName: String = "lemida_sync"
                     val items = courses.flatMap { (id, name) ->
                         val payload = JSONArray().put(JSONObject().put("index", 0)
                             .put("methodname", "core_courseformat_get_state").put("args", JSONObject().put("courseid", id)))
-                        val response = JSONArray(browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())).getJSONObject(0)
-                        if (response.optBoolean("error")) {
-                            val code = response.optJSONObject("exception")?.optString("errorcode").orEmpty()
-                            if (code in setOf("invalidsesskey", "requireloginerror", "servicerequireslogin")) throw LemidaSessionExpired()
-                            throw IOException("Moodle activity API is unavailable ($code). Previous homework preserved.")
-                        }
-                        LemidaParser.stateHomework(response.getString("data"), id, name).map { item ->
+                        val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
+                        val state = LemidaParser.ajaxData(raw) as? String
+                            ?: throw IOException("Unexpected Moodle activity data. Previous homework preserved.")
+                        LemidaParser.stateHomework(state, id, name).map { item ->
                             item.copy(dates = previous[item.id]?.dates.orEmpty())
                         }
                     }

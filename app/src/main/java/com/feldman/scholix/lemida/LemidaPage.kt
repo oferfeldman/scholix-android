@@ -53,7 +53,10 @@ fun LemidaPage(searchQuery: String = "") {
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { enabled = repo.enabled() }
+    val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        homework = repo.cached(); status = repo.status(); updated = repo.lastSync()
+        needsLogin = repo.needsLogin(); enabled = repo.enabled()
+    }
     LaunchedEffect(homework, courseFilter, selectedId) {
         if (courseFilter != null && homework.none { it.courseId == courseFilter }) courseFilter = null
         if (selectedId != null && homework.none { it.id == selectedId }) selectedId = null
@@ -84,6 +87,10 @@ fun LemidaPage(searchQuery: String = "") {
             Box {
                 IconButton(onClick = { options = true }) { Icon(Icons.Default.MoreVert, "Homework settings") }
                 DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                    DropdownMenuItem(text = { Text("Reconnect Lemida") }, enabled = !syncing, onClick = {
+                        options = false
+                        login.launch(Intent(context, LemidaLoginActivity::class.java))
+                    })
                     DropdownMenuItem(text = { Text(if (enabled) "Pause automatic updates" else "Resume automatic updates") }, onClick = {
                         enabled = !enabled; repo.setEnabled(enabled); options = false
                         if (enabled) { permission.launch(Manifest.permission.POST_NOTIFICATIONS); LemidaSyncWorker.schedule(context); LemidaSyncWorker.refresh(context, manual = true) }

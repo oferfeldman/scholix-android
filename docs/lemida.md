@@ -92,6 +92,11 @@ ordinary homework warnings (such as overdue submission) remain readable.
 Updates commit only after discovery and every course succeed. Seen IDs are
 kept as a union to avoid duplicate alerts after temporary hiding. A different
 Moodle `userId` establishes a fresh notification baseline.
+Both discovery calls share response validation. Known session errors and HTML
+login redirects restore sign-in; unavailable methods and malformed responses
+preserve homework without falsely marking the session expired. Reconnect is also
+available in Homework's overflow menu, while the connected screen hides the
+sign-in row. Returning from sign-in refreshes the list immediately.
 Pending alerts use current titles and dates from the latest complete snapshot;
 withdrawn homework is removed from the notification queue. Delivery and acknowledgement
 share the sync/account lock, so overlapping workers cannot deliver the same queue twice

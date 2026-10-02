@@ -4,6 +4,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONException
 import java.io.IOException
 import java.net.URI
 import java.net.URLDecoder
@@ -53,6 +54,29 @@ object LemidaParser {
     fun config(html: String, name: String): String? =
         Regex("\"${Regex.escape(name)}\"\\s*:\\s*(?:\"([^\"]+)\"|(\\d+))")
             .find(html)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }
+
+    /** A login redirect can be HTML with HTTP 200, not a JSON error envelope. */
+    fun ajaxData(raw: String): Any {
+        if (raw.trimStart().startsWith('<')) {
+            val body = Jsoup.parse(raw).body()
+            if (body.hasClass("notloggedin") || body.id().startsWith("page-login-")) throw LemidaSessionExpired()
+            throw IOException("Unexpected Moodle page. Try Refresh or reconnect to Lemida.")
+        }
+        try {
+            val envelope = JSONArray(raw)
+            if (envelope.length() != 1) throw IOException("Unexpected Moodle API response. Previous homework preserved.")
+            val response = envelope.getJSONObject(0)
+            if (response.optBoolean("error")) {
+                val code = response.optJSONObject("exception")?.optString("errorcode").orEmpty()
+                if (code in setOf("invalidsesskey", "requireloginerror", "servicerequireslogin")) throw LemidaSessionExpired()
+                throw IOException("Moodle API is unavailable (${code.ifBlank { "unknown" }}). Previous homework preserved.")
+            }
+            if (!response.has("data") || response.isNull("data")) throw IOException("Moodle returned no API data. Previous homework preserved.")
+            return response.get("data")
+        } catch (e: JSONException) {
+            throw IOException("Unexpected Moodle API response. Try Refresh or reconnect to Lemida.", e)
+        }
+    }
 
     fun homework(html: String, courseId: Int, courseName: String): List<Homework> {
         val doc = Jsoup.parse(html, BASE)
