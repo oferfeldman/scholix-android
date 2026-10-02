@@ -68,6 +68,12 @@ the discovered API supplies activity metadata, not all detail content.
 Updates commit only after discovery and every course succeed. Seen IDs are
 kept as a union to avoid duplicate alerts after temporary hiding. A different
 Moodle `userId` establishes a fresh notification baseline.
+Pending alerts use current titles and dates from the latest complete snapshot;
+withdrawn homework is removed from the notification queue. Delivery and acknowledgement
+share the sync/account lock, so overlapping workers cannot deliver the same queue twice
+and an old worker cannot acknowledge another account's homework. Paused updates and
+sessions awaiting sign-in retain their queued alerts. Sign-in reminder delivery rechecks
+the current session state, suppressing stale reminders after successful recovery.
 
 Unit tests cover Hebrew names, dates, activity type and origin filtering,
 baseline behavior, renames, new IDs, per-course identity, expired login pages,
@@ -80,3 +86,6 @@ holder's interactive session when the university asks for it.
 course-filter and type-filter bounds at normal and 2× font scale on a narrow screen.
 `LemidaPhoneSessionTest` requires an existing signed-in phone session and verifies
 sync, native cached detail reads, and sign-in closing only after a successful load.
+`LemidaAlertsTest` uses isolated preferences and fake notification callbacks to check
+concurrent delivery, account switching, paused/failed delivery, and stale sign-in
+reminders. These tests send no notifications and read no saved account session.

@@ -20,22 +20,20 @@ class LemidaSyncWorker(private val context: Context, params: WorkerParameters) :
     override suspend fun doWork(): Result {
         val repo = LemidaRepository(context)
         if (!repo.enabled()) return Result.success()
-        if (repo.needsLogin()) {
-            if (!repo.loginNotified() && notify(context, 73121, "Lemida needs sign-in",
-                    "Open Homework and sign in again to resume automatic updates.")) repo.markLoginNotified(true)
-            return Result.success()
-        }
         return try {
-            val items = repo.sync()
-            repo.markLoginNotified(false)
-            if (items.isNotEmpty() && notify(context, 73120, "New Lemida homework",
-                items.joinToString(" • ") { "${it.course}: ${it.title}" })) repo.clearPending(items.map { it.id }.toSet())
+            val account = if (repo.needsLogin()) null else try {
+                repo.sync()
+            } catch (_: LemidaSessionExpired) { null }
+            if (account == null) {
+                // No background MFA/CAPTCHA attempts or SMS resends; stale reminders are suppressed.
+                repo.deliverLoginReminder { notify(context, 73121, "Lemida needs sign-in",
+                    "Open Homework and sign in again to resume automatic updates.") }
+            } else {
+                repo.deliverPending(account) { items -> notify(context, 73120, "New Lemida homework",
+                    items.joinToString(" • ") { "${it.course}: ${it.title}" }) }
+            }
             Result.success()
         } catch (e: CancellationException) { throw e
-        } catch (_: LemidaSessionExpired) {
-            if (!repo.loginNotified() && notify(context, 73121, "Lemida needs sign-in",
-                    "Open Homework and sign in again to resume automatic updates.")) repo.markLoginNotified(true)
-            Result.success() // No background MFA/CAPTCHA attempts or SMS resends.
         } catch (_: Exception) { Result.retry() }
     }
     companion object {

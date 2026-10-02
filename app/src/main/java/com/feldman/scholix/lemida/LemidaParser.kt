@@ -106,4 +106,9 @@ object LemidaParser {
     // Keep the union: an activity temporarily hidden and later visible isn't new again.
     fun newItems(items: List<Homework>, seen: Set<String>?) =
         if (seen == null) emptyList() else items.filter { it.id !in seen }
+    // Refresh queued titles/dates from the complete snapshot; don't announce withdrawn activities.
+    fun pendingAlerts(items: List<Homework>, seen: Set<String>?, pending: List<Homework>): List<Homework> {
+        val current = items.associateBy { it.id }
+        return (pending + newItems(items, seen)).mapNotNull { current[it.id] }.distinctBy { it.id }
+    }
 }

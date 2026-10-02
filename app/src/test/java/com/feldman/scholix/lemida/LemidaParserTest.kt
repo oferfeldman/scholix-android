@@ -4,6 +4,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun queuedAlertsUseCurrentTitlesAndDiscardWithdrawnHomework() {
+        val old = Homework("1:assign:9", 1, "Math", "Old title", "assign", "", "")
+        val updated = old.copy(title = "Corrected title", dates = "Due Friday")
+        val withdrawn = old.copy(id = "1:assign:10", title = "Withdrawn")
+        assertEquals(listOf(updated), LemidaParser.pendingAlerts(listOf(updated), setOf(old.id, withdrawn.id), listOf(old, withdrawn)))
+    }
+    @Test fun pendingAndNewHomeworkAreAnnouncedOnlyOnce() {
+        val item = Homework("1:assign:9", 1, "Math", "Exercise", "assign", "", "")
+        assertEquals(listOf(item), LemidaParser.pendingAlerts(listOf(item), emptySet(), listOf(item)))
+        assertTrue(LemidaParser.pendingAlerts(listOf(item), null, emptyList()).isEmpty())
+    }
     @Test fun nestedInstructionContainersDoNotDuplicateParagraphs() {
         val detail = LemidaParser.detail("""<main id="region-main"><div class="activity-description">
             <div id="intro" class="generalbox"><p>Submit a PDF</p></div></div></main>""")

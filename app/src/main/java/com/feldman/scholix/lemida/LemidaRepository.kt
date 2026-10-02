@@ -16,9 +16,9 @@ import java.io.IOException
 open class LemidaSessionExpired(message: String = "Sign in to Lemida again to resume automatic updates.") : IOException(message)
 class LemidaVerificationRequired : LemidaSessionExpired("Open Sign in to Lemida and complete the browser verification.")
 
-class LemidaRepository(context: Context) {
+class LemidaRepository(context: Context, preferencesName: String = "lemida_sync") {
     val syncing get() = syncState.asStateFlow()
-    private val prefs = context.applicationContext.getSharedPreferences("lemida_sync", Context.MODE_PRIVATE)
+    private val prefs = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
     private val appContext = context.applicationContext
     fun enabled() = prefs.getBoolean("enabled", false)
     fun setEnabled(value: Boolean) { prefs.edit().putBoolean("enabled", value).apply() }
@@ -54,7 +54,8 @@ class LemidaRepository(context: Context) {
         }
     }
 
-    suspend fun sync(view: WebView? = null): List<Homework> = mutex.withLock {
+    /** Returns the account of the successfully committed snapshot, for guarded alert delivery. */
+    suspend fun sync(view: WebView? = null): String = mutex.withLock {
         syncState.value = true
         try {
             withContext(Dispatchers.IO) {
@@ -111,9 +112,8 @@ class LemidaRepository(context: Context) {
                         }
                     }
                     val seen = if (sameAccount) prefs.getStringSet("seen", null)?.toSet() else null
-                    val newItems = LemidaParser.newItems(items, seen)
                     val pending = if (sameAccount) LemidaParser.decode(prefs.getString("pending", "[]") ?: "[]") else emptyList()
-                    val alerts = (pending + newItems).distinctBy { it.id }
+                    val alerts = LemidaParser.pendingAlerts(items, seen, pending)
                     // Commit only after every course succeeded. Never turn an error into an empty baseline.
                     check(prefs.edit().putString("homework", LemidaParser.encode(items)).putString("user_id", user)
                         .putStringSet("seen", seen.orEmpty() + items.map { it.id })
@@ -122,7 +122,7 @@ class LemidaRepository(context: Context) {
                         .putBoolean("login_notified", false)
                         .putString("status", "${courses.size} courses • ${items.size} homework items • automatic sync every 30 minutes")
                         .commit()) { "Could not save homework." }
-                    alerts
+                    user
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: LemidaSessionExpired) {
@@ -141,14 +141,23 @@ class LemidaRepository(context: Context) {
         } finally { syncState.value = false }
     }
     fun needsLogin() = prefs.getBoolean("needs_login", false)
-    suspend fun clearPending(notifiedIds: Set<String>) = mutex.withLock {
+    suspend fun deliverPending(account: String, deliver: (List<Homework>) -> Boolean) = mutex.withLock {
         withContext(Dispatchers.IO) {
+            if (!enabled() || needsLogin() || prefs.getString("user_id", null) != account) return@withContext
             val pending = LemidaParser.decode(prefs.getString("pending", "[]") ?: "[]")
-            prefs.edit().putString("pending", LemidaParser.encode(pending.filter { it.id !in notifiedIds })).commit()
+            // Read, deliver, and acknowledge under the same lock as sync/account changes.
+            if (pending.isNotEmpty() && deliver(pending)) {
+                check(prefs.edit().putString("pending", "[]").commit()) { "Could not acknowledge homework alerts." }
+            }
         }
     }
-    fun loginNotified() = prefs.getBoolean("login_notified", false)
-    fun markLoginNotified(value: Boolean) { prefs.edit().putBoolean("login_notified", value).commit() }
+    suspend fun deliverLoginReminder(deliver: () -> Boolean) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            if (enabled() && needsLogin() && !prefs.getBoolean("login_notified", false) && deliver()) {
+                check(prefs.edit().putBoolean("login_notified", true).commit()) { "Could not acknowledge sign-in reminder." }
+            }
+        }
+    }
 
     companion object {
         private val mutex = Mutex()
