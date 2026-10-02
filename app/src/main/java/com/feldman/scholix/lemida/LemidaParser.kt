@@ -4,6 +4,9 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
+import java.net.URI
+import java.net.URLDecoder
 
 data class Homework(val id: String, val courseId: Int, val course: String,
                     val title: String, val type: String, val url: String, val dates: String) {
@@ -56,11 +59,9 @@ object LemidaParser {
         check(doc.body().id().startsWith("page-course-view")) { "Unexpected course page" }
         return doc.select(".activity").mapNotNull { item ->
             val a = item.selectFirst(".activityname a[href], a[href*=/mod/]") ?: return@mapNotNull null
-            val url = a.absUrl("href")
-            val match = Regex("^https://lemida\\.biu\\.ac\\.il/mod/(assign|quiz|workshop)/view\\.php\\?id=(\\d+)").find(url)
+            val url = runCatching { URI(BASE).resolve(a.attr("href")).toString() }.getOrNull()
                 ?: return@mapNotNull null
-            val type = match.groupValues[1]
-            val id = match.groupValues[2]
+            val (type, id) = activityIdentity(url) ?: return@mapNotNull null
             val title = item.selectFirst("[data-activityname]")?.attr("data-activityname")
                 ?.takeIf { it.isNotBlank() } ?: a.text()
             val dates = item.select("[data-region=activity-dates], .activity-dates").text()
@@ -74,14 +75,27 @@ object LemidaParser {
             val module = modules.getJSONObject(index)
             if (!module.optBoolean("uservisible", true) || !module.optBoolean("accessvisible", true)) return@mapNotNull null
             val url = module.optString("url")
-            val match = Regex("^https://lemida\\.biu\\.ac\\.il/mod/(assign|quiz|workshop)/view\\.php\\?id=(\\d+)")
-                .find(url) ?: return@mapNotNull null
-            val type = match.groupValues[1]
-            val id = match.groupValues[2]
+            val (type, id) = activityIdentity(url) ?: return@mapNotNull null
             Homework("$courseId:$type:$id", courseId, courseName,
                 Jsoup.parse(module.getString("name")).text(), type, url.substringBefore('#'), "")
         }.distinctBy { it.id }
     }
+
+    /** Parse the endpoint and complete ID parameter, regardless of query ordering. */
+    private fun activityIdentity(url: String): Pair<String, String>? = runCatching {
+        val uri = URI(url)
+        if (uri.scheme != "https" || !uri.host.equals("lemida.biu.ac.il", ignoreCase = true) ||
+            uri.port !in setOf(-1, 443) || uri.userInfo != null) return null
+        val type = Regex("^/mod/(assign|quiz|workshop)/view\\.php$")
+            .matchEntire(uri.path.orEmpty())?.groupValues?.get(1) ?: return null
+        val ids = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
+            val key = URLDecoder.decode(part.substringBefore('='), "UTF-8")
+            if (key == "id") URLDecoder.decode(part.substringAfter('=', ""), "UTF-8") else null
+        }
+        val id = ids.singleOrNull() ?: return null
+        if (!Regex("[0-9]+").matches(id) || (id.toLongOrNull() ?: 0) <= 0) return null
+        type to id
+    }.getOrNull()
 
     fun decode(raw: String): List<Homework> {
         val array = JSONArray(raw)
@@ -90,6 +104,9 @@ object LemidaParser {
     fun detail(html: String): HomeworkDetail {
         val doc = Jsoup.parse(html)
         val main = doc.selectFirst("#region-main") ?: throw IllegalStateException("Homework page content is missing")
+        if (doc.body().id() == "page-error" || main.selectFirst(".errorbox") != null) {
+            throw IOException("Lemida could not open this homework. Try refreshing the homework list.")
+        }
         main.select("script, style, noscript, form, button, nav").remove()
         val tables = main.select("table").map { table -> table.select("tr").map { row ->
             row.select("th, td").map { it.text() }

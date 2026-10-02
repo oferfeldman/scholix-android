@@ -4,6 +4,51 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun activityQueryOrderingAndFragmentsDoNotChangeIdentity() {
+        val url = "https://lemida.biu.ac.il/mod/assign/view.php?forceview=1&id=900#submission"
+        val html = page().replace("https://lemida.biu.ac.il/mod/assign/view.php?id=900", url.replace("&", "&amp;"))
+        val fromHtml = LemidaParser.homework(html, 123, "Math").single()
+        val state = """{"cm":[{"name":"Exercise","url":"$url"}]}"""
+        val fromApi = LemidaParser.stateHomework(state, 123, "Math").single()
+        assertEquals("123:assign:900", fromHtml.id)
+        assertEquals(fromHtml.id, fromApi.id)
+        assertEquals(url.substringBefore('#'), fromApi.url)
+    }
+    @Test fun malformedOrAmbiguousActivityLinksAreIgnored() {
+        val invalid = listOf(
+            "https://lemida.biu.ac.il/mod/assign/view.php?id=900junk",
+            "https://lemida.biu.ac.il/mod/assign/view.php?id=900&id=901",
+            "https://lemida.biu.ac.il/mod/assign/view.php?id=0",
+            "https://lemida.biu.ac.il/mod/assign/view.php?id=-1",
+            "https://lemida.biu.ac.il/mod/assign/view.php?id=%ZZ",
+            "https://lemida.biu.ac.il/mod/assign/view.php.extra?id=900",
+            "https://lemida.biu.ac.il:444/mod/assign/view.php?id=900",
+            "https://user@lemida.biu.ac.il/mod/assign/view.php?id=900",
+            "http://lemida.biu.ac.il/mod/assign/view.php?id=900",
+            "https://lemida.biu.ac.il.example/mod/assign/view.php?id=900",
+        )
+        invalid.forEach { url ->
+            val state = """{"cm":[{"name":"Exercise","url":"$url"}]}"""
+            assertTrue(url, LemidaParser.stateHomework(state, 123, "Math").isEmpty())
+            val html = page().replace("https://lemida.biu.ac.il/mod/assign/view.php?id=900", url.replace("&", "&amp;"))
+            assertTrue(url, LemidaParser.homework(html, 123, "Math").isEmpty())
+        }
+    }
+    @Test fun authenticatedErrorPagesCannotBecomeCachedInstructions() {
+        val html = """<body><a href="/login/logout.php">Logout</a><main id="region-main">
+            <div class="errorbox">Activity unavailable</div></main></body>"""
+        assertTrue(LemidaParser.authenticated(html))
+        assertThrows(java.io.IOException::class.java) { LemidaParser.detail(html) }
+        assertThrows(java.io.IOException::class.java) {
+            LemidaParser.detail("""<body id="page-error"><main id="region-main">Error</main></body>""")
+        }
+    }
+    @Test fun ordinaryHomeworkWarningsRemainReadable() {
+        val detail = LemidaParser.detail("""<main id="region-main"><div id="intro">Submit a PDF</div>
+            <div class="alert alert-danger">Submission is overdue</div></main>""")
+        assertEquals("Submit a PDF", detail.description)
+        assertTrue(detail.text.contains("Submission is overdue"))
+    }
     @Test fun combinedSearchMatchesWordsAcrossCourseAndTitleInAnyOrder() {
         val item = Homework("1:assign:9", 1, "Linear Algebra", "Exercise 10 — וקטורים", "assign", "", "")
         assertTrue(item.matchesSearch("  ALGEBRA  exercise ", "וקטורים 10"))

@@ -85,6 +85,10 @@ on this deployment returned `servicenotavailable` for `core_course_get_contents`
 `mod_assign_get_assignments`, and `mod_quiz_get_quizzes_by_courses`.
 Homework instructions and submission/grading tables still come from HTML pages:
 the discovered API supplies activity metadata, not all detail content.
+Activity URLs are parsed by endpoint and complete ID parameter, allowing reordered
+query parameters while rejecting ambiguous IDs and other origins. Moodle error
+pages fail detail loading instead of overwriting previously cached instructions;
+ordinary homework warnings (such as overdue submission) remain readable.
 Updates commit only after discovery and every course succeed. Seen IDs are
 kept as a union to avoid duplicate alerts after temporary hiding. A different
 Moodle `userId` establishes a fresh notification baseline.

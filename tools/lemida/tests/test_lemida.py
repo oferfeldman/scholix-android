@@ -6,6 +6,23 @@ import lemida
 
 
 class RedirectHandling(unittest.TestCase):
+    def test_overdue_warning_is_not_a_failed_fetch(self):
+        client = lemida.Client.__new__(lemida.Client)
+        client.page = Mock()
+        client.page.goto.return_value.status = 200
+        client.page.content.return_value = '<main><div class="alert-danger">Submission overdue</div></main>'
+        client.authenticated = Mock(return_value=True)
+        self.assertIn('Submission overdue', client.fetch(lemida.BASE + '/mod/assign/view.php?id=9'))
+
+    def test_authenticated_error_page_is_a_failed_fetch(self):
+        client = lemida.Client.__new__(lemida.Client)
+        client.page = Mock()
+        client.page.goto.return_value.status = 200
+        client.page.content.return_value = '<main><div class="errorbox">Activity unavailable</div></main>'
+        client.authenticated = Mock(return_value=True)
+        with self.assertRaises(RuntimeError):
+            client.fetch(lemida.BASE + '/mod/assign/view.php?id=9')
+
     def test_ajax_expired_session_is_not_an_empty_success(self):
         client = lemida.Client.__new__(lemida.Client)
         client.page = Mock()
@@ -51,6 +68,18 @@ class RedirectHandling(unittest.TestCase):
 
 
 class SavedPages(unittest.TestCase):
+    def test_error_pages_are_not_successful_details(self):
+        for html in ('<main><div class="errorbox">Missing activity</div></main>',
+                     '<body id="page-error"><main>Unavailable</main></body>'):
+            with self.subTest(html=html), self.assertRaises(RuntimeError):
+                lemida.parse_detail(html)
+
+    def test_activity_ids_require_one_complete_positive_parameter(self):
+        self.assertEqual(lemida.number('/mod/assign/view.php?forceview=1&id=9#intro'), 9)
+        for query in ('id=9junk', 'id=9&id=10', 'id=9&id=', 'id=0', 'id=-1', 'id=%ZZ'):
+            with self.subTest(query=query):
+                self.assertIsNone(lemida.number('/mod/assign/view.php?' + query))
+
     def test_supplied_course_activity_counts_and_links(self):
         if not list(lemida.ROOT.glob("*.html")):
             self.skipTest("Private saved course HTML is intentionally excluded from Git")

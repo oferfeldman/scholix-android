@@ -36,8 +36,11 @@ def site_url(href, base=BASE):
 
 
 def number(url, key='id'):
-    value = parse_qs(urlparse(url).query).get(key, [''])[0]
-    return int(value) if value.isdigit() else None
+    values = parse_qs(urlparse(url).query, keep_blank_values=True).get(key, [])
+    if len(values) != 1 or not re.fullmatch(r'[0-9]+', values[0]):
+        return None
+    value = int(values[0])
+    return value if value > 0 else None
 
 
 def courses(html):
@@ -102,8 +105,15 @@ def parse_course(html, url=None):
             'files': files(s.select_one('#region-main') or s)}
 
 
+def reject_error_page(document):
+    main = document.select_one('#region-main') or document.select_one('main') or document
+    if (document.body and document.body.get('id') == 'page-error') or main.select_one('.errorbox'):
+        raise RuntimeError('Moodle returned an error page; check access in the browser.')
+
+
 def parse_detail(html):
     s = soup(html)
+    reject_error_page(s)
     main = s.select_one('#region-main') or s.select_one('main') or s
     for node in main.select('script, style, noscript'):
         node.decompose()
@@ -260,8 +270,7 @@ class Client:
             raise RuntimeError(f'Page returned HTTP {response.status}')
         html = self.page.content()
         s = soup(html)
-        if s.select_one('.alert-danger, .errorbox'):
-            raise RuntimeError('Moodle returned an error page; check access in the browser.')
+        reject_error_page(s)
         return html
 
     def ajax(self, method, arguments):
