@@ -11,6 +11,12 @@ The picker is first inspected without clicking. Native request flags are recorde
 before clicking a discovered method, so a page navigation cannot turn a lost
 JavaScript callback into a repeated automatic SMS request. A changed/detached
 picker leaves manual method selection available.
+Seeing an existing code-entry screen also locks further automatic method requests.
+Challenge timing is kept in memory: repeated probes cannot extend the three-minute
+window, early codes can wait for the input, and a code is consumed at most once.
+The sign-in Activity preserves its WebView and challenge during orientation/size
+changes instead of starting another login. A stalled SMS consent startup stops
+blocking method selection after five seconds; manual entry remains available.
 Ordinary builds start Android's SMS User Consent listener before selecting SMS.
 When Android offers the verification message, accepting the single-message consent
 fills and submits the code. Denied consent, unavailable Play services, and messages
@@ -63,6 +69,8 @@ browser session. Lemida's Perfdrive anti-bot verification rejects native HTTP
 replays even with the same cookies, so OkHttp is not used for Lemida reads.
 The sign-in window loads homework through its own browser before closing; a
 failure remains visible instead of returning silently to an empty page.
+Encrypted-session saves run inside the same recovery flow on an IO dispatcher,
+so a storage/Keystore error offers Retry rather than escaping the browser callback.
 Course discovery uses Moodle's session-authenticated
 `core_course_get_enrolled_courses_by_timeline_classification` AJAX method with
 `allincludinghidden` and offset pagination. Activity discovery uses the working

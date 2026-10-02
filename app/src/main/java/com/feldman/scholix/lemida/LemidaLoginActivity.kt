@@ -33,28 +33,24 @@ class LemidaLoginActivity : ComponentActivity() {
     private var syncing = false
     private val loginScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
-    private var alternativeClicked = false
-    private var smsSelected = false
-    private var challengeStarted = 0L
-    private var pendingCode: String? = null
-    private var codeSubmitted = false
+    private val mfa = LemidaMfaState()
     private lateinit var status: TextView
     private lateinit var retry: Button
     private var receiverRegistered = false
     private var consentRegistered = false
     private var smsReady = false
     private var consentLaunched = false
-    private fun currentChallenge() = challengeStarted != 0L &&
-        SystemClock.elapsedRealtime() - challengeStarted <= 180_000 && !codeSubmitted
+    private fun currentChallenge() = mfa.active(SystemClock.elapsedRealtime())
     private val consentLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (currentChallenge() && result.resultCode == RESULT_OK) {
-            pendingCode = LemidaSms.code(result.data?.getStringExtra(SmsRetriever.EXTRA_SMS_MESSAGE).orEmpty(), "")
+            mfa.acceptCode(result.data?.getStringExtra(SmsRetriever.EXTRA_SMS_MESSAGE).orEmpty(), "", SystemClock.elapsedRealtime())
         }
-        if (pendingCode == null && !isFinishing) status.text = "Enter the Microsoft verification code in the browser to continue."
+        if (!mfa.hasPending && !mfa.submitted && !syncing && !isFinishing)
+            status.text = "Enter the Microsoft verification code in the browser to continue."
     }
     private val consentReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action != SmsRetriever.SMS_RETRIEVED_ACTION || !currentChallenge() || consentLaunched || pendingCode != null) return
+            if (intent.action != SmsRetriever.SMS_RETRIEVED_ACTION || !currentChallenge() || consentLaunched || mfa.hasPending) return
             val result = intent.extras?.get(SmsRetriever.EXTRA_STATUS) as? Status ?: return
             if (result.statusCode == CommonStatusCodes.SUCCESS) {
                 val consent = intent.extras?.getParcelable<Intent>(SmsRetriever.EXTRA_CONSENT_INTENT) ?: return
@@ -70,38 +66,33 @@ class LemidaLoginActivity : ComponentActivity() {
             if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION ||
                 !currentChallenge()) return
             val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
-            val code = LemidaSms.code(messages.joinToString("") { it.messageBody.orEmpty() },
-                messages.firstOrNull()?.displayOriginatingAddress.orEmpty()) ?: return
-            pendingCode = code
+            mfa.acceptCode(messages.joinToString("") { it.messageBody.orEmpty() },
+                messages.firstOrNull()?.displayOriginatingAddress.orEmpty(), SystemClock.elapsedRealtime())
         }
     }
     private val poll = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
             if (!smsReady) { handler.postDelayed(this, 250); return }
-            browser.evaluateJavascript(LemidaSms.selectScript(alternativeClicked, smsSelected)) { raw ->
+            browser.evaluateJavascript(LemidaSms.selectScript(mfa.alternativeClicked, mfa.smsSelected)) { raw ->
                 if (isFinishing || isDestroyed) return@evaluateJavascript
                 when (runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()) {
                     "alternative" -> {
-                        alternativeClicked = true
-                        browser.evaluateJavascript(LemidaSms.chooseScript("alternative"), null)
+                        if (mfa.prepareAlternative()) browser.evaluateJavascript(LemidaSms.chooseScript("alternative"), null)
                     }
                     "sms" -> {
-                        smsSelected = true
-                        challengeStarted = SystemClock.elapsedRealtime()
-                        status.text = "SMS requested. Waiting for the Microsoft verification code…"
-                        browser.evaluateJavascript(LemidaSms.chooseScript("sms")) { result ->
-                            if (result == "false" && !isFinishing && !isDestroyed)
-                                status.text = "The verification page changed. Select SMS in the browser to continue."
+                        if (mfa.prepareSms(SystemClock.elapsedRealtime())) {
+                            status.text = "SMS requested. Waiting for the Microsoft verification code…"
+                            browser.evaluateJavascript(LemidaSms.chooseScript("sms")) { result ->
+                                if (result == "false" && !isFinishing && !isDestroyed)
+                                    status.text = "The verification page changed. Select SMS in the browser to continue."
+                            }
                         }
                     }
                     "otp" -> {
-                        if (challengeStarted == 0L) challengeStarted = SystemClock.elapsedRealtime()
-                        if (!currentChallenge()) pendingCode = null
-                        val code = pendingCode
-                        if (code != null && !codeSubmitted) {
-                            codeSubmitted = true // Submit once. Rejected codes remain editable in the browser.
-                            pendingCode = null
+                        mfa.observeOtp(SystemClock.elapsedRealtime())
+                        val code = mfa.consumeCode(SystemClock.elapsedRealtime())
+                        if (code != null) {
                             browser.evaluateJavascript(LemidaSms.submitScript(code)) { result ->
                                 if (isFinishing || isDestroyed) return@evaluateJavascript
                                 if (result == "true") status.text = "Microsoft SMS code submitted. Completing sign-in…"
@@ -148,26 +139,28 @@ class LemidaLoginActivity : ComponentActivity() {
         LemidaRepository(this).setUserAgent(browser.settings.userAgentString)
         browser.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
-                if (android.net.Uri.parse(url).host != "lemida.biu.ac.il" || checking || syncing) return
+                if (isFinishing || isDestroyed || android.net.Uri.parse(url).host != "lemida.biu.ac.il" || checking || syncing) return
                 checking = true
                 view.evaluateJavascript("""(() => location.origin === '${LemidaParser.BASE}'
                     && !document.body.classList.contains('notloggedin')
                     && Number(window.M?.cfg?.userId) > 1
                     && !!document.querySelector('a[href*="/login/logout.php"]'))()""") { value ->
+                    if (isFinishing || isDestroyed) return@evaluateJavascript
                     checking = false
                     if (value == "true" && !isFinishing) {
                         CookieManager.getInstance().flush()
                         val cookie = CookieManager.getInstance().getCookie("${LemidaParser.BASE}/my/")
                         if (cookie.isNullOrBlank()) {
                             status.text = "Sign-in returned without a Moodle session. Please retry."
+                            retry.visibility = android.view.View.VISIBLE
                             return@evaluateJavascript
                         }
-                        LemidaCookieStore(this@LemidaLoginActivity).save(cookie)
                         syncing = true
                         retry.visibility = android.view.View.GONE
                         status.text = "Signed in. Loading your homework before closing…"
                         loginScope.launch {
                             try {
+                                withContext(Dispatchers.IO) { LemidaCookieStore(this@LemidaLoginActivity).save(cookie) }
                                 val repo = LemidaRepository(this@LemidaLoginActivity)
                                 repo.sync(browser)
                                 repo.setEnabled(true)
@@ -209,6 +202,8 @@ class LemidaLoginActivity : ComponentActivity() {
             runCatching {
                 SmsRetriever.getClient(this).startSmsUserConsent(null).addOnCompleteListener { smsReady = true }
             }.onFailure { smsReady = true }
+            // An unavailable/stalled Play services task must not block method selection forever.
+            handler.postDelayed({ smsReady = true }, 5_000)
         }
         browser.loadUrl("${LemidaParser.BASE}/my/")
         handler.postDelayed(poll, 750)
@@ -218,7 +213,7 @@ class LemidaLoginActivity : ComponentActivity() {
         loginScope.cancel()
         if (receiverRegistered) unregisterReceiver(smsReceiver)
         if (consentRegistered) unregisterReceiver(consentReceiver)
-        pendingCode = null
+        mfa.discardCode()
         browser.stopLoading()
         browser.destroy()
         super.onDestroy()
