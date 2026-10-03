@@ -34,6 +34,7 @@ class LemidaLoginActivity : ComponentActivity() {
     private lateinit var browser: WebView
     private val signInProbe = LemidaLoginProbe()
     private var syncing = false
+    private val reconnectPaths = mutableSetOf<String>()
     private val loginScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
     private val mfa = LemidaMfaState()
@@ -194,6 +195,16 @@ class LemidaLoginActivity : ComponentActivity() {
                 view.evaluateJavascript(LemidaRequestScript.signedIn(url)) { value ->
                     if (isFinishing || isDestroyed || !signInProbe.complete(request)) return@evaluateJavascript
                     if (view.url != url || syncing) return@evaluateJavascript
+                    if (value != "true" && reconnectPaths.size < 2) {
+                        view.evaluateJavascript(LemidaRequestScript.document(url)) entry@{ raw ->
+                            if (isFinishing || isDestroyed || syncing || reconnectPaths.size >= 2 || view.url != url ||
+                                view.webViewClient !== this) return@entry
+                            val html = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull() ?: return@entry
+                            val entry = LemidaParser.reconnectUrl(html) ?: return@entry
+                            if (!reconnectPaths.add(android.net.Uri.parse(entry).path.orEmpty())) return@entry
+                            view.loadUrl(entry)
+                        }
+                    }
                     if (value == "true" && !isFinishing) {
                         CookieManager.getInstance().flush()
                         val cookie = CookieManager.getInstance().getCookie("${LemidaParser.BASE}/my/")

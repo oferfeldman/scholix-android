@@ -64,12 +64,37 @@ of their order, and combines the homework field with Scholix's app search. The f
 has a clear button. Course filters are reset when the selected course no longer has
 homework in the complete snapshot. The selected detail survives screen recreation;
 failed detail reads keep cached content visible and offer **Retry loading homework**.
-If Microsoft/Moodle expires the session, the app retains the cache and sends
-one sign-in reminder, then waits for interactive sign-in. No SMS resend,
-password replay, or CAPTCHA bypass occurs in the background.
+Before requiring interactive sign-in, a homepage read follows the observed
+university login page and Microsoft provider entry once each, allowing an existing
+Microsoft session to redirect back to Lemida automatically. A session rejected
+partway through AJAX discovery restarts the entire snapshot once with a fresh
+session key. Expired homework-detail reads also get one dashboard reconnect and
+retry; they verify the saved account before caching any content. Detail recovery
+does not advance the full homework sync timestamp.
+Visible Microsoft input/choice controls require interactive login. The attempt is
+bounded and does not click MFA controls in the background. If recovery cannot
+complete, the app retains the cache, sends one sign-in reminder and waits for
+interactive sign-in. No SMS resend, password replay or CAPTCHA bypass occurs in
+the background. The visible sign-in window also follows the university entries
+once each. Invalid/external or ambiguous provider links are ignored, and stale
+callbacks cannot navigate another document.
+`LemidaRealExpiryTest` requires the explicit `allow_real_lemida_expiry=true` runner
+argument. It calls the actual Moodle logout endpoint without following a separate
+Microsoft logout redirect, verifies that authenticated AJAX is rejected, and then
+checks automatic detail loading and a complete homework sync using the retained
+Microsoft session. This real test passed on the connected phone on 2026-10-03,
+recovering the same account and all 19 homework items without user input or SMS.
+It invalidates the real Moodle session and must run only with the account holder's
+authorization. It does not demonstrate unattended recovery after Microsoft itself
+requires a new verification or CAPTCHA. The separate
+`resumeAutomaticUpdatesForConnectedSession` check requires
+`resume_real_lemida_sync=true`; it validates the current session, enables automatic
+updates and verifies a pending periodic worker. This also passed on the phone;
+notifications were allowed and automatic updates were enabled at completion.
 `LemidaExpiryTest` exercises logged-out pages, rejected session keys, Microsoft
 redirects, successful recovery and ordinary network errors using synthetic browser
-responses and separate preferences. Its native screen check verifies that sign-in
+responses and separate preferences. Its seven device tests also check full-snapshot
+restart after mid-sync expiry, detail retry and rejection of another account's detail. Its native screen check verifies that sign-in
 returns while cached homework remains visible. These tests do not expire the real
 account, read cookies, contact Microsoft/Moodle or send a verification SMS.
 
@@ -157,10 +182,14 @@ concurrent delivery, account switching, paused/failed delivery, and stale sign-i
 reminders. These tests send no notifications and read no saved account session.
 Homework notification taps reuse MainActivity when present and navigate to a fresh
 homework list, clearing prior local filters and detail selection. Other navigation
-stacks remain available. Warm notification routing still needs device verification.
+stacks remain available. A warm `open_homework` intent was verified on the phone;
+an actual notification tap and recreation still need device verification.
 `LemidaBrowserLifecycleTest` uses controlled, non-network WebView loads to check
-page cancellation before reuse and idempotent client cleanup. It does not prepare
-cookies or read the saved session; device execution remains pending.
+page cancellation before reuse, idempotent client cleanup, passive university/SSO
+navigation, interactive Microsoft detection and stale snapshot rejection. Its six
+tests passed on the connected phone. It does not prepare cookies or read the saved
+session. Together with seven expiry, two layout and four alert tests, all 19 offline
+device regressions passed on 2026-10-03.
 `tools/lemida/verify_browser_requests.py` exercises the Android request scripts
 in Chromium with intercepted traffic, including late completion after cancellation,
 network failure, page navigation and HTTPS origin checks; no live account is used.

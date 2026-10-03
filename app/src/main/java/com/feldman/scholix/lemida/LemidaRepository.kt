@@ -38,17 +38,29 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
             val browser = withContext(Dispatchers.Main) { browserFactory(appContext, prefs.getString("user_agent", null), null) }
             try {
                 browser.prepare()
-                val html = browser.get(item.url)
-                if (!LemidaParser.authenticated(html)) throw LemidaSessionExpired()
-                check(LemidaParser.config(html, "userId") == prefs.getString("user_id", null)) {
-                    "The signed-in account changed. Refresh your homework list first."
+                fun requireAccount(html: String) {
+                    if (!LemidaParser.authenticated(html)) throw LemidaSessionExpired()
+                    check(LemidaParser.config(html, "userId") == prefs.getString("user_id", null)) {
+                        "The signed-in account changed. Refresh your homework list first."
+                    }
+                }
+                val html = try {
+                    browser.get(item.url).also(::requireAccount)
+                } catch (error: LemidaSessionExpired) {
+                    if (error is LemidaVerificationRequired) throw error
+                    // Only the dashboard follows the observed university SSO entry.
+                    requireAccount(browser.get("${LemidaParser.BASE}/my/"))
+                    browser.get(item.url).also(::requireAccount)
                 }
                 val result = LemidaParser.detail(html)
                 val items = cached().map { cached ->
                     if (cached.id == item.id && result.dates.isNotBlank()) cached.copy(dates = result.dates) else cached
                 }
-                prefs.edit().putString(detailKey(item), result.json().toString())
-                    .putString("homework", LemidaParser.encode(items)).commit()
+                val editor = prefs.edit().putString(detailKey(item), result.json().toString())
+                    .putString("homework", LemidaParser.encode(items))
+                    .putBoolean("needs_login", false).putBoolean("login_notified", false)
+                if (needsLogin()) editor.putString("status", "Connected to Lemida. Refresh to update all homework.")
+                check(editor.commit()) { "Could not save homework details." }
                 result
             } catch (e: LemidaSessionExpired) {
                 prefs.edit().putBoolean("needs_login", true).putString("status", e.message).commit()
@@ -65,57 +77,69 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                 val browser = withContext(Dispatchers.Main) { browserFactory(appContext, prefs.getString("user_agent", null), view) }
                 try {
                     browser.prepare()
-                    val homepage = browser.get("${LemidaParser.BASE}/my/")
-                    if (!LemidaParser.authenticated(homepage)) throw LemidaSessionExpired()
-                    val user = LemidaParser.config(homepage, "userId")
-                        ?: throw IOException("Could not identify the signed-in Lemida account.")
-                    val key = LemidaParser.config(homepage, "sesskey")
-                        ?: throw IOException("Could not discover the Moodle session key.")
-                    val courses = linkedMapOf<Int, String>()
-                    var offset = 0
-                    var complete = false
-                    for (page in 0 until 100) {
-                        val payload = JSONArray().put(JSONObject().put("index", 0)
-                            .put("methodname", "core_course_get_enrolled_courses_by_timeline_classification")
-                            .put("args", JSONObject().put("classification", "allincludinghidden")
-                                .put("limit", 50).put("offset", offset).put("sort", "fullname")))
-                        val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
-                        val data = LemidaParser.ajaxData(raw) as? JSONObject
-                            ?: throw IOException("Unexpected Moodle course data. Previous homework preserved.")
-                        val next = LemidaParser.nextCourseOffset(data, offset)
-                        val batch = data.getJSONArray("courses")
-                        for (i in 0 until batch.length()) {
-                            val c = batch.getJSONObject(i)
-                            courses[c.getInt("id")] = org.jsoup.Jsoup.parse(c.getString("fullname")).text()
+                    var authenticatedPageRead = false
+                    suspend fun readSnapshot(): String {
+                        val homepage = browser.get("${LemidaParser.BASE}/my/")
+                        if (!LemidaParser.authenticated(homepage)) throw LemidaSessionExpired()
+                        authenticatedPageRead = true
+                        val user = LemidaParser.config(homepage, "userId")
+                            ?: throw IOException("Could not identify the signed-in Lemida account.")
+                        val key = LemidaParser.config(homepage, "sesskey")
+                            ?: throw IOException("Could not discover the Moodle session key.")
+                        val courses = linkedMapOf<Int, String>()
+                        var offset = 0
+                        var complete = false
+                        for (page in 0 until 100) {
+                            val payload = JSONArray().put(JSONObject().put("index", 0)
+                                .put("methodname", "core_course_get_enrolled_courses_by_timeline_classification")
+                                .put("args", JSONObject().put("classification", "allincludinghidden")
+                                    .put("limit", 50).put("offset", offset).put("sort", "fullname")))
+                            val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
+                            val data = LemidaParser.ajaxData(raw) as? JSONObject
+                                ?: throw IOException("Unexpected Moodle course data. Previous homework preserved.")
+                            val next = LemidaParser.nextCourseOffset(data, offset)
+                            val batch = data.getJSONArray("courses")
+                            for (i in 0 until batch.length()) {
+                                val c = batch.getJSONObject(i)
+                                courses[c.getInt("id")] = org.jsoup.Jsoup.parse(c.getString("fullname")).text()
+                            }
+                            if (next == offset) { complete = true; break }
+                            offset = next
                         }
-                        if (next == offset) { complete = true; break }
-                        offset = next
-                    }
-                    if (!complete) throw IOException("Course pagination did not finish; previous data preserved.")
-                    val sameAccount = prefs.getString("user_id", null) == user
-                    val previous = if (sameAccount) cached().associateBy { it.id } else emptyMap()
-                    val items = courses.flatMap { (id, name) ->
-                        val payload = JSONArray().put(JSONObject().put("index", 0)
-                            .put("methodname", "core_courseformat_get_state").put("args", JSONObject().put("courseid", id)))
-                        val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
-                        val state = LemidaParser.ajaxData(raw) as? String
-                            ?: throw IOException("Unexpected Moodle activity data. Previous homework preserved.")
-                        LemidaParser.stateHomework(state, id, name).map { item ->
-                            item.copy(dates = previous[item.id]?.dates.orEmpty())
+                        if (!complete) throw IOException("Course pagination did not finish; previous data preserved.")
+                        val sameAccount = prefs.getString("user_id", null) == user
+                        val previous = if (sameAccount) cached().associateBy { it.id } else emptyMap()
+                        val items = courses.flatMap { (id, name) ->
+                            val payload = JSONArray().put(JSONObject().put("index", 0)
+                                .put("methodname", "core_courseformat_get_state").put("args", JSONObject().put("courseid", id)))
+                            val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
+                            val state = LemidaParser.ajaxData(raw) as? String
+                                ?: throw IOException("Unexpected Moodle activity data. Previous homework preserved.")
+                            LemidaParser.stateHomework(state, id, name).map { item ->
+                                item.copy(dates = previous[item.id]?.dates.orEmpty())
+                            }
                         }
+                        val seen = if (sameAccount) prefs.getStringSet("seen", null)?.toSet() else null
+                        val pending = if (sameAccount) LemidaParser.decode(prefs.getString("pending", "[]") ?: "[]") else emptyList()
+                        val alerts = LemidaParser.pendingAlerts(items, seen, pending)
+                        // Commit only after every course succeeded. Never turn an error into an empty baseline.
+                        check(prefs.edit().putString("homework", LemidaParser.encode(items)).putString("user_id", user)
+                            .putStringSet("seen", seen.orEmpty() + items.map { it.id })
+                            .putString("pending", LemidaParser.encode(alerts))
+                            .putLong("last_sync", System.currentTimeMillis()).putBoolean("needs_login", false)
+                            .putBoolean("login_notified", false)
+                            .putString("status", "${courses.size} courses • ${items.size} homework items • automatic sync every 30 minutes")
+                            .commit()) { "Could not save homework." }
+                        return user
                     }
-                    val seen = if (sameAccount) prefs.getStringSet("seen", null)?.toSet() else null
-                    val pending = if (sameAccount) LemidaParser.decode(prefs.getString("pending", "[]") ?: "[]") else emptyList()
-                    val alerts = LemidaParser.pendingAlerts(items, seen, pending)
-                    // Commit only after every course succeeded. Never turn an error into an empty baseline.
-                    check(prefs.edit().putString("homework", LemidaParser.encode(items)).putString("user_id", user)
-                        .putStringSet("seen", seen.orEmpty() + items.map { it.id })
-                        .putString("pending", LemidaParser.encode(alerts))
-                        .putLong("last_sync", System.currentTimeMillis()).putBoolean("needs_login", false)
-                        .putBoolean("login_notified", false)
-                        .putString("status", "${courses.size} courses • ${items.size} homework items • automatic sync every 30 minutes")
-                        .commit()) { "Could not save homework." }
-                    user
+                    try {
+                        readSnapshot()
+                    } catch (error: LemidaSessionExpired) {
+                        if (!authenticatedPageRead || error is LemidaVerificationRequired) throw error
+                        // A session can expire after the dashboard and before an AJAX response.
+                        // Restart the entire snapshot once with a freshly discovered session key.
+                        readSnapshot()
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: LemidaSessionExpired) {

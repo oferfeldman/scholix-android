@@ -4,6 +4,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun reconnectUsesOnlyOneObservedUniversityLoginEntry() {
+        val link = "/auth/multioauth/login.php?providerid=1"
+        assertEquals(LemidaParser.BASE + link, LemidaParser.reconnectUrl("<a href='$link'>Sign in</a><a href='$link'>Again</a>"))
+        assertNull(LemidaParser.reconnectUrl("<a href='$link'>First</a><a href='/auth/multioauth/login.php?providerid=2'>Second</a>"))
+    }
+    @Test fun reconnectFollowsTheObservedPortalAndPrefersAnUnambiguousMicrosoftProvider() {
+        val portal = "<a href='/login/index.php'>Sign in</a>"
+        assertEquals("${LemidaParser.BASE}/login/index.php", LemidaParser.reconnectUrl(portal))
+        assertEquals("${LemidaParser.BASE}/auth/multioauth/login.php?providerid=1",
+            LemidaParser.reconnectUrl(portal + "<a href='/auth/multioauth/login.php?providerid=1'>University</a>"))
+        assertNull(LemidaParser.reconnectUrl(portal + "<a href='/auth/multioauth/login.php?providerid=1'>First</a>" +
+            "<a href='/auth/multioauth/login.php?providerid=2'>Second</a>"))
+    }
+    @Test fun reconnectCannotFollowExternalOrUnexpectedLoginLinks() {
+        listOf("http://lemida.biu.ac.il/auth/multioauth/login.php", "https://example.test/auth/multioauth/login.php",
+            "https://lemida.biu.ac.il:444/auth/multioauth/login.php", "https://user@lemida.biu.ac.il/auth/multioauth/login.php",
+            "/auth/multioauth/login.php.evil", "/login/logout.php").forEach { link ->
+            assertNull(LemidaParser.reconnectUrl("<a href='$link'>Sign in</a>"))
+        }
+    }
     @Test fun coursePaginationCompletesOnlyOnAnEmptyPageAtTheCurrentOffset() {
         assertEquals(1, LemidaParser.nextCourseOffset(org.json.JSONObject("""{"courses":[{"id":1}],"nextoffset":1}"""), 0))
         assertEquals(2, LemidaParser.nextCourseOffset(org.json.JSONObject("""{"courses":[],"nextoffset":2}"""), 1))

@@ -26,23 +26,38 @@ class LemidaExpiryTest {
         "assign", "${LemidaParser.BASE}/mod/assign/view.php?id=9", "Friday")
     private val cachedDetail = HomeworkDetail("Cached instructions", "Friday", emptyList(), "Cached instructions")
 
-    private enum class Response { LOGIN_PAGE, INVALID_KEY, MICROSOFT, NETWORK_ERROR, RECOVERED }
+    private enum class Response { LOGIN_PAGE, INVALID_KEY, INVALID_KEY_ONCE, MICROSOFT, NETWORK_ERROR,
+        DETAIL_EXPIRED_ONCE, DETAIL_DIFFERENT_ACCOUNT, RECOVERED }
     private class FixtureTransport(var response: Response) : LemidaTransport {
         var closed = false
+        var homepageReads = 0
+        var detailReads = 0
+        var stateReads = 0
         override suspend fun prepare() = Unit
         override suspend fun close() { closed = true }
-        override suspend fun get(url: String): String = when (response) {
+        override suspend fun get(url: String): String {
+            if (url == "${LemidaParser.BASE}/my/") homepageReads++ else {
+                detailReads++
+                if (detailReads == 1 && response in setOf(Response.DETAIL_EXPIRED_ONCE, Response.DETAIL_DIFFERENT_ACCOUNT))
+                    throw LemidaSessionExpired()
+            }
+            return when (response) {
             Response.LOGIN_PAGE -> "<body class='notloggedin'>Sign in</body>"
             Response.MICROSOFT -> throw LemidaSessionExpired()
             Response.NETWORK_ERROR -> throw IOException("Offline fixture")
             else -> """<body><a href="/login/logout.php">Logout</a>
-                <script>M.cfg={"userId":42,"sesskey":"fixture"};</script></body>"""
+                <script>M.cfg={"userId":${if (response == Response.DETAIL_DIFFERENT_ACCOUNT) 99 else 42},"sesskey":"fixture"};</script>
+                <main id="region-main"><div id="intro">Updated instructions</div></main></body>"""
+            }
         }
         override suspend fun post(url: String, body: String): String {
             if (response == Response.INVALID_KEY)
                 return """[{"error":true,"exception":{"errorcode":"invalidsesskey"}}]"""
             val args = JSONArray(body).getJSONObject(0)
             val data: Any = if (args.getString("methodname") == "core_courseformat_get_state") {
+                stateReads++
+                if (response == Response.INVALID_KEY_ONCE && stateReads == 1)
+                    return """[{"error":true,"exception":{"errorcode":"invalidsesskey"}}]"""
                 """{"cm":[{"name":"Cached homework","url":"https://lemida.biu.ac.il/mod/assign/view.php?id=9"}]}"""
             } else if (args.getJSONObject("args").getInt("offset") == 0) {
                 JSONObject("""{"courses":[{"id":1,"fullname":"Expiry test (simulation)"}],"nextoffset":1}""")
@@ -81,6 +96,7 @@ class LemidaExpiryTest {
                 assertEquals(listOf(item), repo.cached())
                 assertEquals(cachedDetail, repo.cachedDetail(item))
                 assertEquals(42L, repo.lastSync())
+                assertEquals(if (response == Response.INVALID_KEY) 2 else 1, transport.homepageReads)
                 repo.deliverPending("42") { fail("Expiry must pause homework notifications"); true }
                 assertEquals(listOf(item), LemidaParser.decode(prefs.getString("pending", "[]")!!))
                 var reminders = 0
@@ -107,6 +123,38 @@ class LemidaExpiryTest {
         try { repo.sync(); fail("Network failure must fail the update") }
         catch (error: IOException) { assertFalse(error is LemidaSessionExpired) }
         assertFalse(repo.needsLogin())
+        assertEquals(listOf(item), repo.cached())
+        assertEquals(42L, repo.lastSync())
+    }
+
+    @Test fun sessionExpiryDuringCourseReadRestartsTheWholeSnapshotOnce() = isolated(Response.INVALID_KEY_ONCE) { repo, _, transport ->
+        assertEquals("42", repo.sync())
+        assertEquals(2, transport.homepageReads)
+        assertEquals(2, transport.stateReads)
+        assertFalse(repo.needsLogin())
+        assertTrue(repo.lastSync() > 42L)
+        assertEquals(listOf(item), repo.cached())
+        assertEquals(cachedDetail, repo.cachedDetail(item))
+    }
+
+    @Test fun detailExpiryReconnectsOnceWithoutAdvancingTheFullSyncTimestamp() = isolated(Response.DETAIL_EXPIRED_ONCE) { repo, prefs, transport ->
+        prefs.edit().putBoolean("needs_login", true).putBoolean("login_notified", true).commit()
+        val result = repo.detail(item)
+        assertEquals("Updated instructions", result.description)
+        assertEquals(result, repo.cachedDetail(item))
+        assertEquals(2, transport.detailReads)
+        assertEquals(1, transport.homepageReads)
+        assertFalse(repo.needsLogin())
+        assertFalse(prefs.getBoolean("login_notified", true))
+        assertEquals(42L, repo.lastSync())
+    }
+
+    @Test fun detailRecoveryCannotCacheContentFromAnotherAccount() = isolated(Response.DETAIL_DIFFERENT_ACCOUNT) { repo, _, transport ->
+        try { repo.detail(item); fail("Another account must not replace cached instructions") }
+        catch (_: IllegalStateException) { }
+        assertEquals(1, transport.detailReads)
+        assertEquals(1, transport.homepageReads)
+        assertEquals(cachedDetail, repo.cachedDetail(item))
         assertEquals(listOf(item), repo.cached())
         assertEquals(42L, repo.lastSync())
     }

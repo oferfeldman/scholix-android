@@ -66,6 +66,8 @@ internal class LemidaBrowser(context: Context, agent: String?, supplied: WebView
     override suspend fun get(url: String): String = withContext(Dispatchers.Main) {
         check(!closed) { "Lemida browser is closed." }
         var complete = false
+        val allowReconnect = url == "${LemidaParser.BASE}/my/"
+        val reconnectPaths = mutableSetOf<String>()
         var requestClient: WebViewClient? = null
         try {
             withTimeoutOrNull(60_000) {
@@ -89,13 +91,31 @@ internal class LemidaBrowser(context: Context, agent: String?, supplied: WebView
                             // Wait for Moodle; a CAPTCHA that needs a person will time out visibly.
                             val host = android.net.Uri.parse(finished).host
                             if (host in setOf("login.microsoftonline.com", "login.live.com")) {
-                                if (continuation.isActive) continuation.resumeWithException(LemidaSessionExpired())
+                                if (!allowReconnect) {
+                                    continuation.resumeWithException(LemidaSessionExpired())
+                                } else {
+                                    // Allow Microsoft's existing session to redirect itself back to Moodle.
+                                    // Visible input/choice controls require the normal interactive login.
+                                    web.evaluateJavascript(LemidaRequestScript.interactiveSignIn()) { value ->
+                                        if (value == "true" && continuation.isActive && !closed && !ownerDestroyed() &&
+                                            web.webViewClient === this && web.url == finished)
+                                            continuation.resumeWithException(LemidaSessionExpired())
+                                    }
+                                }
                                 return
                             }
                             if (host != "lemida.biu.ac.il") return
                             web.evaluateJavascript(LemidaRequestScript.document(finished)) { raw ->
                                 val result = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
-                                if (result != null && continuation.isActive) continuation.resume(result)
+                                if (result != null && continuation.isActive && !closed && !ownerDestroyed() &&
+                                    web.webViewClient === this && web.url == finished) {
+                                    val entry = if (allowReconnect && !LemidaParser.authenticated(result))
+                                        LemidaParser.reconnectUrl(result) else null
+                                    if (entry != null && reconnectPaths.add(android.net.Uri.parse(entry).path.orEmpty())) {
+                                        // Follow each observed portal/provider step once; never loop on a failed SSO return.
+                                        web.loadUrl(entry)
+                                    } else continuation.resume(result)
+                                }
                             }
                         }
                     }

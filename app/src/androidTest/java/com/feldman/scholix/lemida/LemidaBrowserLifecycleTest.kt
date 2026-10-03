@@ -3,6 +3,7 @@ package com.feldman.scholix.lemida
 import android.content.Context
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.ValueCallback
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -19,9 +20,67 @@ class LemidaBrowserLifecycleTest {
     private class ControlledWebView(context: Context) : WebView(context) {
         var requested: String? = null
         var stops = 0
+        var scriptCallback: ValueCallback<String>? = null
         override fun loadUrl(url: String) { requested = url }
         override fun getUrl(): String? = requested
         override fun stopLoading() { stops++ }
+        override fun evaluateJavascript(script: String, callback: ValueCallback<String>?) { scriptCallback = callback }
+    }
+
+    @Test fun universityEntryStartsPassiveRecoveryWithoutCompletingAnAnonymousPage() = runBlocking {
+        withContext(Dispatchers.Main) {
+            val view = ControlledWebView(InstrumentationRegistry.getInstrumentation().targetContext)
+            val browser = LemidaBrowser(view.context, null, view)
+            try {
+                val home = "${LemidaParser.BASE}/my/"
+                val page = async(start = CoroutineStart.UNDISPATCHED) { browser.get(home) }
+                view.webViewClient.onPageFinished(view, home)
+                view.scriptCallback!!.onReceiveValue(org.json.JSONObject.quote(
+                    "<body class='notloggedin'><a href='/auth/multioauth/login.php?providerid=1'>Sign in</a></body>"))
+                assertEquals("${LemidaParser.BASE}/auth/multioauth/login.php?providerid=1", view.requested)
+                assertTrue(page.isActive)
+                page.cancelAndJoin()
+            } finally { browser.close(); view.destroy() }
+        }
+    }
+
+    @Test fun lateAnonymousSnapshotCannotNavigateAnotherDocumentToSignIn() = runBlocking {
+        withContext(Dispatchers.Main) {
+            val view = ControlledWebView(InstrumentationRegistry.getInstrumentation().targetContext)
+            val browser = LemidaBrowser(view.context, null, view)
+            try {
+                val home = "${LemidaParser.BASE}/my/"
+                val page = async(start = CoroutineStart.UNDISPATCHED) { browser.get(home) }
+                view.webViewClient.onPageFinished(view, home)
+                view.requested = "${LemidaParser.BASE}/course/view.php?id=1"
+                view.scriptCallback!!.onReceiveValue(org.json.JSONObject.quote(
+                    "<body class='notloggedin'><a href='/auth/multioauth/login.php?providerid=1'>Sign in</a></body>"))
+                assertEquals("${LemidaParser.BASE}/course/view.php?id=1", view.requested)
+                assertTrue(page.isActive)
+                page.cancelAndJoin()
+            } finally { browser.close(); view.destroy() }
+        }
+    }
+
+    @Test fun passiveMicrosoftPageMayRedirectButInteractiveControlsRequireSignIn() = runBlocking {
+        withContext(Dispatchers.Main) {
+            val view = ControlledWebView(InstrumentationRegistry.getInstrumentation().targetContext)
+            val browser = LemidaBrowser(view.context, null, view)
+            try {
+                val page = async(start = CoroutineStart.UNDISPATCHED) {
+                    try { browser.get("${LemidaParser.BASE}/my/"); false }
+                    catch (_: LemidaSessionExpired) { true }
+                }
+                val microsoft = "https://login.microsoftonline.com/fixture"
+                view.requested = microsoft
+                view.webViewClient.onPageFinished(view, microsoft)
+                view.scriptCallback!!.onReceiveValue("false")
+                assertTrue(page.isActive)
+                view.webViewClient.onPageFinished(view, microsoft)
+                view.scriptCallback!!.onReceiveValue("true")
+                assertTrue("Interactive Microsoft page must require sign-in", page.await())
+            } finally { browser.close(); view.destroy() }
+        }
     }
 
     @Test fun cancellationStopsBeforeTheNextPageCanStart() = runBlocking {

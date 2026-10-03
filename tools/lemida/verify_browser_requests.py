@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 source = (Path(__file__).resolve().parents[2] /
           'app/src/main/java/com/feldman/scholix/lemida/LemidaRequestScript.kt').read_text(encoding='utf-8')
 scripts = {name: re.search(r'fun ' + name + r'\(.*?= """(.*?)"""', source, re.S).group(1)
-           for name in ('start', 'poll', 'cleanup', 'document', 'signedIn')}
+           for name in ('start', 'poll', 'cleanup', 'document', 'signedIn', 'interactiveSignIn')}
 origin = 'https://lemida.biu.ac.il'
 
 
@@ -94,6 +94,14 @@ with sync_playwright() as runtime:
         page.evaluate('window.M = {cfg: {userId: 42}}')
         assert page.evaluate(script('signedIn', url=page.url)) is False
         assert json.loads(page.evaluate(script('poll'))) == {'verification': True}
+    page.goto('https://login.microsoftonline.com/test')
+    assert page.evaluate(script('interactiveSignIn')) is False
+    page.set_content('<input type="hidden"><button style="display:none">Hidden</button>')
+    assert page.evaluate(script('interactiveSignIn')) is False
+    page.set_content('<input id="i0118" type="password">')
+    assert page.evaluate(script('interactiveSignIn')) is True
+    page.set_content('<div role="button">Authenticator approval</div>')
+    assert page.evaluate(script('interactiveSignIn')) is True
     browser.close()
 
 print('Browser JSON fetch, cancellation, late completion, network errors, stale document, sign-in and origin guards passed.')

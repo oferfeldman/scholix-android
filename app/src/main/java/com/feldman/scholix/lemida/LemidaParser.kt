@@ -62,6 +62,21 @@ object LemidaParser {
         Regex("\"${Regex.escape(name)}\"\\s*:\\s*(?:\"([^\"]+)\"|(\\d+))")
             .find(html)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }
 
+    /** Follow only a single university login entry observed in the returned Moodle page. */
+    fun reconnectUrl(html: String): String? {
+        val entries = Jsoup.parse(html, BASE).select("a[href]").mapNotNull { link ->
+            runCatching {
+                val uri = URI(BASE).resolve(link.attr("href"))
+                if (uri.scheme != "https" || !uri.host.equals("lemida.biu.ac.il", ignoreCase = true) ||
+                    uri.port !in setOf(-1, 443) || uri.userInfo != null ||
+                    uri.path !in setOf("/auth/multioauth/login.php", "/login/index.php")) null
+                else uri.toString()
+            }.getOrNull()
+        }.distinct()
+        val providers = entries.filter { URI(it).path == "/auth/multioauth/login.php" }
+        return if (providers.isNotEmpty()) providers.singleOrNull() else entries.singleOrNull()
+    }
+
     /** A login redirect can be HTML with HTTP 200, not a JSON error envelope. */
     fun ajaxData(raw: String): Any {
         if (raw.trimStart().startsWith('<')) {

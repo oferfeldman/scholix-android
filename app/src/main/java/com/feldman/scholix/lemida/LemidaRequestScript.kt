@@ -4,6 +4,12 @@ import org.json.JSONObject
 
 /** One browser request, including its abort handle, lives only in the current document. */
 internal object LemidaRequestScript {
+    fun interactiveSignIn() = """(() => {
+        if (!['https://login.microsoftonline.com', 'https://login.live.com'].includes(location.origin)) return false;
+        return [...document.querySelectorAll('input:not([type="hidden"]), button, [role="button"]')]
+            .some(e => !!e.getClientRects().length && !['hidden', 'collapse'].includes(getComputedStyle(e).visibility));
+    })()"""
+
     fun signedIn(url: String) = """(() => location.origin === '${LemidaParser.BASE}'
         && location.href === ${JSONObject.quote(url)}
         && !!document.body && !document.body.classList.contains('notloggedin')
