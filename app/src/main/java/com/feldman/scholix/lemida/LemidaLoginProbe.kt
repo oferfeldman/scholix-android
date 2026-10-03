@@ -19,5 +19,12 @@ internal class LemidaLoginProbe {
     /** Secondary document callbacks remain valid only until navigation/retry/new probe. */
     fun isCurrent(request: Int): Boolean = serial == request
 
+    /** A timeout may abandon only its own pending callback, never a newer request. */
+    fun abandon(request: Int): Boolean {
+        if (active != request) return false
+        invalidate()
+        return true
+    }
+
     fun invalidate() { active = null; serial++ }
 }
