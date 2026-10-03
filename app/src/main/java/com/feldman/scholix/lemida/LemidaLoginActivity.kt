@@ -39,6 +39,14 @@ class LemidaLoginActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private val mfa = LemidaMfaState()
     private val smsConsent = LemidaSmsConsentState()
+    private val mfaPolling = LemidaMfaPoll(mfa,
+        now = { SystemClock.elapsedRealtime() },
+        alive = { !isFinishing && !isDestroyed && !syncing && retry.visibility != android.view.View.VISIBLE },
+        url = { browser.url }, prepareReception = { prepareSmsReception() },
+        evaluate = { script, callback -> browser.evaluateJavascript(script) { callback(it) } },
+        scheduleTimeout = { callback -> handler.postDelayed({ callback() }, 5_000) },
+        status = { status.text = it },
+    )
     private lateinit var status: TextView
     private lateinit var retry: Button
     private var receiverRegistered = false
@@ -48,6 +56,7 @@ class LemidaLoginActivity : ComponentActivity() {
     private fun showPageFailure(message: String) {
         if (isFinishing || isDestroyed || syncing) return
         signInProbe.invalidate()
+        mfaPolling.invalidate()
         status.text = message
         retry.visibility = android.view.View.VISIBLE
     }
@@ -103,46 +112,11 @@ class LemidaLoginActivity : ComponentActivity() {
     private val poll = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
-            if (!directSmsGranted() && !smsConsent.ready(SystemClock.elapsedRealtime())) {
-                handler.postDelayed(this, 250); return
-            }
-            browser.evaluateJavascript(LemidaSms.selectScript(mfa.alternativeClicked, mfa.smsSelected)) { raw ->
-                if (isFinishing || isDestroyed) return@evaluateJavascript
-                when (runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()) {
-                    "alternative" -> {
-                        if (mfa.prepareAlternative()) browser.evaluateJavascript(LemidaSms.chooseScript("alternative"), null)
-                    }
-                    "sms" -> {
-                        if (prepareSmsReception() && mfa.prepareSms(SystemClock.elapsedRealtime())) {
-                            status.text = "SMS requested. Waiting for the Microsoft verification code…"
-                            browser.evaluateJavascript(LemidaSms.chooseScript("sms")) { result ->
-                                if (result == "false" && !isFinishing && !isDestroyed)
-                                    status.text = "The verification page changed. Select SMS in the browser to continue."
-                            }
-                        }
-                    }
-                    "otp", "otp-waiting" -> {
-                        mfa.observeOtp(SystemClock.elapsedRealtime())
-                        prepareSmsReception() // Manual selection can also follow a long password/CAPTCHA step.
-                        val code = mfa.pendingCode(SystemClock.elapsedRealtime())
-                        if (code != null) {
-                            // Filling may enable Verify asynchronously. Keep the code until it can be submitted.
-                            browser.evaluateJavascript(LemidaSms.prepareCodeScript(code)) ready@{ ready ->
-                                if (isFinishing || isDestroyed) return@ready
-                                if (ready != "true") return@ready
-                                if (mfa.pendingCode(SystemClock.elapsedRealtime()) != code) return@ready
-                                val toSubmit = mfa.consumeCode(SystemClock.elapsedRealtime()) ?: return@ready
-                                browser.evaluateJavascript(LemidaSms.submitScript(toSubmit)) submitted@{ result ->
-                                    if (isFinishing || isDestroyed) return@submitted
-                                    if (result == "true") status.text = "Microsoft SMS code submitted. Completing sign-in…"
-                                    else if (result == "false") status.text = "The verification page changed. Enter the code in the browser to continue."
-                                }
-                            }
-                        }
-                    }
-                }
-                handler.postDelayed(this, 750)
-            }
+            // Schedule independently: navigation can lose the current JavaScript callback.
+            handler.postDelayed(this, 750)
+            if (retry.visibility == android.view.View.VISIBLE || syncing) return
+            if (!directSmsGranted() && !smsConsent.ready(SystemClock.elapsedRealtime())) return
+            mfaPolling.poll()
         }
     }
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -166,6 +140,10 @@ class LemidaLoginActivity : ComponentActivity() {
             visibility = android.view.View.GONE
             setOnClickListener {
                 visibility = android.view.View.GONE
+                signInProbe.invalidate()
+                mfaPolling.invalidate()
+                reconnectPaths.clear() // A deliberate Retry gets a new bounded portal/provider attempt.
+                status.text = "Retrying Lemida sign-in…"
                 browser.loadUrl("${LemidaParser.BASE}/my/")
             }
         }
@@ -180,6 +158,11 @@ class LemidaLoginActivity : ComponentActivity() {
         browser.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 signInProbe.invalidate()
+                mfaPolling.invalidate()
+                if (!isFinishing && !isDestroyed && !syncing && retry.visibility == android.view.View.VISIBLE) {
+                    retry.visibility = android.view.View.GONE
+                    status.text = "Loading Lemida sign-in…"
+                }
             }
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (request.isForMainFrame)
@@ -197,7 +180,8 @@ class LemidaLoginActivity : ComponentActivity() {
                     if (view.url != url || syncing) return@evaluateJavascript
                     if (value != "true" && reconnectPaths.size < 2) {
                         view.evaluateJavascript(LemidaRequestScript.document(url)) entry@{ raw ->
-                            if (isFinishing || isDestroyed || syncing || reconnectPaths.size >= 2 || view.url != url ||
+                            if (isFinishing || isDestroyed || syncing || !signInProbe.isCurrent(request) ||
+                                reconnectPaths.size >= 2 || view.url != url ||
                                 view.webViewClient !== this) return@entry
                             val html = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull() ?: return@entry
                             val entry = LemidaParser.reconnectUrl(html) ?: return@entry

@@ -80,7 +80,11 @@ complete, the app retains the cache, sends one sign-in reminder and waits for
 interactive sign-in. No SMS resend, password replay or CAPTCHA bypass occurs in
 the background. The visible sign-in window also follows the university entries
 once each. Invalid/external or ambiguous provider links are ignored, and stale
-callbacks cannot navigate another document.
+callbacks cannot navigate another document. An explicit **Retry** invalidates
+pending checks and starts a fresh bounded portal/provider attempt. Existing MFA
+request/submission guards and the challenge deadline remain in place, so retrying
+a page cannot automatically request another SMS. Secondary login-entry callbacks
+also check their probe generation, including when a retry returns to the same URL.
 `LemidaRealExpiryTest` requires the explicit `allow_real_lemida_expiry=true` runner
 argument. It calls the actual Moodle logout endpoint without following a separate
 Microsoft logout redirect, verifies that authenticated AJAX is rejected, and then
@@ -121,8 +125,16 @@ The sign-in window loads homework through its own browser before closing; a
 failure remains visible instead of returning silently to an empty page.
 Encrypted-session saves run inside the same recovery flow on an IO dispatcher,
 so a storage/Keystore error offers Retry rather than escaping the browser callback.
-Navigation releases an unfinished sign-in check; a late callback cannot confirm
-another document or block its check. Confirmation requires the current URL,
+Navigation releases unfinished sign-in and MFA checks; a late callback cannot
+confirm another document or block its check. The MFA timer schedules its next
+check independently of JavaScript completion. Only one browser sequence is pending
+at a time across picker inspection, code preparation and submission acknowledgement.
+Slow readiness callbacks remain valid across timer ticks. After five seconds a lost
+callback is abandoned, allowing the next sequence.
+An old timeout cannot abandon a newer query. Navigation and Retry invalidate old
+picker/readiness callbacks, including same-URL navigation. Failed pages pause MFA
+selection until Retry or a fresh navigation, while cached codes and one-submit
+state retain their original deadline. Confirmation requires the current URL,
 HTTPS origin, Moodle user ID and logout marker. Main-frame sign-in network/HTTP
 failures show Retry; failed subresources do not interrupt a usable login page.
 Course discovery uses Moodle's session-authenticated
@@ -192,10 +204,117 @@ stacks remain available. A warm `open_homework` intent was verified on the phone
 an actual notification tap and recreation still need device verification.
 `LemidaBrowserLifecycleTest` uses controlled, non-network WebView loads to check
 page cancellation before reuse, idempotent client cleanup, passive university/SSO
-navigation, interactive Microsoft detection and stale snapshot rejection. Its six
+navigation, interactive Microsoft detection and stale snapshot rejection. Its original six
 tests passed on the connected phone. It does not prepare cookies or read the saved
 session. Together with seven expiry, two layout and four alert tests, all 19 offline
 device regressions passed on 2026-10-03.
 `tools/lemida/verify_browser_requests.py` exercises the Android request scripts
 in Chromium with intercepted traffic, including late completion after cancellation,
 network failure, page navigation and HTTPS origin checks; no live account is used.
+
+The focused JVM checks compile the app's actual parser, session exceptions, SMS
+scripts, MFA/consent state and login probes, and run their existing unit tests:
+
+```powershell
+.\gradlew.bat --project-dir tools/lemida/core-checks test
+```
+
+All 75 focused tests passed after rebasing onto main's 2026-10-03 updates. This
+standalone project reads the root version catalog and requires neither Android
+nor Motion; it does not validate UI, WebView, Keystore or background scheduling.
+Session exceptions were moved into an Android-independent source file without
+changing their names or behavior. Browser request and SMS script checks also passed
+with intercepted traffic. The unmodified full app build now fails because upstream
+requires the unavailable `Motion beta52-local` artifact. Available Motion source
+still provides `beta49-local`; main's new styling/navigation and dependency versions
+were preserved. No new APK or phone verification is claimed for this rebase.
+
+The three additional probe-timeout tests passed in the focused JVM check. Native
+MFA timer wiring also passed the focused Android compilation described below;
+the full app build and phone verification remain pending.
+
+`LemidaMfaPoll` contains the actual browser-callback sequence independently of
+Android. Eight controlled-callback regressions cover slow preparation/submission,
+lost picker/SMS callbacks, same-URL navigation, listener readiness, expired or
+changed codes and disabled Verify. They use the production scripts/state and send
+no messages or network requests. Activity timer/receiver binding now compiles in
+the focused Android project. Full app compilation and actual phone behavior still
+need validation once Motion and a device are available.
+
+Native homework instructions and Python detail exports preserve numbered, lettered
+and Roman lists, including explicit starting values, item restarts and descending
+lists. Nested lists start on separate lines and keep their own counters; unordered
+items remain bullets. The same formatting applies to teacher feedback cells and
+fallback detail text. Python also recognizes `#intro` and combines separate
+instruction sections without duplicating nested wrappers. Six additional actual
+parser regressions passed in the focused JVM checks; the equivalent Python suite
+passed 24 tests, with two private-HTML checks intentionally skipped. These checks
+use synthetic pages and do not access a live account or validate phone rendering.
+
+Course-state discovery uses `uservisible` to decide whether the current account can
+access an activity. `accessvisible` describes general availability to everyone;
+requiring it incorrectly omitted homework restricted to a group even when the
+signed-in student could open it. The distinction follows Moodle's
+[course-state export](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/course/format/classes/output/local/state/cm.php#L67-L96)
+and [account-specific visibility checks](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/lib/modinfolib.php#L2445-L2499).
+Three focused regressions cover accessible restricted assignments/quizzes/workshops,
+unavailable items, and one alert when restricted homework becomes available. The
+API authorization, accepted activity types and same-university URL checks still
+apply. The new visibility cases have not been verified with a live phone session.
+
+The focused Android check compiles 14 actual Lemida production source files,
+excluding the Motion homework screen, including the current login Activity's native
+timer/receiver binding, WebView transport, encrypted cookie store, repository and
+worker. It uses the upstream AGP/Kotlin versions and reads SDK levels, Java targets
+and the SMS dependency from the app build file:
+
+```powershell
+# Set ANDROID_HOME to your installed Android SDK, or use ignored local.properties.
+.\gradlew.bat --project-dir tools/lemida/android-checks testDebugUnitTest assembleDebug
+```
+
+This check passed with AGP 9.4.1, Gradle 9.8.0 and SDK 37; all 75 existing focused
+unit tests and eight controlled browser host cases passed (83 total). The selected source files and
+notification icon were verified byte-identical to production. It builds a library
+AAR, not a Scholix APK. MainActivity is a compilation fixture used only to resolve
+the worker's notification destination; the real MainActivity, navigation and Motion
+screen are excluded. This validates native compilation without downgrading or
+substituting Motion. It does not execute SMS delivery, Play services, Keystore,
+WebView, worker scheduling or notification routing on a phone. See the
+[checker boundaries](../tools/lemida/android-checks/README.md) before interpreting
+the results. Full app and pending device checks remain required for an updated APK.
+
+The browser transport now invalidates document-read and Microsoft-control callbacks
+on each main-frame page start, even when a reload keeps the same URL and client.
+Without that guard, delayed anonymous HTML could interrupt the new page with a
+sign-in redirect, or an old Microsoft control check could prematurely fail passive
+recovery. Two additional `LemidaBrowserLifecycleTest` cases reproduced those failures
+before the fix and passed afterward, while current-page recovery still works.
+All eight methods now run under Robolectric SDK 37 in the focused Android project,
+using the actual device suite and production browser with controlled callbacks.
+The host-only Main dispatcher fixture and WebView subclass do not render pages,
+execute JavaScript, prepare cookies or read a saved session. This adds local
+callback/lifecycle coverage; the new cases have not run on a phone and do not
+validate real Microsoft SSO, SMS delivery or full app behavior.
+
+Python live sync now publishes its JSON snapshot only after all selected course,
+grade and homework reads succeed. Previously a midway failure or expired session
+could replace the last complete export with partial data. Such attempts now write
+a separate `.failed.json` diagnostic file and preserve the successful export;
+read errors still return exit code 2 and session expiry returns exit code 1.
+JSON publication uses a temporary file in the destination directory and atomic
+replacement, preserving the previous file if publication fails. Five synthetic
+regressions reproduced premature publication/data replacement before the fix and
+passed afterward, including course and grade/homework errors, session expiry and
+failed file replacement. All 29 Python tests passed; two private HTML cases were
+skipped. No live browser session, SMS or phone operation was used for these checks.
+
+The desktop Python login also inspects the existing Microsoft OTP field before
+choosing a verification method. Observing that field locks subsequent alternative
+and SMS requests even if it disappears during navigation. The alternative-method
+attempt is now recorded before clicking, as the SMS attempt already was, preventing
+a lost navigation callback from repeating the choice. Three mocked-client cases
+reproduced the prior behavior and now pass; a fourth confirms that an interrupted
+SMS click still requests only once. All 33 Python tests passed with two private
+HTML skips. These tests run the actual Python login loop with mocked controls;
+they neither send SMS nor verify a real Microsoft session or phone behavior.
