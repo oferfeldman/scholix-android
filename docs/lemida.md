@@ -97,6 +97,10 @@ Native details show activity notices beside instructions and grading tables,
 including overdue/availability/attempt notices that were previously only in the
 fallback text. Hidden notices are excluded and repeated messages are deduplicated;
 cached details from earlier versions remain readable.
+Nested grading tables contribute each row only to its own table; empty layout
+wrappers are omitted, while blank grade values are retained. Feedback paragraphs
+and line breaks survive extraction, and native grading sections show table captions.
+The Python exporter uses the same row-ownership and feedback-formatting rules.
 Updates commit only after discovery and every course succeed. Seen IDs are
 kept as a union to avoid duplicate alerts after temporary hiding. A different
 Moodle `userId` establishes a fresh notification baseline.

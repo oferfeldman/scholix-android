@@ -26,10 +26,11 @@ data class Homework(val id: String, val courseId: Int, val course: String,
 }
 
 data class HomeworkDetail(val description: String, val dates: String, val tables: List<List<List<String>>>, val text: String,
-                          val notices: List<String> = emptyList()) {
+                          val notices: List<String> = emptyList(), val tableCaptions: List<String> = emptyList()) {
     fun json() = JSONObject().put("description", description).put("dates", dates).put("text", text)
         .put("tables", JSONArray(tables.map { table -> JSONArray(table.map { JSONArray(it) }) }))
         .put("notices", JSONArray(notices))
+        .put("tableCaptions", JSONArray(tableCaptions))
     companion object {
         fun fromJson(raw: String): HomeworkDetail {
             val j = JSONObject(raw)
@@ -43,6 +44,8 @@ data class HomeworkDetail(val description: String, val dates: String, val tables
                     }
                 }, j.optString("text"), j.optJSONArray("notices")?.let { messages ->
                     (0 until messages.length()).map { messages.getString(it) }
+                }.orEmpty(), j.optJSONArray("tableCaptions")?.let { captions ->
+                    (0 until captions.length()).map { captions.getString(it) }
                 }.orEmpty())
         }
     }
@@ -150,13 +153,21 @@ object LemidaParser {
             .map { readableText(it) }.filter { it.isNotBlank() }.distinct()
         // Notices have their own section; don't repeat them in instructions or fallback text.
         alerts.remove()
-        val tables = main.select("table").map { table -> table.select("tr").map { row ->
-            row.select("th, td").map { it.text() }
-        }.filter { it.isNotEmpty() } }
+        val parsedTables = main.select("table").mapNotNull { table ->
+            val rows = table.select("tr").filter { row -> row.parents().firstOrNull { it.tagName() == "table" } == table }
+                .map { row -> row.children().filter { it.tagName() in setOf("th", "td") }.map { cell ->
+                    val content = cell.clone()
+                    content.select("table").remove()
+                    readableText(content)
+                } }.filter { cells -> cells.any { it.isNotBlank() } }
+            if (rows.isEmpty()) null else rows to table.children().firstOrNull { it.tagName() == "caption" }
+                ?.let { readableText(it) }.orEmpty()
+        }
         val descriptions = main.select(".activity-description, #intro, .generalbox")
         val topLevelDescriptions = descriptions.filter { element -> element.parents().none { it in descriptions } }
         return HomeworkDetail(topLevelDescriptions.joinToString("\n\n") { readableText(it) },
-            main.select("[data-region=activity-dates], .activity-dates").text(), tables, main.text(), notices)
+            main.select("[data-region=activity-dates], .activity-dates").text(), parsedTables.map { it.first },
+            main.text(), notices, parsedTables.map { it.second })
     }
     private fun readableText(element: Element): String {
         val content = element.clone()

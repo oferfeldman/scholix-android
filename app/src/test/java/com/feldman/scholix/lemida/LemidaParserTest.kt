@@ -4,6 +4,28 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun nestedGradingRowsBelongToTheirOwnTableOnly() {
+        val detail = LemidaParser.detail("""<main id="region-main"><table><tr><th>Feedback</th>
+            <td>Teacher summary<table><tr><th>Grade</th><td>95 / 100</td></tr></table></td>
+            </tr></table></main>""")
+        assertEquals(listOf(listOf(listOf("Feedback", "Teacher summary")),
+            listOf(listOf("Grade", "95 / 100"))), detail.tables)
+    }
+    @Test fun gradingCaptionsAndFeedbackParagraphsSurviveCaching() {
+        val detail = LemidaParser.detail("""<main id="region-main"><table><caption>Teacher feedback</caption>
+            <tr><th>הערות</th><td><p>First comment</p><p>Second comment<br>Final line</p></td></tr>
+            </table></main>""")
+        assertEquals(listOf("Teacher feedback"), detail.tableCaptions)
+        assertEquals(listOf("הערות", "First comment\nSecond comment\nFinal line"), detail.tables.single().single())
+        assertEquals(detail, HomeworkDetail.fromJson(detail.json().toString()))
+    }
+    @Test fun emptyWrapperTablesDoNotMisalignCaptionsOrDropBlankValues() {
+        val detail = LemidaParser.detail("""<main id="region-main"><table><tr><td><table>
+            <caption>Final grade</caption><tr><th>Grade</th><td></td></tr>
+            </table></td></tr></table></main>""")
+        assertEquals(listOf(listOf(listOf("Grade", ""))), detail.tables)
+        assertEquals(listOf("Final grade"), detail.tableCaptions)
+    }
     @Test fun availabilityNoticesAreRetainedBesideInstructionsAndGrades() {
         val detail = LemidaParser.detail("""<main id="region-main"><div id="intro">Submit a PDF</div>
             <div class="alert alert-danger">Submission overdue</div>
@@ -31,6 +53,7 @@ class LemidaParserTest {
         assertEquals("Instructions", detail.description)
         assertEquals("Friday", detail.dates)
         assertTrue(detail.notices.isEmpty())
+        assertTrue(detail.tableCaptions.isEmpty())
     }
     @Test fun ajaxSupportsCourseObjectsAndEncodedActivityState() {
         val courses = LemidaParser.ajaxData("""[{"error":false,"data":{"courses":[],"nextoffset":0}}]""") as org.json.JSONObject

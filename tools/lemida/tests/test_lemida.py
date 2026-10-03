@@ -68,6 +68,24 @@ class RedirectHandling(unittest.TestCase):
 
 
 class SavedPages(unittest.TestCase):
+    def test_nested_grade_tables_are_not_duplicated(self):
+        result = lemida.parse_detail('''<main><table><tr><th>Feedback</th><td>Teacher summary
+            <table><tr><th>Grade</th><td>95 / 100</td></tr></table></td></tr></table></main>''')
+        self.assertEqual([table['rows'] for table in result['tables']],
+                         [[['Feedback', 'Teacher summary']], [['Grade', '95 / 100']]])
+
+    def test_grade_captions_and_feedback_lines_are_preserved(self):
+        result = lemida.parse_detail('''<main><table><caption>Teacher feedback</caption>
+            <tr><th>הערות</th><td><p>First comment</p><p>Second comment<br>Final line</p></td></tr>
+            </table></main>''')
+        self.assertEqual(result['tables'][0]['caption'], 'Teacher feedback')
+        self.assertEqual(result['tables'][0]['rows'], [['הערות', 'First comment\nSecond comment\nFinal line']])
+
+    def test_empty_wrapper_does_not_hide_grade_caption_or_blank_value(self):
+        result = lemida.parse_detail('''<main><table><tr><td><table><caption>Final grade</caption>
+            <tr><th>Grade</th><td></td></tr></table></td></tr></table></main>''')
+        self.assertEqual(result['tables'], [{'caption': 'Final grade', 'rows': [['Grade', '']]}])
+
     def test_error_pages_are_not_successful_details(self):
         for html in ('<main><div class="errorbox">Missing activity</div></main>',
                      '<body id="page-error"><main>Unavailable</main></body>'):

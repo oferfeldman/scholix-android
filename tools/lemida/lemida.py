@@ -57,10 +57,27 @@ def courses(html):
 
 
 def tables(container):
-    return [{'caption': text(t.select_one('caption')),
-             'rows': [[text(c) for c in row.select('th, td')]
-                      for row in t.select('tr') if row.select('th, td')]}
-            for t in container.select('table')]
+    result = []
+    for table in container.select('table'):
+        rows = []
+        for row in table.select('tr'):
+            if row.find_parent('table') is not table:
+                continue
+            cells = []
+            for cell in row.find_all(['th', 'td'], recursive=False):
+                content = soup(str(cell))
+                for nested in content.select('table'):
+                    nested.decompose()
+                for br in content.select('br'):
+                    br.replace_with('\n')
+                for block in content.select('p, div, li, h1, h2, h3'):
+                    block.append('\n')
+                cells.append('\n'.join(' '.join(line.split()) for line in content.get_text().splitlines() if line.strip()))
+            if any(cells):
+                rows.append(cells)
+        if rows:
+            result.append({'caption': text(table.find('caption', recursive=False)), 'rows': rows})
+    return result
 
 
 def files(container):

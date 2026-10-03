@@ -212,12 +212,17 @@ private fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack:
             if (data.dates.isNotBlank()) { Title("Dates"); Section { Item { Text(data.dates, style = MaterialTheme.typography.bodyMedium) } } }
             if (data.description.isNotBlank()) { Title("Instructions"); Section { Item { Text(data.description, style = MaterialTheme.typography.bodyMedium) } } }
             if (data.tables.isNotEmpty()) Title("Submission and grading")
-            data.tables.forEach { table -> Section { table.forEach { cells -> Item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(cells.first(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    if (cells.size > 1) Text(cells.drop(1).joinToString("\n"), style = MaterialTheme.typography.bodyMedium)
+            data.tables.forEachIndexed { index, table -> Section {
+                data.tableCaptions.getOrNull(index)?.takeIf { it.isNotBlank() }?.let { caption ->
+                    Item { Text(caption, style = MaterialTheme.typography.titleSmall) }
                 }
-            } } } }
+                table.forEach { cells -> Item {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(cells.first(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                        if (cells.size > 1) Text(cells.drop(1).joinToString("\n"), style = MaterialTheme.typography.bodyMedium)
+                    }
+                } }
+            } }
             if (data.description.isBlank() && data.tables.isEmpty() && (data.text.isNotBlank() || data.notices.isEmpty())) Section { Item {
                 Text(data.text.ifBlank { "This activity has no instructions yet." }, style = MaterialTheme.typography.bodyMedium)
             } }
