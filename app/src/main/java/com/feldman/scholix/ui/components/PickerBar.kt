@@ -94,6 +94,8 @@ fun <T> PickerBar(
             colors = MotionDropdownDefaults.tonalColors(
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                // Deliberately no expanded colors: the chip keeps its closed colors while
+                // open. Only the chevron and the menu itself animate.
             ).copy(
                 menuContainerColor = menuContainerColor,
                 menuItemTextColor = MaterialTheme.colorScheme.onSurface,

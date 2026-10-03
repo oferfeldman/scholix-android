@@ -11,8 +11,10 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -27,11 +29,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FloatingActionButtonMenu
+import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults
+import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
+import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
@@ -55,6 +65,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.draw.clip
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
@@ -70,8 +90,12 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.Room
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.ui.draw.alpha
 import com.feldman.motion.MotionFloatingToolbarDefaults
+import com.feldman.motion.MotionSymbols
+import com.feldman.motion.motionFloatingContainer
+import com.feldman.motion.rememberSymbolPainter
 import com.feldman.motion.MotionDropdown
 import com.feldman.motion.MotionDropdownDefaults
 import com.feldman.motion.MotionDropdownDirection
@@ -463,6 +487,8 @@ fun MainScreen(
     val navigationBackdrop = rememberMotionBlurState()
     val navigationBlurred = rememberMotionBlur()
     var bottomBarHeight by remember { mutableStateOf(0.dp) }
+    var overflowFabSlot by remember { mutableStateOf<Rect?>(null) }
+    var navigationOrigin by remember { mutableStateOf(Offset.Zero) }
     val showNavigationRail = isLandscape && currentScreen.showNavigation
 
     val lockerViewModel: LockerViewModel = viewModel(
@@ -487,7 +513,9 @@ fun MainScreen(
         )
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().onGloballyPositioned {
+        navigationOrigin = it.positionInWindow()
+    }) {
         MotionBlurBackdrop(state = navigationBackdrop, modifier = Modifier.fillMaxSize()) {
             Row(modifier = Modifier.fillMaxSize()) {
                 if (showNavigationRail) {
@@ -558,14 +586,52 @@ fun MainScreen(
                         selectedDest = selectedNavbarDest,
                         destinations = visibleNavbarDestinations,
                         onNavigate = { dest -> backStack.navigateTop(dest) },
-                        floatingActionButton = moreFab.content,
                         onHeightChanged = { bottomBarHeight = it },
                         modifier = Modifier.fillMaxWidth(),
+                        floatingActionButton = if (overflowPagesList.isNotEmpty()) {
+                            {
+                                // Reserve the same button slot as the gallery's overlay menu.
+                                Box(Modifier.size(56.dp).onGloballyPositioned {
+                                    overflowFabSlot = it.boundsInWindow()
+                                })
+                            }
+                        } else null,
+                        fab = MotionNavigationBarDefaults.fab(morphEnabled = false),
                         colors = MotionNavigationBarDefaults.colors().let { colors ->
                             colors.copy(container = colors.container.copy(alpha = if (navigationBlurred) 0.84f else 1f))
                         },
                         contrast = MotionNavigationBarDefaults.contrast(enabled = false)
                     )
+                }
+            }
+            // Material's menu grows above the bar, but its toggle covers the reserved slot.
+            val slot = overflowFabSlot
+            if (slot != null && overflowPagesList.isNotEmpty() &&
+                currentScreen.showNavigation && navigationState.bottomBarVisible
+            ) {
+                CompositionLocalProvider(LocalMotionBlurState provides navigationBackdrop) {
+                    Layout(
+                        content = {
+                            OverflowFabMenu(
+                                overflowPages = overflowPagesList,
+                                onNavigate = { dest -> backStack.navigateTo(dest) }
+                            )
+                        },
+                        modifier = Modifier.matchParentSize()
+                    ) { measurables, constraints ->
+                        val menu = measurables.single().measure(constraints.copy(minWidth = 0, minHeight = 0))
+                        layout(constraints.maxWidth, constraints.maxHeight) {
+                            // Material adds 16 dp around its button, as in Motion's overlay host.
+                            val inset = 16.dp.toPx()
+                            val x = if (layoutDirection == LayoutDirection.Rtl) {
+                                slot.left - navigationOrigin.x - inset
+                            } else {
+                                slot.right - navigationOrigin.x + inset - menu.width
+                            }
+                            val y = slot.bottom - navigationOrigin.y + inset - menu.height
+                            menu.place(x.roundToInt(), y.roundToInt())
+                        }
+                    }
                 }
             }
         } else if (!isLandscape && currentScreen.showNavigation) {
@@ -592,6 +658,79 @@ fun MainScreen(
                 }
                 moreFab.content?.invoke()
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun OverflowFabMenu(
+    overflowPages: List<AppDest>,
+    onNavigate: (MotionDest) -> Unit
+) {
+    if (overflowPages.isEmpty()) return
+    var menuExpanded by rememberSaveable { mutableStateOf(false) }
+    BackHandler(menuExpanded) { menuExpanded = false }
+
+    // Material's own menu, like the gallery demo's native menu: the toggle is primary like
+    // every other button in the bar, and the items open from the default lighter container.
+    val toggleProgress by animateFloatAsState(
+        targetValue = if (menuExpanded) 1f else 0f,
+        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+        label = "OverflowToggleProgress",
+    )
+    val toggleSize = ToggleFloatingActionButtonDefaults.containerSize()(toggleProgress)
+    val toggleCornerRadius = ToggleFloatingActionButtonDefaults.containerCornerRadius()(toggleProgress)
+    val toggleShape = RoundedCornerShape(toggleCornerRadius)
+    FloatingActionButtonMenu(
+        expanded = menuExpanded,
+        horizontalAlignment = Alignment.End,
+        button = {
+            // Keep the menu's button footprint fixed while its visible surface shrinks.
+            Box(Modifier.size(56.dp), contentAlignment = Alignment.TopEnd) {
+                FilledIconButton(
+                    onClick = { menuExpanded = !menuExpanded },
+                    shape = toggleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Color.Transparent,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                    modifier = Modifier.size(toggleSize).clip(toggleShape)
+                        .motionFloatingContainer(toggleShape, MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(
+                        painter = rememberSymbolPainter(
+                            if (menuExpanded) MotionSymbols.ic_close else MotionSymbols.ic_menu
+                        ),
+                        contentDescription = if (menuExpanded) "Close more pages" else "More pages",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = with(ToggleFloatingActionButtonDefaults) {
+                            Modifier.animateIcon(
+                                checkedProgress = { toggleProgress },
+                                color = iconColor(MaterialTheme.colorScheme.onPrimary, MaterialTheme.colorScheme.onPrimary)
+                            )
+                        }
+                    )
+                }
+            }
+        }
+    ) {
+        overflowPages.forEach { page ->
+            FloatingActionButtonMenuItem(
+                onClick = {
+                    menuExpanded = false
+                    onNavigate(page)
+                },
+                icon = {
+                    if (page.filledIcon != 0) {
+                        Icon(
+                            painter = painterResource(page.filledIcon),
+                            contentDescription = null
+                        )
+                    }
+                },
+                text = { Text(page.label) }
+            )
         }
     }
 }
@@ -627,7 +766,11 @@ private fun OverflowMenuFab(
         anchorContent = { _, toggle ->
             MotionFloatingToolbarDefaults.StandardFloatingActionButton(
                 onClick = toggle,
-                modifier = Modifier.size(56.dp)
+                modifier = Modifier.size(56.dp),
+                // Same pair as the navigation bar itself: the button reads as part of the
+                // pill rather than a second accent. Both blur identically behind.
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
             ) {
                 Icon(
                     painter = painterResource(R.drawable.ic_menu),
