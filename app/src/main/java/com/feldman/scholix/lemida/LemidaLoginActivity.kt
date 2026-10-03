@@ -16,6 +16,9 @@ import android.provider.Telephony
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.widget.LinearLayout
 import android.widget.Button
 import android.widget.TextView
@@ -29,7 +32,7 @@ import com.google.android.gms.common.api.Status
 /** Visible Microsoft login, including SMS, Authenticator, and CAPTCHA. */
 class LemidaLoginActivity : ComponentActivity() {
     private lateinit var browser: WebView
-    private var checking = false
+    private val signInProbe = LemidaLoginProbe()
     private var syncing = false
     private val loginScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
@@ -41,6 +44,12 @@ class LemidaLoginActivity : ComponentActivity() {
     private var consentRegistered = false
     private var consentLaunched = false
     private fun currentChallenge() = mfa.active(SystemClock.elapsedRealtime())
+    private fun showPageFailure(message: String) {
+        if (isFinishing || isDestroyed || syncing) return
+        signInProbe.invalidate()
+        status.text = message
+        retry.visibility = android.view.View.VISIBLE
+    }
     private fun directSmsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
     private fun startSmsConsent() {
         val request = smsConsent.start(SystemClock.elapsedRealtime())
@@ -152,7 +161,7 @@ class LemidaLoginActivity : ComponentActivity() {
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         actions.addView(Button(this).apply { text = "Cancel"; setOnClickListener { finish() } })
         retry = Button(this).apply {
-            text = "Retry loading homework"
+            text = "Retry"
             visibility = android.view.View.GONE
             setOnClickListener {
                 visibility = android.view.View.GONE
@@ -168,15 +177,23 @@ class LemidaLoginActivity : ComponentActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(browser, true)
         LemidaRepository(this).setUserAgent(browser.settings.userAgentString)
         browser.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                signInProbe.invalidate()
+            }
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                if (request.isForMainFrame)
+                    showPageFailure("Sign-in could not load. Check your connection, then tap Retry.")
+            }
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                if (request.isForMainFrame && response.statusCode >= 400)
+                    showPageFailure("Sign-in returned HTTP ${response.statusCode}. Tap Retry to try again.")
+            }
             override fun onPageFinished(view: WebView, url: String) {
-                if (isFinishing || isDestroyed || android.net.Uri.parse(url).host != "lemida.biu.ac.il" || checking || syncing) return
-                checking = true
-                view.evaluateJavascript("""(() => location.origin === '${LemidaParser.BASE}'
-                    && !document.body.classList.contains('notloggedin')
-                    && Number(window.M?.cfg?.userId) > 1
-                    && !!document.querySelector('a[href*="/login/logout.php"]'))()""") { value ->
-                    if (isFinishing || isDestroyed) return@evaluateJavascript
-                    checking = false
+                if (isFinishing || isDestroyed || android.net.Uri.parse(url).host != "lemida.biu.ac.il" || view.url != url || syncing) return
+                val request = signInProbe.start() ?: return
+                view.evaluateJavascript(LemidaRequestScript.signedIn(url)) { value ->
+                    if (isFinishing || isDestroyed || !signInProbe.complete(request)) return@evaluateJavascript
+                    if (view.url != url || syncing) return@evaluateJavascript
                     if (value == "true" && !isFinishing) {
                         CookieManager.getInstance().flush()
                         val cookie = CookieManager.getInstance().getCookie("${LemidaParser.BASE}/my/")

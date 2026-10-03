@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 source = (Path(__file__).resolve().parents[2] /
           'app/src/main/java/com/feldman/scholix/lemida/LemidaRequestScript.kt').read_text(encoding='utf-8')
 scripts = {name: re.search(r'fun ' + name + r'\(.*?= """(.*?)"""', source, re.S).group(1)
-           for name in ('start', 'poll', 'cleanup', 'document')}
+           for name in ('start', 'poll', 'cleanup', 'document', 'signedIn')}
 origin = 'https://lemida.biu.ac.il'
 
 
@@ -28,6 +28,20 @@ with sync_playwright() as runtime:
     page.goto(origin + '/my/')
 
     assert 'Mock Moodle' in page.evaluate(script('document', url=page.url))
+
+    # Sign-in checks require this exact document and the authenticated Moodle markers.
+    assert page.evaluate(script('signedIn', url=page.url)) is False
+    page.set_content('<a href="/login/logout.php">Logout</a>')
+    page.evaluate('window.M = {cfg: {userId: 42}}')
+    assert page.evaluate(script('signedIn', url=page.url)) is True
+    assert page.evaluate(script('signedIn', url=origin + '/my/?old=1')) is False
+    page.evaluate("document.body.classList.add('notloggedin')")
+    assert page.evaluate(script('signedIn', url=page.url)) is False
+    page.evaluate("document.body.classList.remove('notloggedin'); window.M.cfg.userId = 1")
+    assert page.evaluate(script('signedIn', url=page.url)) is False
+    page.evaluate("window.M.cfg.userId = 42; document.querySelector('a').remove()")
+    assert page.evaluate(script('signedIn', url=page.url)) is False
+    page.reload()
     assert page.evaluate(script('document', url=origin + '/mod/assign/view.php?id=9')) is None
     old_url = page.url
     page.evaluate("history.replaceState(null, '', '/my/?updated=1')")
@@ -76,7 +90,10 @@ with sync_playwright() as runtime:
         page.goto(url)
         assert page.evaluate(script('start')) is False
         assert page.evaluate(script('document', url=page.url)) is None
+        page.set_content('<a href="/login/logout.php">Logout</a>')
+        page.evaluate('window.M = {cfg: {userId: 42}}')
+        assert page.evaluate(script('signedIn', url=page.url)) is False
         assert json.loads(page.evaluate(script('poll'))) == {'verification': True}
     browser.close()
 
-print('Browser JSON fetch, cancellation, late completion, network errors, stale document and origin guards passed.')
+print('Browser JSON fetch, cancellation, late completion, network errors, stale document, sign-in and origin guards passed.')

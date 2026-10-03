@@ -4,6 +4,12 @@ import org.json.JSONObject
 
 /** One browser request, including its abort handle, lives only in the current document. */
 internal object LemidaRequestScript {
+    fun signedIn(url: String) = """(() => location.origin === '${LemidaParser.BASE}'
+        && location.href === ${JSONObject.quote(url)}
+        && !!document.body && !document.body.classList.contains('notloggedin')
+        && Number(window.M?.cfg?.userId) > 1
+        && !!document.querySelector('a[href*="/login/logout.php"]'))()"""
+
     fun document(url: String) = """(() =>
         location.origin === '${LemidaParser.BASE}' && location.href === ${JSONObject.quote(url)}
             ? document.documentElement.outerHTML : null

@@ -85,6 +85,10 @@ The sign-in window loads homework through its own browser before closing; a
 failure remains visible instead of returning silently to an empty page.
 Encrypted-session saves run inside the same recovery flow on an IO dispatcher,
 so a storage/Keystore error offers Retry rather than escaping the browser callback.
+Navigation releases an unfinished sign-in check; a late callback cannot confirm
+another document or block its check. Confirmation requires the current URL,
+HTTPS origin, Moodle user ID and logout marker. Main-frame sign-in network/HTTP
+failures show Retry; failed subresources do not interrupt a usable login page.
 Course discovery uses Moodle's session-authenticated
 `core_course_get_enrolled_courses_by_timeline_classification` AJAX method with
 `allincludinghidden` and offset pagination. Activity discovery uses the working
