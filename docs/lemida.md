@@ -219,7 +219,7 @@ scripts, MFA/consent state and login probes, and run their existing unit tests:
 .\gradlew.bat --project-dir tools/lemida/core-checks test
 ```
 
-All 66 focused tests passed after rebasing onto main's 2026-10-03 updates. This
+All 72 focused tests passed after rebasing onto main's 2026-10-03 updates. This
 standalone project reads the root version catalog and requires neither Android
 nor Motion; it does not validate UI, WebView, Keystore or background scheduling.
 Session exceptions were moved into an Android-independent source file without
@@ -239,3 +239,13 @@ lost picker/SMS callbacks, same-URL navigation, listener readiness, expired or
 changed codes and disabled Verify. They use the production scripts/state and send
 no messages or network requests. Activity timer/receiver binding and the complete
 Android app still require compilation/device validation once Motion is available.
+
+Native homework instructions and Python detail exports preserve numbered, lettered
+and Roman lists, including explicit starting values, item restarts and descending
+lists. Nested lists start on separate lines and keep their own counters; unordered
+items remain bullets. The same formatting applies to teacher feedback cells and
+fallback detail text. Python also recognizes `#intro` and combines separate
+instruction sections without duplicating nested wrappers. Six additional actual
+parser regressions passed in the focused JVM checks; the equivalent Python suite
+passed 24 tests, with two private-HTML checks intentionally skipped. These checks
+use synthetic pages and do not access a live account or validate phone rendering.

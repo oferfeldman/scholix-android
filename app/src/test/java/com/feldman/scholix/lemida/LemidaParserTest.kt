@@ -200,6 +200,43 @@ class LemidaParserTest {
             <ul><li>First question</li><li>Second question</li></ul></div></main>""")
         assertEquals("הנחיות הגשה\nUpload a PDF\nInclude your name\n• First question\n• Second question", detail.description)
     }
+    @Test fun instructionsKeepQuestionNumbersAndExplicitRestarts() {
+        val detail = LemidaParser.detail("""<main id="region-main"><div id="intro"><ol start="3">
+            <li>Prove</li><li value="8">Calculate</li><li>Explain</li></ol></div></main>""")
+        assertEquals("3. Prove\n8. Calculate\n9. Explain", detail.description)
+    }
+    @Test fun nestedInstructionsKeepDescendingParentNumbersAndSeparateBullets() {
+        val detail = LemidaParser.detail("""<main id="region-main"><div id="intro"><ol reversed>
+            <li>הוכיחו<ul><li>Explain</li><li>Check</li></ul>Then submit</li>
+            <li>Next</li><li>Last</li></ol></div></main>""")
+        assertEquals("3. הוכיחו\n• Explain\n• Check\nThen submit\n2. Next\n1. Last", detail.description)
+    }
+    @Test fun instructionsPreserveLetterAndRomanReferences() {
+        val detail = LemidaParser.detail("""<main id="region-main"><div id="intro"><ol type="A" start="26">
+            <li>Choose<ol type="i" start="4"><li>Proof</li><li>Check</li></ol></li>
+            <li>Submit</li></ol><ol type="I" start="9"><li>Review</li></ol></div></main>""")
+        assertEquals("Z. Choose\niv. Proof\nv. Check\nAA. Submit\nIX. Review", detail.description)
+    }
+    @Test fun malformedAndNonPositiveCountersKeepReadableFallbacks() {
+        val detail = LemidaParser.detail("""<main id="region-main"><div id="intro"><ol type="a" start="invalid">
+            <li value="invalid">First</li><li value="-1">Before</li><li>Zero</li>
+            <li value=" +4tail">Fourth</li></ol><ol type="I" start="4000"><li>Large</li></ol>
+            <ol start="9223372036854775807"><li>Maximum</li><li>Following</li></ol></div></main>""")
+        assertEquals("a. First\n-1. Before\n0. Zero\nd. Fourth\n4000. Large\n9223372036854775807. Maximum\n9223372036854775808. Following", detail.description)
+    }
+    @Test fun feedbackListsAndFallbackInstructionsKeepNumbering() {
+        val detail = LemidaParser.detail("""<main id="region-main"><p>Instructions</p>
+            <ol><li>Read</li><li>Submit</li></ol><table><tr><th>Feedback</th><td>
+            <ol start="2"><li>Fix proof</li><li>Explain</li></ol></td></tr></table></main>""")
+        assertEquals("", detail.description)
+        assertTrue(detail.text.startsWith("Instructions\n1. Read\n2. Submit\nFeedback"))
+        assertEquals(listOf("Feedback", "2. Fix proof\n3. Explain"), detail.tables.single().single())
+    }
+    @Test fun unorderedListsDoNotInterpretOrderedCounterAttributes() {
+        val detail = LemidaParser.detail("""<main id="region-main"><div id="intro"><ul start="9">
+            <li value="12">Read</li><li>Submit</li></ul></div></main>""")
+        assertEquals("• Read\n• Submit", detail.description)
+    }
     @Test fun jsonActivityStateFiltersHomeworkAndPreservesStableIds() {
         val state = """{"cm":[
             {"id":"9","name":"תרגיל &amp; תשובות","url":"https://lemida.biu.ac.il/mod/assign/view.php?id=9","uservisible":true},

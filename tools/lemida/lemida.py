@@ -23,6 +23,61 @@ def text(node):
     return ' '.join(node.stripped_strings) if node else ''
 
 
+def list_ordinal(raw):
+    match = re.match(r'^[\t\n\f\r ]*([+-]?[0-9]+)', str(raw or ''))
+    return int(match[1]) if match else None
+
+
+def list_marker(ordinal, kind):
+    if kind in ('a', 'A') and ordinal > 0:
+        letters = ''
+        while ordinal > 0:
+            ordinal, remainder = divmod(ordinal - 1, 26)
+            letters = chr(ord('a') + remainder) + letters
+        return letters.upper() if kind == 'A' else letters
+    if kind in ('i', 'I') and 1 <= ordinal <= 3999:
+        roman = ''
+        for value, symbol in ((1000, 'M'), (900, 'CM'), (500, 'D'), (400, 'CD'),
+                              (100, 'C'), (90, 'XC'), (50, 'L'), (40, 'XL'),
+                              (10, 'X'), (9, 'IX'), (5, 'V'), (4, 'IV'), (1, 'I')):
+            count, ordinal = divmod(ordinal, value)
+            roman += symbol * count
+        return roman.lower() if kind == 'i' else roman
+    return str(ordinal)
+
+
+def readable_text(node):
+    if node is None:
+        return ''
+    content = soup(str(node))
+    for br in content.select('br'):
+        br.replace_with('\n')
+    for listing in content.select('ol, ul, menu'):
+        items = listing.find_all('li', recursive=False)
+        ordered = listing.name == 'ol'
+        reversed_list = listing.has_attr('reversed')
+        ordinal = list_ordinal(listing.get('start'))
+        if ordinal is None:
+            ordinal = len(items) if reversed_list else 1
+        for item in items:
+            value = list_ordinal(item.get('value')) if ordered else None
+            if value is not None:
+                ordinal = value
+            marker = list_marker(ordinal, item.get('type') or listing.get('type')) + '.' if ordered else '•'
+            item.insert(0, marker + ' ')
+            ordinal += -1 if reversed_list else 1
+        listing.insert(0, '\n')
+        listing.append('\n')
+    for item in content.select('li'):
+        if item.parent.name not in ('ol', 'ul', 'menu'):
+            item.insert(0, '• ')
+    for cell in content.select('th, td'):
+        cell.append(' ')
+    for block in content.select('p, div, li, h1, h2, h3, tr'):
+        block.append('\n')
+    return '\n'.join(' '.join(line.split()) for line in content.get_text().splitlines() if line.strip())
+
+
 def soup(html):
     return BeautifulSoup(html, 'html.parser')
 
@@ -68,15 +123,11 @@ def tables(container):
                 content = soup(str(cell))
                 for nested in content.select('table'):
                     nested.decompose()
-                for br in content.select('br'):
-                    br.replace_with('\n')
-                for block in content.select('p, div, li, h1, h2, h3'):
-                    block.append('\n')
-                cells.append('\n'.join(' '.join(line.split()) for line in content.get_text().splitlines() if line.strip()))
+                cells.append(readable_text(content))
             if any(cells):
                 rows.append(cells)
         if rows:
-            result.append({'caption': text(table.find('caption', recursive=False)), 'rows': rows})
+            result.append({'caption': readable_text(table.find('caption', recursive=False)), 'rows': rows})
     return result
 
 
@@ -134,11 +185,13 @@ def parse_detail(html):
     main = s.select_one('#region-main') or s.select_one('main') or s
     for node in main.select('script, style, noscript'):
         node.decompose()
+    descriptions = main.select('.activity-description, #intro, .generalbox')
+    top_level = [node for node in descriptions if not any(parent in descriptions for parent in node.parents)]
     return {'title': text(s.select_one('h1')) or text(s.title),
-            'description': text(main.select_one('.activity-description, .box.generalbox')),
+            'description': '\n\n'.join(readable_text(node) for node in top_level),
             'dates': [{'timestamp': n.get('data-timestamp'), 'text': text(n)}
                       for n in main.select('[data-timestamp]')],
-            'tables': tables(main), 'files': files(main), 'text': text(main)}
+            'tables': tables(main), 'files': files(main), 'text': readable_text(main)}
 
 
 def write_json(path, data):

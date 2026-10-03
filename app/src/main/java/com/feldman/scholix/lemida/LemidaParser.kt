@@ -8,6 +8,7 @@ import org.json.JSONException
 import java.io.IOException
 import java.net.URI
 import java.net.URLDecoder
+import java.math.BigInteger
 
 data class Homework(val id: String, val courseId: Int, val course: String,
                     val title: String, val type: String, val url: String, val dates: String) {
@@ -193,15 +194,59 @@ object LemidaParser {
         val topLevelDescriptions = descriptions.filter { element -> element.parents().none { it in descriptions } }
         return HomeworkDetail(topLevelDescriptions.joinToString("\n\n") { readableText(it) },
             main.select("[data-region=activity-dates], .activity-dates").text(), parsedTables.map { it.first },
-            main.text(), notices, parsedTables.map { it.second })
+            readableText(main), notices, parsedTables.map { it.second })
     }
     private fun readableText(element: Element): String {
         val content = element.clone()
         content.select("br").forEach { it.before("\n"); it.remove() }
-        content.select("li").forEach { it.prependText("• ") }
+        content.select("ol, ul, menu").forEach { list ->
+            val items = list.children().filter { it.tagName() == "li" }
+            val ordered = list.tagName() == "ol"
+            val reversed = list.hasAttr("reversed")
+            var ordinal = listOrdinal(list.attr("start"))
+                ?: BigInteger.valueOf(if (reversed) items.size.toLong() else 1L)
+            items.forEach { item ->
+                if (ordered) ordinal = listOrdinal(item.attr("value")) ?: ordinal
+                val marker = if (ordered) listMarker(ordinal, item.attr("type").ifEmpty { list.attr("type") }) + "." else "•"
+                item.prependText("$marker ")
+                ordinal += if (reversed) -BigInteger.ONE else BigInteger.ONE
+            }
+            // A nested list starts a new line, even if its parent item has no paragraph.
+            list.prependText("\n")
+            list.appendText("\n")
+        }
+        content.select("li").filter { it.parent()?.tagName() !in setOf("ol", "ul", "menu") }
+            .forEach { it.prependText("• ") }
+        content.select("th, td").forEach { it.appendText(" ") }
         content.select("p, div, li, h1, h2, h3, tr").forEach { it.appendText("\n") }
         return content.wholeText().lineSequence().map { it.trim().replace(Regex("[\\t ]+"), " ") }
             .filter { it.isNotBlank() }.joinToString("\n")
+    }
+    private fun listOrdinal(raw: String): BigInteger? =
+        Regex("^[\\t\\n\\f\\r ]*([+-]?[0-9]+)").find(raw)?.groupValues?.get(1)?.let { BigInteger(it) }
+
+    private fun listMarker(ordinal: BigInteger, type: String): String {
+        if (type in setOf("a", "A") && ordinal.signum() > 0) {
+            var remaining = ordinal
+            val letters = StringBuilder()
+            val radix = BigInteger.valueOf(26)
+            while (remaining.signum() > 0) {
+                val (quotient, remainder) = (remaining - BigInteger.ONE).divideAndRemainder(radix)
+                letters.append('a' + remainder.toInt())
+                remaining = quotient
+            }
+            return letters.reverse().toString().let { if (type == "A") it.uppercase() else it }
+        }
+        if (type in setOf("i", "I") && ordinal in BigInteger.ONE..BigInteger.valueOf(3999)) {
+            var remaining = ordinal.toInt()
+            val roman = StringBuilder()
+            for ((value, symbol) in listOf(1000 to "M", 900 to "CM", 500 to "D", 400 to "CD",
+                100 to "C", 90 to "XC", 50 to "L", 40 to "XL", 10 to "X", 9 to "IX", 5 to "V", 4 to "IV", 1 to "I")) {
+                while (remaining >= value) { roman.append(symbol); remaining -= value }
+            }
+            return roman.toString().let { if (type == "i") it.lowercase() else it }
+        }
+        return ordinal.toString()
     }
     fun encode(items: List<Homework>) = JSONArray().apply { items.forEach { put(it.json()) } }.toString()
     // Keep the union: an activity temporarily hidden and later visible isn't new again.

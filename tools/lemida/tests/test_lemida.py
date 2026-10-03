@@ -110,6 +110,45 @@ class RedirectHandling(unittest.TestCase):
 
 
 class SavedPages(unittest.TestCase):
+    def test_instructions_keep_question_numbers_and_explicit_restarts(self):
+        result = lemida.parse_detail('''<main><div id="intro"><ol start="3">
+            <li>Prove</li><li value="8">Calculate</li><li>Explain</li></ol></div></main>''')
+        self.assertEqual(result['description'], '3. Prove\n8. Calculate\n9. Explain')
+
+    def test_nested_instructions_keep_descending_numbers_and_separate_bullets(self):
+        result = lemida.parse_detail('''<main><div id="intro"><ol reversed>
+            <li>הוכיחו<ul><li>Explain</li><li>Check</li></ul>Then submit</li>
+            <li>Next</li><li>Last</li></ol></div></main>''')
+        self.assertEqual(result['description'], '3. הוכיחו\n• Explain\n• Check\nThen submit\n2. Next\n1. Last')
+
+    def test_instructions_preserve_letter_and_roman_references_without_duplicate_wrappers(self):
+        result = lemida.parse_detail('''<main><div class="activity-description"><div id="intro">
+            <ol type="A" start="26"><li>Choose<ol type="i" start="4"><li>Proof</li><li>Check</li></ol></li>
+            <li>Submit</li></ol><ol type="I" start="9"><li>Review</li></ol></div></div></main>''')
+        self.assertEqual(result['description'], 'Z. Choose\niv. Proof\nv. Check\nAA. Submit\nIX. Review')
+
+    def test_invalid_and_nonpositive_counters_keep_readable_fallbacks(self):
+        result = lemida.parse_detail('''<main><div id="intro"><ol type="a" start="invalid">
+            <li value="invalid">First</li><li value="-1">Before</li><li>Zero</li><li value=" +4tail">Fourth</li>
+            </ol><ol type="I" start="4000"><li>Large</li></ol>
+            <ol start="9223372036854775807"><li>Maximum</li><li>Following</li></ol></div></main>''')
+        self.assertEqual(result['description'],
+                         'a. First\n-1. Before\n0. Zero\nd. Fourth\n4000. Large\n'
+                         '9223372036854775807. Maximum\n9223372036854775808. Following')
+
+    def test_feedback_lists_and_fallback_instructions_keep_numbering(self):
+        result = lemida.parse_detail('''<main><p>Instructions</p><ol><li>Read</li><li>Submit</li></ol>
+            <table><tr><th>Feedback</th><td><ol start="2"><li>Fix proof</li><li>Explain</li></ol>
+            </td></tr></table></main>''')
+        self.assertEqual(result['description'], '')
+        self.assertTrue(result['text'].startswith('Instructions\n1. Read\n2. Submit\nFeedback'))
+        self.assertEqual(result['tables'][0]['rows'], [['Feedback', '2. Fix proof\n3. Explain']])
+
+    def test_unordered_lists_ignore_ordered_counter_attributes(self):
+        result = lemida.parse_detail('''<main><div id="intro"><ul start="9"><li value="12">Read</li>
+            <li>Submit</li></ul></div></main>''')
+        self.assertEqual(result['description'], '• Read\n• Submit')
+
     def test_nested_grade_tables_are_not_duplicated(self):
         result = lemida.parse_detail('''<main><table><tr><th>Feedback</th><td>Teacher summary
             <table><tr><th>Grade</th><td>95 / 100</td></tr></table></td></tr></table></main>''')
