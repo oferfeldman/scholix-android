@@ -204,7 +204,7 @@ stacks remain available. A warm `open_homework` intent was verified on the phone
 an actual notification tap and recreation still need device verification.
 `LemidaBrowserLifecycleTest` uses controlled, non-network WebView loads to check
 page cancellation before reuse, idempotent client cleanup, passive university/SSO
-navigation, interactive Microsoft detection and stale snapshot rejection. Its six
+navigation, interactive Microsoft detection and stale snapshot rejection. Its original six
 tests passed on the connected phone. It does not prepare cookies or read the saved
 session. Together with seven expiry, two layout and four alert tests, all 19 offline
 device regressions passed on 2026-10-03.
@@ -274,7 +274,7 @@ and the SMS dependency from the app build file:
 ```
 
 This check passed with AGP 9.4.1, Gradle 9.8.0 and SDK 37; all 75 existing focused
-unit tests also passed in this Android project. The selected source files and
+unit tests and eight controlled browser host cases passed (83 total). The selected source files and
 notification icon were verified byte-identical to production. It builds a library
 AAR, not a Scholix APK. MainActivity is a compilation fixture used only to resolve
 the worker's notification destination; the real MainActivity, navigation and Motion
@@ -283,3 +283,16 @@ substituting Motion. It does not execute SMS delivery, Play services, Keystore,
 WebView, worker scheduling or notification routing on a phone. See the
 [checker boundaries](../tools/lemida/android-checks/README.md) before interpreting
 the results. Full app and pending device checks remain required for an updated APK.
+
+The browser transport now invalidates document-read and Microsoft-control callbacks
+on each main-frame page start, even when a reload keeps the same URL and client.
+Without that guard, delayed anonymous HTML could interrupt the new page with a
+sign-in redirect, or an old Microsoft control check could prematurely fail passive
+recovery. Two additional `LemidaBrowserLifecycleTest` cases reproduced those failures
+before the fix and passed afterward, while current-page recovery still works.
+All eight methods now run under Robolectric SDK 37 in the focused Android project,
+using the actual device suite and production browser with controlled callbacks.
+The host-only Main dispatcher fixture and WebView subclass do not render pages,
+execute JavaScript, prepare cookies or read a saved session. This adds local
+callback/lifecycle coverage; the new cases have not run on a phone and do not
+validate real Microsoft SSO, SMS delivery or full app behavior.

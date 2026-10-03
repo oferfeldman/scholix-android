@@ -16,8 +16,9 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /** Controlled loads never contact a server, prepare cookies, or read the saved session. */
-class LemidaBrowserLifecycleTest {
+open class LemidaBrowserLifecycleTest {
     private class ControlledWebView(context: Context) : WebView(context) {
+        init { webViewClient = WebViewClient() }
         var requested: String? = null
         var stops = 0
         var scriptCallback: ValueCallback<String>? = null
@@ -79,6 +80,54 @@ class LemidaBrowserLifecycleTest {
                 view.webViewClient.onPageFinished(view, microsoft)
                 view.scriptCallback!!.onReceiveValue("true")
                 assertTrue("Interactive Microsoft page must require sign-in", page.await())
+            } finally { browser.close(); view.destroy() }
+        }
+    }
+
+    @Test fun lateAnonymousSnapshotCannotNavigateASameUrlReloadToSignIn() = runBlocking {
+        withContext(Dispatchers.Main) {
+            val view = ControlledWebView(InstrumentationRegistry.getInstrumentation().targetContext)
+            val browser = LemidaBrowser(view.context, null, view)
+            try {
+                val home = "${LemidaParser.BASE}/my/"
+                val page = async(start = CoroutineStart.UNDISPATCHED) { browser.get(home) }
+                view.webViewClient.onPageFinished(view, home)
+                val abandoned = view.scriptCallback!!
+                view.webViewClient.onPageStarted(view, home, null)
+                abandoned.onReceiveValue(org.json.JSONObject.quote(
+                    "<body class='notloggedin'><a href='/auth/multioauth/login.php?providerid=1'>Sign in</a></body>"))
+                assertEquals("Old HTML must not interrupt a same-URL reload", home, view.requested)
+                assertTrue(page.isActive)
+                view.webViewClient.onPageFinished(view, home)
+                view.scriptCallback!!.onReceiveValue(org.json.JSONObject.quote(
+                    "<body class='notloggedin'><a href='/auth/multioauth/login.php?providerid=1'>Sign in</a></body>"))
+                assertEquals("${LemidaParser.BASE}/auth/multioauth/login.php?providerid=1", view.requested)
+                assertTrue("Current HTML must still be able to recover", page.isActive)
+                page.cancelAndJoin()
+            } finally { browser.close(); view.destroy() }
+        }
+    }
+
+    @Test fun lateMicrosoftChoiceCannotFailASameUrlReload() = runBlocking {
+        withContext(Dispatchers.Main) {
+            val view = ControlledWebView(InstrumentationRegistry.getInstrumentation().targetContext)
+            val browser = LemidaBrowser(view.context, null, view)
+            try {
+                val page = async(start = CoroutineStart.UNDISPATCHED) {
+                    try { browser.get("${LemidaParser.BASE}/my/"); false }
+                    catch (_: LemidaSessionExpired) { true }
+                }
+                val microsoft = "https://login.microsoftonline.com/fixture"
+                view.requested = microsoft
+                view.webViewClient.onPageFinished(view, microsoft)
+                val abandoned = view.scriptCallback!!
+                view.webViewClient.onPageStarted(view, microsoft, null)
+                abandoned.onReceiveValue("true")
+                kotlinx.coroutines.yield()
+                assertTrue("Old Microsoft controls must not expire the new page", page.isActive)
+                view.webViewClient.onPageFinished(view, microsoft)
+                view.scriptCallback!!.onReceiveValue("true")
+                assertTrue("Current Microsoft controls must still require sign-in", page.await())
             } finally { browser.close(); view.destroy() }
         }
     }

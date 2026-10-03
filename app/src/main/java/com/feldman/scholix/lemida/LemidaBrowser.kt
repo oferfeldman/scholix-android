@@ -73,6 +73,11 @@ internal class LemidaBrowser(context: Context, agent: String?, supplied: WebView
             withTimeoutOrNull(60_000) {
                 val html = suspendCancellableCoroutine<String> { continuation ->
                     val client = object : WebViewClient() {
+                        private var pageGeneration = 0L
+                        override fun onPageStarted(web: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                            // A reload can keep the URL and client while replacing the document.
+                            pageGeneration++
+                        }
                         override fun onReceivedError(web: WebView, request: WebResourceRequest, error: WebResourceError) {
                             // Broken images/resources must not discard an otherwise usable page.
                             if (request.isForMainFrame && continuation.isActive) {
@@ -87,6 +92,7 @@ internal class LemidaBrowser(context: Context, agent: String?, supplied: WebView
                         override fun onPageFinished(web: WebView, finished: String) {
                             if (!continuation.isActive || closed || ownerDestroyed() ||
                                 web.webViewClient !== this || web.url != finished) return
+                            val generation = pageGeneration
                             // Perfdrive may complete an automatic browser check and redirect itself.
                             // Wait for Moodle; a CAPTCHA that needs a person will time out visibly.
                             val host = android.net.Uri.parse(finished).host
@@ -98,7 +104,7 @@ internal class LemidaBrowser(context: Context, agent: String?, supplied: WebView
                                     // Visible input/choice controls require the normal interactive login.
                                     web.evaluateJavascript(LemidaRequestScript.interactiveSignIn()) { value ->
                                         if (value == "true" && continuation.isActive && !closed && !ownerDestroyed() &&
-                                            web.webViewClient === this && web.url == finished)
+                                            generation == pageGeneration && web.webViewClient === this && web.url == finished)
                                             continuation.resumeWithException(LemidaSessionExpired())
                                     }
                                 }
@@ -108,7 +114,7 @@ internal class LemidaBrowser(context: Context, agent: String?, supplied: WebView
                             web.evaluateJavascript(LemidaRequestScript.document(finished)) { raw ->
                                 val result = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
                                 if (result != null && continuation.isActive && !closed && !ownerDestroyed() &&
-                                    web.webViewClient === this && web.url == finished) {
+                                    generation == pageGeneration && web.webViewClient === this && web.url == finished) {
                                     val entry = if (allowReconnect && !LemidaParser.authenticated(result))
                                         LemidaParser.reconnectUrl(result) else null
                                     if (entry != null && reconnectPaths.add(android.net.Uri.parse(entry).path.orEmpty())) {
