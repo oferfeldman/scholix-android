@@ -205,6 +205,10 @@ private fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack:
             PageItem(title = "Retry loading homework", icon = rememberVectorPainter(Icons.Default.Refresh), onClick = { retry++ })
         } }
         detail?.let { data ->
+            if (data.notices.isNotEmpty()) {
+                Title("Activity notices")
+                Section { data.notices.forEach { notice -> Item { Text(notice, style = MaterialTheme.typography.bodyMedium) } } }
+            }
             if (data.dates.isNotBlank()) { Title("Dates"); Section { Item { Text(data.dates, style = MaterialTheme.typography.bodyMedium) } } }
             if (data.description.isNotBlank()) { Title("Instructions"); Section { Item { Text(data.description, style = MaterialTheme.typography.bodyMedium) } } }
             if (data.tables.isNotEmpty()) Title("Submission and grading")
@@ -214,7 +218,7 @@ private fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack:
                     if (cells.size > 1) Text(cells.drop(1).joinToString("\n"), style = MaterialTheme.typography.bodyMedium)
                 }
             } } } }
-            if (data.description.isBlank() && data.tables.isEmpty()) Section { Item {
+            if (data.description.isBlank() && data.tables.isEmpty() && (data.text.isNotBlank() || data.notices.isEmpty())) Section { Item {
                 Text(data.text.ifBlank { "This activity has no instructions yet." }, style = MaterialTheme.typography.bodyMedium)
             } }
         }

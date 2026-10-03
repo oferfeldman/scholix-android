@@ -4,6 +4,34 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun availabilityNoticesAreRetainedBesideInstructionsAndGrades() {
+        val detail = LemidaParser.detail("""<main id="region-main"><div id="intro">Submit a PDF</div>
+            <div class="alert alert-danger">Submission overdue</div>
+            <div class="alert alert-warning"><div class="alert">Attempts exhausted</div><p>Contact your teacher</p></div>
+            <table><tr><th>Grade</th><td>95</td></tr></table></main>""")
+        assertEquals("Submit a PDF", detail.description)
+        assertEquals(listOf("Submission overdue", "Attempts exhausted\nContact your teacher"), detail.notices)
+        assertEquals(detail, HomeworkDetail.fromJson(detail.json().toString()))
+    }
+    @Test fun hiddenAndRepeatedNoticesDoNotClutterTheNativePage() {
+        val detail = LemidaParser.detail("""<main id="region-main">
+            <div class="alert">Visible<div class="alert" hidden>Nested hidden</div></div><div class="alert">Visible</div>
+            <div class="alert" hidden>Hidden</div>
+            <div aria-hidden="true"><div class="alert">Template</div></div>
+            <div class="d-none"><div class="alert">Hidden template</div></div>
+            <div style="display: none"><div class="alert">Not rendered</div></div>
+            <div class="alert" style="visibility:hidden">Invisible</div></main>""")
+        assertEquals(listOf("Visible"), detail.notices)
+        assertFalse(detail.text.contains("Hidden"))
+        assertFalse(detail.text.contains("Visible"))
+    }
+    @Test fun detailCachesFromEarlierVersionsRemainReadable() {
+        val old = """{"description":"Instructions","dates":"Friday","tables":[],"text":"Instructions"}"""
+        val detail = HomeworkDetail.fromJson(old)
+        assertEquals("Instructions", detail.description)
+        assertEquals("Friday", detail.dates)
+        assertTrue(detail.notices.isEmpty())
+    }
     @Test fun ajaxSupportsCourseObjectsAndEncodedActivityState() {
         val courses = LemidaParser.ajaxData("""[{"error":false,"data":{"courses":[],"nextoffset":0}}]""") as org.json.JSONObject
         assertEquals(0, courses.getJSONArray("courses").length())
@@ -76,7 +104,7 @@ class LemidaParserTest {
         val detail = LemidaParser.detail("""<main id="region-main"><div id="intro">Submit a PDF</div>
             <div class="alert alert-danger">Submission is overdue</div></main>""")
         assertEquals("Submit a PDF", detail.description)
-        assertTrue(detail.text.contains("Submission is overdue"))
+        assertEquals(listOf("Submission is overdue"), detail.notices)
     }
     @Test fun combinedSearchMatchesWordsAcrossCourseAndTitleInAnyOrder() {
         val item = Homework("1:assign:9", 1, "Linear Algebra", "Exercise 10 — וקטורים", "assign", "", "")

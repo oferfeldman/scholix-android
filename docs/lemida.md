@@ -89,6 +89,10 @@ Activity URLs are parsed by endpoint and complete ID parameter, allowing reorder
 query parameters while rejecting ambiguous IDs and other origins. Moodle error
 pages fail detail loading instead of overwriting previously cached instructions;
 ordinary homework warnings (such as overdue submission) remain readable.
+Native details show activity notices beside instructions and grading tables,
+including overdue/availability/attempt notices that were previously only in the
+fallback text. Hidden notices are excluded and repeated messages are deduplicated;
+cached details from earlier versions remain readable.
 Updates commit only after discovery and every course succeed. Seen IDs are
 kept as a union to avoid duplicate alerts after temporary hiding. A different
 Moodle `userId` establishes a fresh notification baseline.

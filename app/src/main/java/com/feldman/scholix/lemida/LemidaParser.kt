@@ -25,9 +25,11 @@ data class Homework(val id: String, val courseId: Int, val course: String,
     }
 }
 
-data class HomeworkDetail(val description: String, val dates: String, val tables: List<List<List<String>>>, val text: String) {
+data class HomeworkDetail(val description: String, val dates: String, val tables: List<List<List<String>>>, val text: String,
+                          val notices: List<String> = emptyList()) {
     fun json() = JSONObject().put("description", description).put("dates", dates).put("text", text)
         .put("tables", JSONArray(tables.map { table -> JSONArray(table.map { JSONArray(it) }) }))
+        .put("notices", JSONArray(notices))
     companion object {
         fun fromJson(raw: String): HomeworkDetail {
             val j = JSONObject(raw)
@@ -39,7 +41,9 @@ data class HomeworkDetail(val description: String, val dates: String, val tables
                         val cells = rows.getJSONArray(r)
                         (0 until cells.length()).map { cells.getString(it) }
                     }
-                }, j.optString("text"))
+                }, j.optString("text"), j.optJSONArray("notices")?.let { messages ->
+                    (0 until messages.length()).map { messages.getString(it) }
+                }.orEmpty())
         }
     }
 }
@@ -132,13 +136,27 @@ object LemidaParser {
             throw IOException("Lemida could not open this homework. Try refreshing the homework list.")
         }
         main.select("script, style, noscript, form, button, nav").remove()
+        val alerts = main.select(".alert")
+        val visibleAlerts = alerts.filter { notice ->
+            generateSequence(notice) { it.parent() }.none { element ->
+                element.hasAttr("hidden") || element.attr("aria-hidden").equals("true", ignoreCase = true) ||
+                    element.hasClass("d-none") ||
+                    Regex("(?:^|;)\\s*(?:display\\s*:\\s*none|visibility\\s*:\\s*hidden)\\b", RegexOption.IGNORE_CASE)
+                        .containsMatchIn(element.attr("style"))
+            }
+        }
+        alerts.filter { it !in visibleAlerts }.forEach { it.remove() }
+        val notices = visibleAlerts.filter { notice -> notice.parents().none { it in visibleAlerts } }
+            .map { readableText(it) }.filter { it.isNotBlank() }.distinct()
+        // Notices have their own section; don't repeat them in instructions or fallback text.
+        alerts.remove()
         val tables = main.select("table").map { table -> table.select("tr").map { row ->
             row.select("th, td").map { it.text() }
         }.filter { it.isNotEmpty() } }
         val descriptions = main.select(".activity-description, #intro, .generalbox")
         val topLevelDescriptions = descriptions.filter { element -> element.parents().none { it in descriptions } }
         return HomeworkDetail(topLevelDescriptions.joinToString("\n\n") { readableText(it) },
-            main.select("[data-region=activity-dates], .activity-dates").text(), tables, main.text())
+            main.select("[data-region=activity-dates], .activity-dates").text(), tables, main.text(), notices)
     }
     private fun readableText(element: Element): String {
         val content = element.clone()
