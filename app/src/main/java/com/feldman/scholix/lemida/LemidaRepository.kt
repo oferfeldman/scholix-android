@@ -79,13 +79,13 @@ class LemidaRepository(context: Context, preferencesName: String = "lemida_sync"
                         val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
                         val data = LemidaParser.ajaxData(raw) as? JSONObject
                             ?: throw IOException("Unexpected Moodle course data. Previous homework preserved.")
+                        val next = LemidaParser.nextCourseOffset(data, offset)
                         val batch = data.getJSONArray("courses")
                         for (i in 0 until batch.length()) {
                             val c = batch.getJSONObject(i)
                             courses[c.getInt("id")] = org.jsoup.Jsoup.parse(c.getString("fullname")).text()
                         }
-                        val next = data.getInt("nextoffset")
-                        if (next <= offset) { complete = true; break }
+                        if (next == offset) { complete = true; break }
                         offset = next
                     }
                     if (!complete) throw IOException("Course pagination did not finish; previous data preserved.")

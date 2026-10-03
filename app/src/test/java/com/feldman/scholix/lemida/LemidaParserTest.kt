@@ -4,6 +4,29 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LemidaParserTest {
+    @Test fun coursePaginationCompletesOnlyOnAnEmptyPageAtTheCurrentOffset() {
+        assertEquals(1, LemidaParser.nextCourseOffset(org.json.JSONObject("""{"courses":[{"id":1}],"nextoffset":1}"""), 0))
+        assertEquals(2, LemidaParser.nextCourseOffset(org.json.JSONObject("""{"courses":[],"nextoffset":2}"""), 1))
+        assertEquals(2, LemidaParser.nextCourseOffset(org.json.JSONObject("""{"courses":[],"nextoffset":2}"""), 2))
+        assertEquals(0, LemidaParser.nextCourseOffset(org.json.JSONObject("""{"courses":[],"nextoffset":0}"""), 0))
+    }
+    @Test fun stalledAndBackwardsCoursePagesCannotCommitPartialSnapshots() {
+        listOf("""{"courses":[{"id":1}],"nextoffset":1}""",
+            """{"courses":[],"nextoffset":0}""",
+            """{"courses":[{"id":2}],"nextoffset":0}""").forEach { raw ->
+            assertThrows(java.io.IOException::class.java) { LemidaParser.nextCourseOffset(org.json.JSONObject(raw), 1) }
+        }
+    }
+    @Test fun malformedCourseOffsetsAndBatchesAreRejectedWithoutCoercion() {
+        listOf("-1", "1.5", "\"1\"", "true", "null", "2147483648").forEach { value ->
+            val data = org.json.JSONObject("""{"courses":[],"nextoffset":$value}""")
+            assertThrows(java.io.IOException::class.java) { LemidaParser.nextCourseOffset(data, 0) }
+        }
+        listOf("""{"courses":[]}""", """{"courses":null,"nextoffset":0}""",
+            """{"courses":{},"nextoffset":0}""").forEach { raw ->
+            assertThrows(java.io.IOException::class.java) { LemidaParser.nextCourseOffset(org.json.JSONObject(raw), 0) }
+        }
+    }
     @Test fun nestedGradingRowsBelongToTheirOwnTableOnly() {
         val detail = LemidaParser.detail("""<main id="region-main"><table><tr><th>Feedback</th>
             <td>Teacher summary<table><tr><th>Grade</th><td>95 / 100</td></tr></table></td>

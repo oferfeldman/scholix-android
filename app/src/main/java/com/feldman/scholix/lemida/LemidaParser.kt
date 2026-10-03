@@ -85,6 +85,17 @@ object LemidaParser {
         }
     }
 
+    /** Moodle returns current offset + processed count; only an empty stalled page is complete. */
+    fun nextCourseOffset(data: JSONObject, offset: Int): Int {
+        val courses = data.optJSONArray("courses")
+        val next = data.opt("nextoffset")
+        if (courses == null || next !is Int || next < offset ||
+            (next == offset && courses.length() != 0)) {
+            throw IOException("Course pagination did not finish; previous data preserved.")
+        }
+        return next
+    }
+
     fun homework(html: String, courseId: Int, courseName: String): List<Homework> {
         val doc = Jsoup.parse(html, BASE)
         check(doc.body().id().startsWith("page-course-view")) { "Unexpected course page" }

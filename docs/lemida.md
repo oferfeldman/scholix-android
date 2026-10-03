@@ -101,8 +101,13 @@ Nested grading tables contribute each row only to its own table; empty layout
 wrappers are omitted, while blank grade values are retained. Feedback paragraphs
 and line breaks survive extraction, and native grading sections show table captions.
 The Python exporter uses the same row-ownership and feedback-formatting rules.
-Updates commit only after discovery and every course succeed. Seen IDs are
-kept as a union to avoid duplicate alerts after temporary hiding. A different
+Updates commit only after discovery and every course succeed.
+Course pagination accepts completion only when an empty response keeps the
+current offset. Stalled nonempty pages, backwards offsets, and malformed paging
+data fail the update and preserve the previous snapshot/export. This follows
+[Moodle's offset-plus-processed-count contract](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/course/externallib.php#L3818-L3821)
+in Android and Python; the bounded page limit remains in place.
+Seen IDs are kept as a union to avoid duplicate alerts after temporary hiding. A different
 Moodle `userId` establishes a fresh notification baseline.
 Both discovery calls share response validation. Known session errors and HTML
 login redirects restore sign-in; unavailable methods and malformed responses

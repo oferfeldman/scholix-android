@@ -34,13 +34,55 @@ class RedirectHandling(unittest.TestCase):
         client = lemida.Client.__new__(lemida.Client)
         client.fetch = Mock()
         client.ajax = Mock(side_effect=[
-            {'courses': [{'id': 1, 'fullname': 'מתמטיקה &amp; לוגיקה'}], 'nextoffset': 50},
-            {'courses': [{'id': 2, 'fullname': 'Second'}], 'nextoffset': 0},
+            {'courses': [{'id': 1, 'fullname': 'מתמטיקה &amp; לוגיקה'}], 'nextoffset': 1},
+            {'courses': [{'id': 2, 'fullname': 'Second'}], 'nextoffset': 2},
+            {'courses': [], 'nextoffset': 2},
         ])
         found = client.discover()
         self.assertEqual(set(found), {1, 2})
         self.assertEqual(found[1]['name'], 'מתמטיקה & לוגיקה')
-        self.assertEqual(client.ajax.call_args_list[1].args[1]['offset'], 50)
+        self.assertEqual([call.args[1]['offset'] for call in client.ajax.call_args_list], [0, 1, 2])
+
+    def test_nonempty_stalled_page_cannot_complete_discovery(self):
+        client = lemida.Client.__new__(lemida.Client)
+        client.fetch = Mock()
+        client.ajax = Mock(return_value={'courses': [{'id': 1, 'fullname': 'Math'}], 'nextoffset': 0})
+        with self.assertRaisesRegex(RuntimeError, 'previous export is preserved'):
+            client.discover()
+        self.assertEqual(client.ajax.call_count, 1)
+
+    def test_backwards_offset_cannot_commit_a_partial_course_list(self):
+        client = lemida.Client.__new__(lemida.Client)
+        client.fetch = Mock()
+        for courses in ([], [{'id': 2, 'fullname': 'Second'}]):
+            with self.subTest(courses=courses):
+                client.ajax = Mock(side_effect=[
+                    {'courses': [{'id': 1, 'fullname': 'Math'}], 'nextoffset': 1},
+                    {'courses': courses, 'nextoffset': 0},
+                ])
+                with self.assertRaisesRegex(RuntimeError, 'previous export is preserved'):
+                    client.discover()
+
+    def test_malformed_pagination_is_rejected_without_coercion(self):
+        client = lemida.Client.__new__(lemida.Client)
+        client.fetch = Mock()
+        invalid = [{'courses': [], 'nextoffset': value} for value in (-1, 1.5, '1', True, None)]
+        invalid += [{'courses': []}, {'courses': None, 'nextoffset': 0}, []]
+        for data in invalid:
+            with self.subTest(data=data):
+                client.ajax = Mock(return_value=data)
+                with self.assertRaisesRegex(RuntimeError, 'previous export is preserved'):
+                    client.discover()
+
+    def test_empty_first_page_completes_and_page_limit_still_fails(self):
+        client = lemida.Client.__new__(lemida.Client)
+        client.fetch = Mock()
+        client.ajax = Mock(return_value={'courses': [], 'nextoffset': 0})
+        self.assertEqual(client.discover(), {})
+        client.ajax = Mock(side_effect=lambda method, args: {'courses': [], 'nextoffset': args['offset'] + 1})
+        with self.assertRaisesRegex(RuntimeError, 'previous export is preserved'):
+            client.discover()
+        self.assertEqual(client.ajax.call_count, 100)
 
     def test_authentication_resumes_after_navigation(self):
         client = lemida.Client.__new__(lemida.Client)

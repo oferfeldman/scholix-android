@@ -331,12 +331,17 @@ class Client:
         for _ in range(100):
             data = self.ajax('core_course_get_enrolled_courses_by_timeline_classification', {
                 'classification': 'allincludinghidden', 'limit': 50, 'offset': offset, 'sort': 'fullname'})
-            for course in data['courses']:
+            if not isinstance(data, dict):
+                raise RuntimeError('Unexpected Moodle course data; previous export is preserved.')
+            batch, next_offset = data.get('courses'), data.get('nextoffset')
+            if (not isinstance(batch, list) or type(next_offset) is not int or next_offset < offset
+                    or (next_offset == offset and batch)):
+                raise RuntimeError('Course pagination did not finish; previous export is preserved.')
+            for course in batch:
                 cid = int(course['id'])
                 found[cid] = {'id': cid, 'name': text(soup(course['fullname'])),
                               'url': f'{BASE}/course/view.php?id={cid}'}
-            next_offset = int(data['nextoffset'])
-            if next_offset <= offset:
+            if next_offset == offset:
                 return found
             offset = next_offset
         raise RuntimeError('Course pagination did not finish; previous export is preserved.')
