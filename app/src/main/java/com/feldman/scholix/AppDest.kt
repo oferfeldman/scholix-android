@@ -5,6 +5,7 @@ package com.feldman.scholix
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import com.feldman.motion.MotionDest
@@ -45,6 +46,22 @@ import kotlinx.serialization.Transient
 @Serializable
 @Parcelize
 sealed class AppDest : MotionDest {
+
+    @Serializable
+    @Parcelize
+    data object Homework : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Homework"
+        @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
+        @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_docs_outline
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            // Each notification opens the full list rather than retaining a prior detail/filter.
+            key(LocalAppState.current.homeworkOpenRequest) {
+                com.feldman.scholix.lemida.LemidaPage(searchQuery)
+            }
+        }
+    }
 
     @Serializable
     @Parcelize

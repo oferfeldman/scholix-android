@@ -7,5 +7,6 @@ class ScholixApp : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashHandler.install(this)
+        com.feldman.scholix.lemida.LemidaSyncWorker.schedule(this)
     }
 }
