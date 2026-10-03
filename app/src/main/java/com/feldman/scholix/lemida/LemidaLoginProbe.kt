@@ -16,5 +16,8 @@ internal class LemidaLoginProbe {
         return true
     }
 
-    fun invalidate() { active = null }
+    /** Secondary document callbacks remain valid only until navigation/retry/new probe. */
+    fun isCurrent(request: Int): Boolean = serial == request
+
+    fun invalidate() { active = null; serial++ }
 }

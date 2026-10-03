@@ -166,6 +166,9 @@ class LemidaLoginActivity : ComponentActivity() {
             visibility = android.view.View.GONE
             setOnClickListener {
                 visibility = android.view.View.GONE
+                signInProbe.invalidate()
+                reconnectPaths.clear() // A deliberate Retry gets a new bounded portal/provider attempt.
+                status.text = "Retrying Lemida sign-in…"
                 browser.loadUrl("${LemidaParser.BASE}/my/")
             }
         }
@@ -197,7 +200,8 @@ class LemidaLoginActivity : ComponentActivity() {
                     if (view.url != url || syncing) return@evaluateJavascript
                     if (value != "true" && reconnectPaths.size < 2) {
                         view.evaluateJavascript(LemidaRequestScript.document(url)) entry@{ raw ->
-                            if (isFinishing || isDestroyed || syncing || reconnectPaths.size >= 2 || view.url != url ||
+                            if (isFinishing || isDestroyed || syncing || !signInProbe.isCurrent(request) ||
+                                reconnectPaths.size >= 2 || view.url != url ||
                                 view.webViewClient !== this) return@entry
                             val html = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull() ?: return@entry
                             val entry = LemidaParser.reconnectUrl(html) ?: return@entry

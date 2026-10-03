@@ -80,7 +80,11 @@ complete, the app retains the cache, sends one sign-in reminder and waits for
 interactive sign-in. No SMS resend, password replay or CAPTCHA bypass occurs in
 the background. The visible sign-in window also follows the university entries
 once each. Invalid/external or ambiguous provider links are ignored, and stale
-callbacks cannot navigate another document.
+callbacks cannot navigate another document. An explicit **Retry** invalidates
+pending checks and starts a fresh bounded portal/provider attempt. Existing MFA
+request/submission guards and the challenge deadline remain in place, so retrying
+a page cannot automatically request another SMS. Secondary login-entry callbacks
+also check their probe generation, including when a retry returns to the same URL.
 `LemidaRealExpiryTest` requires the explicit `allow_real_lemida_expiry=true` runner
 argument. It calls the actual Moodle logout endpoint without following a separate
 Microsoft logout redirect, verifies that authenticated AJAX is rejected, and then
