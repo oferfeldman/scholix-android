@@ -249,6 +249,39 @@ class LemidaParserTest {
         assertEquals("123:assign:9", items.single().id)
         assertEquals("תרגיל & תשובות", items.single().title)
     }
+    @Test fun groupRestrictedHomeworkIsIncludedWhenCurrentAccountCanAccessIt() {
+        val state = """{"cm":[
+            {"name":"Group assignment","url":"https://lemida.biu.ac.il/mod/assign/view.php?id=9",
+             "visible":true,"uservisible":true,"accessvisible":false},
+            {"name":"Group quiz","url":"https://lemida.biu.ac.il/mod/quiz/view.php?id=10",
+             "visible":true,"uservisible":true,"accessvisible":false},
+            {"name":"Group workshop","url":"https://lemida.biu.ac.il/mod/workshop/view.php?id=11",
+             "visible":true,"uservisible":true,"accessvisible":false}
+        ]}"""
+        val items = LemidaParser.stateHomework(state, 123, "Math")
+        assertEquals(listOf("123:assign:9", "123:quiz:10", "123:workshop:11"), items.map { it.id })
+    }
+    @Test fun unavailableHomeworkIsExcludedRegardlessOfUniversalAccessFlag() {
+        val state = """{"cm":[
+            {"name":"Other group","url":"https://lemida.biu.ac.il/mod/assign/view.php?id=9",
+             "visible":true,"uservisible":false,"accessvisible":false},
+            {"name":"Not available yet","url":"https://lemida.biu.ac.il/mod/quiz/view.php?id=10",
+             "visible":true,"uservisible":false,"accessvisible":true}
+        ]}"""
+        assertTrue(LemidaParser.stateHomework(state, 123, "Math").isEmpty())
+    }
+    @Test fun newlyAvailableGroupHomeworkQueuesOneAlertWithItsCurrentTitle() {
+        val unavailable = """{"cm":[{"name":"Group assignment","url":"https://lemida.biu.ac.il/mod/assign/view.php?id=9",
+            "uservisible":false,"accessvisible":false}]}"""
+        val initial = LemidaParser.stateHomework(unavailable, 123, "Math")
+        val seen = initial.map { it.id }.toSet()
+        val available = LemidaParser.stateHomework(unavailable.replace("\"uservisible\":false", "\"uservisible\":true"), 123, "Math")
+        val queued = LemidaParser.pendingAlerts(available, seen, emptyList())
+        assertEquals(listOf("123:assign:9"), queued.map { it.id })
+        val corrected = available.map { it.copy(title = "תרגיל לקבוצה — corrected") }
+        assertEquals(corrected, LemidaParser.pendingAlerts(corrected, seen + available.map { it.id }, queued))
+        assertTrue(LemidaParser.pendingAlerts(corrected, seen + available.map { it.id }, emptyList()).isEmpty())
+    }
     @Test fun detailsPreserveHebrewInstructionsAndSubmissionStatus() {
         val detail = LemidaParser.detail("""<main id="region-main"><div id="intro">הגישו את תרגיל 1</div>
             <table><tr><th>מצב הגשה</th><td>הוגש</td></tr><tr><th>ציון</th><td>95 / 100</td></tr></table>

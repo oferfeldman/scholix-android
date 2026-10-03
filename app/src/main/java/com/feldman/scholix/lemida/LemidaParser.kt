@@ -131,7 +131,8 @@ object LemidaParser {
         val modules = JSONObject(raw).getJSONArray("cm")
         return (0 until modules.length()).mapNotNull { index ->
             val module = modules.getJSONObject(index)
-            if (!module.optBoolean("uservisible", true) || !module.optBoolean("accessvisible", true)) return@mapNotNull null
+            // Moodle's accessvisible means available to everyone; uservisible includes this account's restrictions.
+            if (!module.optBoolean("uservisible", true)) return@mapNotNull null
             val url = module.optString("url")
             val (type, id) = activityIdentity(url) ?: return@mapNotNull null
             Homework("$courseId:$type:$id", courseId, courseName,

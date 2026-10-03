@@ -219,7 +219,7 @@ scripts, MFA/consent state and login probes, and run their existing unit tests:
 .\gradlew.bat --project-dir tools/lemida/core-checks test
 ```
 
-All 72 focused tests passed after rebasing onto main's 2026-10-03 updates. This
+All 75 focused tests passed after rebasing onto main's 2026-10-03 updates. This
 standalone project reads the root version catalog and requires neither Android
 nor Motion; it does not validate UI, WebView, Keystore or background scheduling.
 Session exceptions were moved into an Android-independent source file without
@@ -249,3 +249,14 @@ instruction sections without duplicating nested wrappers. Six additional actual
 parser regressions passed in the focused JVM checks; the equivalent Python suite
 passed 24 tests, with two private-HTML checks intentionally skipped. These checks
 use synthetic pages and do not access a live account or validate phone rendering.
+
+Course-state discovery uses `uservisible` to decide whether the current account can
+access an activity. `accessvisible` describes general availability to everyone;
+requiring it incorrectly omitted homework restricted to a group even when the
+signed-in student could open it. The distinction follows Moodle's
+[course-state export](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/course/format/classes/output/local/state/cm.php#L67-L96)
+and [account-specific visibility checks](https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/lib/modinfolib.php#L2445-L2499).
+Three focused regressions cover accessible restricted assignments/quizzes/workshops,
+unavailable items, and one alert when restricted homework becomes available. The
+API authorization, accepted activity types and same-university URL checks still
+apply. The new visibility cases have not been verified with a live phone session.
