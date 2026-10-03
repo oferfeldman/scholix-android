@@ -308,3 +308,13 @@ regressions reproduced premature publication/data replacement before the fix and
 passed afterward, including course and grade/homework errors, session expiry and
 failed file replacement. All 29 Python tests passed; two private HTML cases were
 skipped. No live browser session, SMS or phone operation was used for these checks.
+
+The desktop Python login also inspects the existing Microsoft OTP field before
+choosing a verification method. Observing that field locks subsequent alternative
+and SMS requests even if it disappears during navigation. The alternative-method
+attempt is now recorded before clicking, as the SMS attempt already was, preventing
+a lost navigation callback from repeating the choice. Three mocked-client cases
+reproduced the prior behavior and now pass; a fourth confirms that an interrupted
+SMS click still requests only once. All 33 Python tests passed with two private
+HTML skips. These tests run the actual Python login loop with mocked controls;
+they neither send SMS nor verify a real Microsoft session or phone behavior.

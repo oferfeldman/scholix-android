@@ -315,11 +315,17 @@ class Client:
                 return
             with tolerate_navigation():
                 if urlparse(self.page.url).hostname == 'login.microsoftonline.com':
+                    otp = self.page.locator('#idTxtBx_SAOTCC_OTC')
+                    otp_visible = otp.count() and otp.is_visible()
+                    if otp_visible:
+                        # A challenge may already exist without this run selecting SMS.
+                        # Keep the guards even if navigation later hides the field.
+                        switched = sms_selected = True
                     if self.args.mfa == 'sms' and not switched:
                         alternative = self.page.locator('#signInAnotherWay')
                         if alternative.count() and alternative.is_visible():
-                            alternative.click()
                             switched = True
+                            alternative.click()
                     if self.args.mfa == 'sms' and not sms_selected:
                         choice = self.page.locator('[data-value="OneWaySMS"]').first
                         if not choice.count():
@@ -330,8 +336,7 @@ class Client:
                             sms_selected = True
                             choice.click()
                             print('Selected SMS verification. No automatic resend will be requested.')
-                    otp = self.page.locator('#idTxtBx_SAOTCC_OTC')
-                    if otp.count() and otp.is_visible() and not code_prompted:
+                    if otp_visible and not code_prompted:
                         code_prompted = True
                         print('SMS code entry detected. Enter the code in the browser.')
                         if self.args.console_sms:

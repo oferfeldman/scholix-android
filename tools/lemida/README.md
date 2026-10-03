@@ -53,6 +53,10 @@ are available. If the method picker differs, select SMS yourself in the browser.
 The script submits one entered code and does not automatically resend or retry
 failed codes. Any subsequent correction can be made in the browser. Password
 entry remains in Microsoft's browser form. The session is reused on later runs.
+An existing visible code-entry field locks further automatic method requests,
+including if the field disappears during navigation. Method attempts are recorded
+before clicking, so a navigation interruption cannot repeat the alternative/SMS
+selection. These guards also apply when the challenge was started manually.
 
 To read specific courses, or if automatic discovery is incomplete:
 

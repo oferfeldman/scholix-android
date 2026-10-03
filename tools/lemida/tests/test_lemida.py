@@ -207,6 +207,59 @@ class RedirectHandling(unittest.TestCase):
                 raise lemida.PlaywrightError('Target page has been closed')
 
 
+class DesktopMfaGuard(unittest.TestCase):
+    def setUp(self):
+        self.client = lemida.Client.__new__(lemida.Client)
+        self.client.args = SimpleNamespace(mfa='sms', console_sms=False, login_timeout=30)
+        self.client.page = Mock(url='https://login.microsoftonline.com/fixture')
+        self.client.authenticated = Mock(side_effect=[False, False, False, True])
+        self.alternative = Mock()
+        self.sms = Mock()
+        self.otp = Mock()
+        for control in (self.alternative, self.sms, self.otp):
+            control.count.return_value = 1
+            control.is_visible.return_value = True
+        self.sms.first = self.sms
+        self.client.page.locator.side_effect = lambda selector: {
+            '#signInAnotherWay': self.alternative,
+            '[data-value="OneWaySMS"]': self.sms,
+            '#idTxtBx_SAOTCC_OTC': self.otp,
+        }[selector]
+        self.fallback = Mock()
+        self.fallback.count.return_value = 0
+        self.fallback.first = self.fallback
+        self.client.page.get_by_role.return_value = self.fallback
+
+    def login(self):
+        with redirect_stdout(io.StringIO()):
+            self.client.login()
+
+    def test_existing_otp_screen_never_requests_another_method(self):
+        self.login()
+        self.alternative.click.assert_not_called()
+        self.sms.click.assert_not_called()
+
+    def test_observed_otp_keeps_request_guard_when_the_field_disappears(self):
+        self.otp.is_visible.side_effect = [True, False]
+        self.login()
+        self.alternative.click.assert_not_called()
+        self.sms.click.assert_not_called()
+
+    def test_lost_alternative_click_navigation_does_not_repeat_the_click(self):
+        self.otp.count.return_value = 0
+        self.sms.count.return_value = 0
+        self.alternative.click.side_effect = lemida.PlaywrightError('Execution context was destroyed')
+        self.login()
+        self.alternative.click.assert_called_once()
+
+    def test_lost_sms_click_navigation_still_requests_only_once(self):
+        self.otp.count.return_value = 0
+        self.alternative.count.return_value = 0
+        self.sms.click.side_effect = lemida.PlaywrightError('Execution context was destroyed')
+        self.login()
+        self.sms.click.assert_called_once()
+
+
 class SavedPages(unittest.TestCase):
     def test_instructions_keep_question_numbers_and_explicit_restarts(self):
         result = lemida.parse_detail('''<main><div id="intro"><ol start="3">
