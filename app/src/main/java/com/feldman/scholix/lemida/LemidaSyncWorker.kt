@@ -47,7 +47,7 @@ class LemidaSyncWorker(private val context: Context, params: WorkerParameters) :
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled() ||
                 manager.getNotificationChannel(CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE) return false
             val intent = Intent(context, MainActivity::class.java).putExtra("open_homework", true)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             val pending = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             NotificationManagerCompat.from(context).notify(id,
                 NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_docs)

@@ -18,6 +18,7 @@ class AppState(
     val navigationPages: List<AppDest> = emptyList(),
     val overflowPages: List<AppDest> = emptyList(),
     val messagesViewModel: MessagesViewModel? = null,
+    val homeworkOpenRequest: Int = 0,
 )
 
 val LocalAppState = compositionLocalOf<AppState> {

@@ -5,6 +5,7 @@ package com.feldman.scholix
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import com.feldman.motion.MotionDest
@@ -55,7 +56,10 @@ sealed class AppDest : MotionDest {
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
                              onFabAction: ((() -> Unit) -> Unit) -> Unit) {
-            com.feldman.scholix.lemida.LemidaPage(searchQuery)
+            // Each notification opens the full list rather than retaining a prior detail/filter.
+            key(LocalAppState.current.homeworkOpenRequest) {
+                com.feldman.scholix.lemida.LemidaPage(searchQuery)
+            }
         }
     }
 

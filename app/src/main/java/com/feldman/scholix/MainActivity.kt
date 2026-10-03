@@ -3,6 +3,7 @@ package com.feldman.scholix
 import androidx.compose.ui.res.stringResource
 
 import android.Manifest
+import android.content.Intent
 import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.os.Build
@@ -47,8 +48,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -127,6 +130,19 @@ fun BottomBarSpacing(): Dp {
 }
 
 class MainActivity : ComponentActivity() {
+    private var homeworkOpenRequest by mutableIntStateOf(0)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("open_homework", false)) homeworkOpenRequest++
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("lemida_open_request", homeworkOpenRequest)
+        super.onSaveInstanceState(outState)
+    }
+
     private val requestNotificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
             if (isGranted) {
@@ -158,6 +174,7 @@ class MainActivity : ComponentActivity() {
         // for the keyboard (every bottom sheet) pays for it twice.
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        homeworkOpenRequest = savedInstanceState?.getInt("lemida_open_request", 0) ?: 0
         // Clean up grade notifications & legacy periodic worker
         GradeMonitorWorker.clearNotificationsAndChannel(this)
         GradeMonitorWorker.cancelPeriodicWorker(this)
@@ -304,6 +321,7 @@ class MainActivity : ComponentActivity() {
 
                     else -> {
                         MainScreen(
+                            homeworkOpenRequest = homeworkOpenRequest,
                             preloadedCourses = preloadedCourses,
                             repository = repository,
                             onPlatformsChanged = {
@@ -338,6 +356,7 @@ fun MainScreen(
     platforms: List<Platform>,
     onLoginSuccess: () -> Unit,
     onLogout: () -> Unit,
+    homeworkOpenRequest: Int = 0,
 ) {
     val context = LocalContext.current
 
@@ -383,7 +402,7 @@ fun MainScreen(
     }
     val bottomBarDestinations = navigationPages.filter { it.label in navbarPages }.ifEmpty { listOf(AppDest.Tiktek, AppDest.Settings) }
 
-    val startDestination = remember {
+    val startDestination = rememberSaveable {
         val activity = context as? android.app.Activity
         if (activity?.intent?.getBooleanExtra("open_crash_logs", false) == true) AppDest.CrashLogs
         else if (activity?.intent?.getBooleanExtra("open_messages", false) == true) AppDest.Messages
@@ -392,6 +411,13 @@ fun MainScreen(
     }
 
     val backStack = rememberMotionDestBackStack(startDestination)
+    var handledHomeworkOpenRequest by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(homeworkOpenRequest) {
+        if (homeworkOpenRequest > handledHomeworkOpenRequest) {
+            backStack.navigateTop(AppDest.Homework)
+            handledHomeworkOpenRequest = homeworkOpenRequest
+        }
+    }
     val currentScreen = backStack.backStack.lastOrNull() ?: startDestination
     val activeNavigationPage = backStack.backStack.asReversed().firstNotNullOfOrNull { screen ->
         generateSequence<MotionDest>(screen) { it.parent }.firstOrNull { it in navigationPages }
@@ -445,7 +471,7 @@ fun MainScreen(
     val messagesViewModel: MessagesViewModel = viewModel()
     LaunchedEffect(platforms) { messagesViewModel.configure(platforms) }
 
-    val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, navbarPages, visibleNavbarDestinations, overflowPagesList) {
+    val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, navbarPages, visibleNavbarDestinations, overflowPagesList, homeworkOpenRequest) {
         AppState(
             preloadedCourses = preloadedCourses,
             repository = repository,
@@ -457,6 +483,7 @@ fun MainScreen(
             navigationPages = navigationPages,
             overflowPages = overflowPagesList,
             messagesViewModel = messagesViewModel,
+            homeworkOpenRequest = homeworkOpenRequest,
         )
     }
 

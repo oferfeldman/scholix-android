@@ -123,6 +123,9 @@ sync, native cached detail reads, and sign-in closing only after a successful lo
 `LemidaAlertsTest` uses isolated preferences and fake notification callbacks to check
 concurrent delivery, account switching, paused/failed delivery, and stale sign-in
 reminders. These tests send no notifications and read no saved account session.
+Homework notification taps reuse MainActivity when present and navigate to a fresh
+homework list, clearing prior local filters and detail selection. Other navigation
+stacks remain available. Warm notification routing still needs device verification.
 `tools/lemida/verify_browser_requests.py` exercises the Android request scripts
 in Chromium with intercepted traffic, including late completion after cancellation,
 network failure, page navigation and HTTPS origin checks; no live account is used.
