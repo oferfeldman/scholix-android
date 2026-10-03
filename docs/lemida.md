@@ -203,3 +203,20 @@ device regressions passed on 2026-10-03.
 `tools/lemida/verify_browser_requests.py` exercises the Android request scripts
 in Chromium with intercepted traffic, including late completion after cancellation,
 network failure, page navigation and HTTPS origin checks; no live account is used.
+
+The focused JVM checks compile the app's actual parser, session exceptions, SMS
+scripts, MFA/consent state and login probes, and run their existing unit tests:
+
+```powershell
+.\gradlew.bat --project-dir tools/lemida/core-checks test
+```
+
+All 55 focused tests passed after rebasing onto main's 2026-10-03 updates. This
+standalone project reads the root version catalog and requires neither Android
+nor Motion; it does not validate UI, WebView, Keystore or background scheduling.
+Session exceptions were moved into an Android-independent source file without
+changing their names or behavior. Browser request and SMS script checks also passed
+with intercepted traffic. The unmodified full app build now fails because upstream
+requires the unavailable `Motion beta52-local` artifact. Available Motion source
+still provides `beta49-local`; main's new styling/navigation and dependency versions
+were preserved. No new APK or phone verification is claimed for this rebase.
