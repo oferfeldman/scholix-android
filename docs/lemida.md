@@ -230,15 +230,16 @@ still provides `beta49-local`; main's new styling/navigation and dependency vers
 were preserved. No new APK or phone verification is claimed for this rebase.
 
 The three additional probe-timeout tests passed in the focused JVM check. Native
-MFA timer wiring still awaits full Android compilation and phone verification; the
-Motion artifact and disconnected device prevent those checks in this follow-up.
+MFA timer wiring also passed the focused Android compilation described below;
+the full app build and phone verification remain pending.
 
 `LemidaMfaPoll` contains the actual browser-callback sequence independently of
 Android. Eight controlled-callback regressions cover slow preparation/submission,
 lost picker/SMS callbacks, same-URL navigation, listener readiness, expired or
 changed codes and disabled Verify. They use the production scripts/state and send
-no messages or network requests. Activity timer/receiver binding and the complete
-Android app still require compilation/device validation once Motion is available.
+no messages or network requests. Activity timer/receiver binding now compiles in
+the focused Android project. Full app compilation and actual phone behavior still
+need validation once Motion and a device are available.
 
 Native homework instructions and Python detail exports preserve numbered, lettered
 and Roman lists, including explicit starting values, item restarts and descending
@@ -260,3 +261,25 @@ Three focused regressions cover accessible restricted assignments/quizzes/worksh
 unavailable items, and one alert when restricted homework becomes available. The
 API authorization, accepted activity types and same-university URL checks still
 apply. The new visibility cases have not been verified with a live phone session.
+
+The focused Android check compiles 14 actual Lemida production source files,
+excluding the Motion homework screen, including the current login Activity's native
+timer/receiver binding, WebView transport, encrypted cookie store, repository and
+worker. It uses the upstream AGP/Kotlin versions and reads SDK levels, Java targets
+and the SMS dependency from the app build file:
+
+```powershell
+# Set ANDROID_HOME to your installed Android SDK, or use ignored local.properties.
+.\gradlew.bat --project-dir tools/lemida/android-checks testDebugUnitTest assembleDebug
+```
+
+This check passed with AGP 9.4.1, Gradle 9.8.0 and SDK 37; all 75 existing focused
+unit tests also passed in this Android project. The selected source files and
+notification icon were verified byte-identical to production. It builds a library
+AAR, not a Scholix APK. MainActivity is a compilation fixture used only to resolve
+the worker's notification destination; the real MainActivity, navigation and Motion
+screen are excluded. This validates native compilation without downgrading or
+substituting Motion. It does not execute SMS delivery, Play services, Keystore,
+WebView, worker scheduling or notification routing on a phone. See the
+[checker boundaries](../tools/lemida/android-checks/README.md) before interpreting
+the results. Full app and pending device checks remain required for an updated APK.
