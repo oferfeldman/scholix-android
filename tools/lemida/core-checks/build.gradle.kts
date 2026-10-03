@@ -13,12 +13,12 @@ sourceSets {
     main {
         kotlin.srcDir("../../../app/src/main/java")
         kotlin.include(listOf("LemidaParser", "LemidaSms", "LemidaMfaState", "LemidaSmsConsentState",
-            "LemidaLoginProbe", "LemidaRequestScript", "LemidaSession").map { "com/feldman/scholix/lemida/$it.kt" })
+            "LemidaLoginProbe", "LemidaMfaPoll", "LemidaRequestScript", "LemidaSession").map { "com/feldman/scholix/lemida/$it.kt" })
     }
     test {
         kotlin.srcDir("../../../app/src/test/java")
         kotlin.include(listOf("LemidaParserTest", "LemidaSmsTest", "LemidaMfaStateTest",
-            "LemidaSmsConsentStateTest", "LemidaLoginProbeTest").map { "com/feldman/scholix/lemida/$it.kt" })
+            "LemidaSmsConsentStateTest", "LemidaLoginProbeTest", "LemidaMfaPollTest").map { "com/feldman/scholix/lemida/$it.kt" })
     }
 }
 

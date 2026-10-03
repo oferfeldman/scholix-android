@@ -127,8 +127,10 @@ Encrypted-session saves run inside the same recovery flow on an IO dispatcher,
 so a storage/Keystore error offers Retry rather than escaping the browser callback.
 Navigation releases unfinished sign-in and MFA checks; a late callback cannot
 confirm another document or block its check. The MFA timer schedules its next
-check independently of JavaScript completion. Only one picker query is pending at
-a time; after five seconds a lost callback is abandoned, allowing the next check.
+check independently of JavaScript completion. Only one browser sequence is pending
+at a time across picker inspection, code preparation and submission acknowledgement.
+Slow readiness callbacks remain valid across timer ticks. After five seconds a lost
+callback is abandoned, allowing the next sequence.
 An old timeout cannot abandon a newer query. Navigation and Retry invalidate old
 picker/readiness callbacks, including same-URL navigation. Failed pages pause MFA
 selection until Retry or a fresh navigation, while cached codes and one-submit
@@ -217,7 +219,7 @@ scripts, MFA/consent state and login probes, and run their existing unit tests:
 .\gradlew.bat --project-dir tools/lemida/core-checks test
 ```
 
-All 58 focused tests passed after rebasing onto main's 2026-10-03 updates. This
+All 66 focused tests passed after rebasing onto main's 2026-10-03 updates. This
 standalone project reads the root version catalog and requires neither Android
 nor Motion; it does not validate UI, WebView, Keystore or background scheduling.
 Session exceptions were moved into an Android-independent source file without
@@ -230,3 +232,10 @@ were preserved. No new APK or phone verification is claimed for this rebase.
 The three additional probe-timeout tests passed in the focused JVM check. Native
 MFA timer wiring still awaits full Android compilation and phone verification; the
 Motion artifact and disconnected device prevent those checks in this follow-up.
+
+`LemidaMfaPoll` contains the actual browser-callback sequence independently of
+Android. Eight controlled-callback regressions cover slow preparation/submission,
+lost picker/SMS callbacks, same-URL navigation, listener readiness, expired or
+changed codes and disabled Verify. They use the production scripts/state and send
+no messages or network requests. Activity timer/receiver binding and the complete
+Android app still require compilation/device validation once Motion is available.
