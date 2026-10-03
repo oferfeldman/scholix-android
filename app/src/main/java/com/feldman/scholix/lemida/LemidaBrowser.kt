@@ -21,7 +21,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /** Moodle's anti-bot session is browser-bound: keep both reads and AJAX in WebView. */
-class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null) {
+internal class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null) : LemidaTransport {
     private val owned = supplied == null
     private val view = supplied ?: WebView(context)
     private val previousClient = view.webViewClient
@@ -40,7 +40,7 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
             view.layout(0, 0, metrics.widthPixels, metrics.heightPixels)
         }
     }
-    suspend fun prepare() = withContext(Dispatchers.Main) {
+    override suspend fun prepare() = withContext(Dispatchers.Main) {
         val cm = CookieManager.getInstance()
         cm.setAcceptCookie(true)
         cm.setAcceptThirdPartyCookies(view, true)
@@ -63,7 +63,7 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
             }
         }
     }
-    suspend fun get(url: String): String = withContext(Dispatchers.Main) {
+    override suspend fun get(url: String): String = withContext(Dispatchers.Main) {
         check(!closed) { "Lemida browser is closed." }
         var complete = false
         var requestClient: WebViewClient? = null
@@ -117,7 +117,7 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
             if (!complete && !closed && !ownerDestroyed() && view.webViewClient === requestClient) view.stopLoading()
         }
     }
-    suspend fun post(url: String, body: String): String = withContext(Dispatchers.Main) {
+    override suspend fun post(url: String, body: String): String = withContext(Dispatchers.Main) {
         val slot = "lemida_" + UUID.randomUUID().toString().replace("-", "")
         try {
             withTimeoutOrNull(45_000) {
@@ -155,7 +155,7 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
         val value = CookieManager.getInstance().getCookie("${LemidaParser.BASE}/my/")
         if (value != null) withContext(Dispatchers.IO) { cookies.save(value) }
     }
-    suspend fun close() = withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
+    override suspend fun close() = withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
         if (closed) return@withContext
         closed = true
         if (ownerDestroyed()) return@withContext

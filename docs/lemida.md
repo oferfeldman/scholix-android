@@ -67,6 +67,11 @@ failed detail reads keep cached content visible and offer **Retry loading homewo
 If Microsoft/Moodle expires the session, the app retains the cache and sends
 one sign-in reminder, then waits for interactive sign-in. No SMS resend,
 password replay, or CAPTCHA bypass occurs in the background.
+`LemidaExpiryTest` exercises logged-out pages, rejected session keys, Microsoft
+redirects, successful recovery and ordinary network errors using synthetic browser
+responses and separate preferences. Its native screen check verifies that sign-in
+returns while cached homework remains visible. These tests do not expire the real
+account, read cookies, contact Microsoft/Moodle or send a verification SMS.
 
 Implementation: phone WebView CookieManager cookies are retained in a device-only
 Android Keystore encrypted file, so background sync survives process restarts.

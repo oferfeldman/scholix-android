@@ -16,7 +16,10 @@ import java.io.IOException
 open class LemidaSessionExpired(message: String = "Sign in to Lemida again to resume automatic updates.") : IOException(message)
 class LemidaVerificationRequired : LemidaSessionExpired("Open Sign in to Lemida and complete the browser verification.")
 
-class LemidaRepository(context: Context, preferencesName: String = "lemida_sync") {
+class LemidaRepository internal constructor(context: Context, preferencesName: String,
+    private val browserFactory: (Context, String?, WebView?) -> LemidaTransport) {
+    constructor(context: Context, preferencesName: String = "lemida_sync") :
+        this(context, preferencesName, { owner, agent, view -> LemidaBrowser(owner, agent, view) })
     val syncing get() = syncState.asStateFlow()
     private val prefs = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
     private val appContext = context.applicationContext
@@ -32,7 +35,7 @@ class LemidaRepository(context: Context, preferencesName: String = "lemida_sync"
     }
     suspend fun detail(item: Homework): HomeworkDetail = mutex.withLock {
         withContext(Dispatchers.IO) {
-            val browser = withContext(Dispatchers.Main) { LemidaBrowser(appContext, prefs.getString("user_agent", null)) }
+            val browser = withContext(Dispatchers.Main) { browserFactory(appContext, prefs.getString("user_agent", null), null) }
             try {
                 browser.prepare()
                 val html = browser.get(item.url)
@@ -59,7 +62,7 @@ class LemidaRepository(context: Context, preferencesName: String = "lemida_sync"
         syncState.value = true
         try {
             withContext(Dispatchers.IO) {
-                val browser = withContext(Dispatchers.Main) { LemidaBrowser(appContext, prefs.getString("user_agent", null), view) }
+                val browser = withContext(Dispatchers.Main) { browserFactory(appContext, prefs.getString("user_agent", null), view) }
                 try {
                     browser.prepare()
                     val homepage = browser.get("${LemidaParser.BASE}/my/")

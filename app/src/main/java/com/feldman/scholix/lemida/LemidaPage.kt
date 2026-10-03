@@ -35,11 +35,17 @@ import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LemidaPage(searchQuery: String = "") {
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
+    LemidaPageContent(repo, searchQuery)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "") {
+    val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val syncing by repo.syncing.collectAsStateWithLifecycle()
     var homework by remember { mutableStateOf(repo.cached()) }
