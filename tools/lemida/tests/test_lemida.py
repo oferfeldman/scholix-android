@@ -1,8 +1,106 @@
+import io
+import json
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import lemida
+
+
+class ExportCommit(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.output = Path(self.directory.name) / 'live.json'
+        self.previous = '{"courses": [{"name": "מתמטיקה", "grades": "previous complete snapshot"}]}'
+        self.output.write_text(self.previous, encoding='utf-8')
+        self.args = SimpleNamespace(command='sync', course_id=[1, 2], output=self.output)
+        self.client = Mock()
+        self.client.fetch.side_effect = self.page
+
+    @staticmethod
+    def page(url):
+        if '/course/view.php' in url:
+            cid = lemida.number(url)
+            return f'''<body class="course-{cid}"><h1>Course {cid}</h1>
+                <div class="activity"><div class="activityname">
+                <a href="/mod/assign/view.php?id={cid * 11}">Exercise {cid}</a>
+                </div></div></body>'''
+        return '<main id="region-main"><div id="intro">Instructions</div><table><tr><th>Grade</th><td>95</td></tr></table></main>'
+
+    def sync(self):
+        with patch('lemida.Client', return_value=self.client), redirect_stdout(io.StringIO()):
+            return lemida.live(self.args)
+
+    def test_session_expiry_after_first_course_preserves_complete_export(self):
+        def fetch(url):
+            if url == lemida.BASE + '/course/view.php?id=2':
+                raise lemida.LoginRequired('Expired fixture session')
+            return self.page(url)
+        self.client.fetch.side_effect = fetch
+        with self.assertRaises(lemida.LoginRequired):
+            self.sync()
+        self.assertEqual(self.output.read_text(encoding='utf-8'), self.previous)
+        failed = json.loads(self.output.with_name('live.failed.json').read_text(encoding='utf-8'))
+        self.assertEqual([c['id'] for c in failed['courses']], [1])
+        self.assertEqual(failed['errors'][0]['stage'], 'session')
+        self.client.close.assert_called_once()
+
+    def test_course_failure_cannot_publish_an_incomplete_course_list(self):
+        def fetch(url):
+            if url == lemida.BASE + '/course/view.php?id=2':
+                raise RuntimeError('Course temporarily unavailable')
+            return self.page(url)
+        self.client.fetch.side_effect = fetch
+        self.assertEqual(self.sync(), 2)
+        self.assertEqual(self.output.read_text(encoding='utf-8'), self.previous)
+        failed = json.loads(self.output.with_name('live.failed.json').read_text(encoding='utf-8'))
+        self.assertEqual(failed['errors'][0]['stage'], 'course')
+        self.client.close.assert_called_once()
+
+    def test_failed_grade_or_homework_read_preserves_previous_details(self):
+        for failed_url, stage in (
+            (lemida.BASE + '/grade/report/user/index.php?id=2', 'grades'),
+            (lemida.BASE + '/mod/assign/view.php?id=22', 'activity'),
+        ):
+            with self.subTest(stage=stage):
+                def fetch(url):
+                    if url == failed_url:
+                        raise RuntimeError('Detail temporarily unavailable')
+                    return self.page(url)
+                self.client.fetch.side_effect = fetch
+                self.assertEqual(self.sync(), 2)
+                self.assertEqual(self.output.read_text(encoding='utf-8'), self.previous)
+                failed = json.loads(self.output.with_name('live.failed.json').read_text(encoding='utf-8'))
+                self.assertEqual([c['id'] for c in failed['courses']], [1, 2])
+                self.assertEqual(failed['errors'][0]['stage'], stage)
+
+    def test_complete_sync_publishes_once_after_all_course_and_detail_reads(self):
+        reads_at_write = []
+        actual_write = lemida.write_json
+        def record_write(path, data):
+            reads_at_write.append(self.client.fetch.call_count)
+            actual_write(path, data)
+        with patch('lemida.write_json', side_effect=record_write):
+            self.assertIsNone(self.sync())
+        self.assertEqual(reads_at_write, [6])
+        exported = json.loads(self.output.read_text(encoding='utf-8'))
+        self.assertEqual([c['id'] for c in exported['courses']], [1, 2])
+        self.assertEqual(exported['errors'], [])
+        self.assertEqual(exported['courses'][1]['grades']['tables'][0]['rows'], [['Grade', '95']])
+        self.assertEqual(exported['courses'][1]['homework'][0]['detail']['description'], 'Instructions')
+        self.assertFalse(self.output.with_name('live.failed.json').exists())
+        self.client.close.assert_called_once()
+
+    def test_failed_file_replace_preserves_previous_bytes_and_removes_temp(self):
+        with patch('os.replace', side_effect=OSError('Interrupted fixture publish')):
+            with self.assertRaises(OSError):
+                lemida.write_json(self.output, {'courses': []})
+        self.assertEqual(self.output.read_text(encoding='utf-8'), self.previous)
+        self.assertEqual(list(self.output.parent.iterdir()), [self.output])
 
 
 class RedirectHandling(unittest.TestCase):

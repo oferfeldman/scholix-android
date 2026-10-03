@@ -296,3 +296,15 @@ The host-only Main dispatcher fixture and WebView subclass do not render pages,
 execute JavaScript, prepare cookies or read a saved session. This adds local
 callback/lifecycle coverage; the new cases have not run on a phone and do not
 validate real Microsoft SSO, SMS delivery or full app behavior.
+
+Python live sync now publishes its JSON snapshot only after all selected course,
+grade and homework reads succeed. Previously a midway failure or expired session
+could replace the last complete export with partial data. Such attempts now write
+a separate `.failed.json` diagnostic file and preserve the successful export;
+read errors still return exit code 2 and session expiry returns exit code 1.
+JSON publication uses a temporary file in the destination directory and atomic
+replacement, preserving the previous file if publication fails. Five synthetic
+regressions reproduced premature publication/data replacement before the fix and
+passed afterward, including course and grade/homework errors, session expiry and
+failed file replacement. All 29 Python tests passed; two private HTML cases were
+skipped. No live browser session, SMS or phone operation was used for these checks.

@@ -68,8 +68,15 @@ independent of the visible course filter. Explicit IDs select only those courses
 Results go to `exports/live.json`. Each course contains activities and homework;
 homework details contain descriptions, dates, submission/status tables, and file
 links. Grade reports preserve table cells rather than guessing numeric values
-from Hebrew labels. Moodle errors appear in the export's `errors` list and cause
-exit code 2. An expired session saves partial results and stops with exit code 1.
+from Hebrew labels. A successful sync publishes the export only after all selected
+courses, grade reports and homework details load. The file is replaced atomically;
+an interrupted write leaves the previous complete export intact.
+
+Failed attempts preserve that export and save partial data plus an `errors` list
+to `exports/live.failed.json` (or `<output-stem>.failed<output-suffix>` for a custom
+output). Moodle read errors cause exit code 2; session expiry stops with exit code 1.
+The failure file records the attempt's timestamp and is diagnostic data, not the
+current homework snapshot. Both files can contain private academic information.
 
 The script reads pages; it does not submit homework, attempt quizzes, change
 completion, or download files automatically. Viewing an activity may still count

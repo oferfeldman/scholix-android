@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import re
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -196,7 +198,19 @@ def parse_detail(html):
 
 def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    temporary = None
+    try:
+        # Publish only a complete file; a failed write must leave the previous export intact.
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix=f'.{path.name}.', suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def offline(args):
@@ -402,6 +416,7 @@ class Client:
 
 def live(args):
     client = Client(args)
+    result = None
     try:
         client.login()
         if args.command == 'login':
@@ -412,13 +427,13 @@ def live(args):
             raise RuntimeError('No courses found. Supply --course-id from a course URL.')
         result = {'source': BASE, 'exported_at': datetime.now(timezone.utc).isoformat(),
                   'courses': [], 'errors': []}
+        failed_output = args.output.with_name(f'{args.output.stem}.failed{args.output.suffix}')
         for cid, course in selected.items():
             print(f'Reading course {cid}...')
             try:
                 record = parse_course(client.fetch(course['url']), course['url'])
                 result['courses'].append(record)
             except LoginRequired:
-                write_json(args.output, result)
                 raise
             except Exception as exc:
                 result['errors'].append({'course_id': cid, 'stage': 'course', 'error': str(exc)})
@@ -433,15 +448,23 @@ def live(args):
                     else:
                         next(a for a in record['activities'] if a['url'] == url)['detail'] = detail
                 except LoginRequired:
-                    write_json(args.output, result)
                     raise
                 except Exception as exc:
                     result['errors'].append({'course_id': cid, 'url': url, 'stage': kind, 'error': str(exc)})
                 client.page.wait_for_timeout(300)
-            write_json(args.output, result)
-        print(f'Exported {len(result["courses"])} courses to {args.output}; {len(result["errors"])} errors.')
         if result['errors']:
+            write_json(failed_output, result)
+            print(f'Update incomplete: {len(result["errors"])} errors. Previous export preserved. '
+                  f'Partial diagnostics saved to {failed_output}.')
             return 2
+        write_json(args.output, result)
+        print(f'Exported {len(result["courses"])} courses to {args.output}; 0 errors.')
+    except LoginRequired as exc:
+        if result is not None:
+            result['errors'].append({'stage': 'session', 'error': str(exc)})
+            write_json(failed_output, result)
+            print(f'Sync stopped. Previous export preserved. Partial diagnostics saved to {failed_output}.')
+        raise
     finally:
         client.close()
 
