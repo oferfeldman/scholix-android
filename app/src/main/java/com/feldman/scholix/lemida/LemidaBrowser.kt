@@ -26,6 +26,9 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
     private val view = supplied ?: WebView(context)
     private val previousClient = view.webViewClient
     private val cookies = LemidaCookieStore(context)
+    private var closed = false
+    private var installedClient: WebViewClient? = null
+    private fun ownerDestroyed() = (view.context as? android.app.Activity)?.isDestroyed == true
     init {
         view.settings.javaScriptEnabled = true
         view.settings.domStorageEnabled = true
@@ -61,43 +64,57 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
         }
     }
     suspend fun get(url: String): String = withContext(Dispatchers.Main) {
-        withTimeoutOrNull(60_000) {
-            val html = suspendCancellableCoroutine<String> { continuation ->
-                view.webViewClient = object : WebViewClient() {
-                    override fun onReceivedError(web: WebView, request: WebResourceRequest, error: WebResourceError) {
-                        // Broken images/resources must not discard an otherwise usable page.
-                        if (request.isForMainFrame && continuation.isActive) {
-                            continuation.resumeWithException(IOException("Lemida could not load. Check your connection and try Refresh."))
+        check(!closed) { "Lemida browser is closed." }
+        var complete = false
+        var requestClient: WebViewClient? = null
+        try {
+            withTimeoutOrNull(60_000) {
+                val html = suspendCancellableCoroutine<String> { continuation ->
+                    val client = object : WebViewClient() {
+                        override fun onReceivedError(web: WebView, request: WebResourceRequest, error: WebResourceError) {
+                            // Broken images/resources must not discard an otherwise usable page.
+                            if (request.isForMainFrame && continuation.isActive) {
+                                continuation.resumeWithException(IOException("Lemida could not load. Check your connection and try Refresh."))
+                            }
+                        }
+                        override fun onReceivedHttpError(web: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                            if (request.isForMainFrame && response.statusCode >= 400 && continuation.isActive) {
+                                continuation.resumeWithException(IOException("Lemida returned HTTP ${response.statusCode}. Try Refresh."))
+                            }
+                        }
+                        override fun onPageFinished(web: WebView, finished: String) {
+                            if (!continuation.isActive || closed || ownerDestroyed() ||
+                                web.webViewClient !== this || web.url != finished) return
+                            // Perfdrive may complete an automatic browser check and redirect itself.
+                            // Wait for Moodle; a CAPTCHA that needs a person will time out visibly.
+                            val host = android.net.Uri.parse(finished).host
+                            if (host in setOf("login.microsoftonline.com", "login.live.com")) {
+                                if (continuation.isActive) continuation.resumeWithException(LemidaSessionExpired())
+                                return
+                            }
+                            if (host != "lemida.biu.ac.il") return
+                            web.evaluateJavascript(LemidaRequestScript.document(finished)) { raw ->
+                                val result = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
+                                if (result != null && continuation.isActive) continuation.resume(result)
+                            }
                         }
                     }
-                    override fun onReceivedHttpError(web: WebView, request: WebResourceRequest, response: WebResourceResponse) {
-                        if (request.isForMainFrame && response.statusCode >= 400 && continuation.isActive) {
-                            continuation.resumeWithException(IOException("Lemida returned HTTP ${response.statusCode}. Try Refresh."))
-                        }
-                    }
-                    override fun onPageFinished(web: WebView, finished: String) {
-                        // Perfdrive may complete an automatic browser check and redirect itself.
-                        // Wait for Moodle; a CAPTCHA that needs a person will time out visibly.
-                        val host = android.net.Uri.parse(finished).host
-                        if (host in setOf("login.microsoftonline.com", "login.live.com")) {
-                            if (continuation.isActive) continuation.resumeWithException(LemidaSessionExpired())
-                            return
-                        }
-                        if (host != "lemida.biu.ac.il") return
-                        web.evaluateJavascript("location.origin === '${LemidaParser.BASE}' ? document.documentElement.outerHTML : null") { raw ->
-                            val result = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
-                            if (result != null && continuation.isActive) continuation.resume(result)
-                        }
-                    }
+                    requestClient = client
+                    installedClient = client
+                    view.webViewClient = client
+                    view.loadUrl(url)
                 }
-                view.loadUrl(url)
-                continuation.invokeOnCancellation { view.post { view.stopLoading() } }
+                snapshot()
+                complete = true
+                html
+            } ?: run {
+                if (android.net.Uri.parse(view.url).host != "lemida.biu.ac.il") throw LemidaVerificationRequired()
+                throw IOException("Lemida page load timed out. Check your connection and try Refresh.")
             }
-            snapshot()
-            html
-        } ?: run {
-            if (android.net.Uri.parse(view.url).host != "lemida.biu.ac.il") throw LemidaVerificationRequired()
-            throw IOException("Lemida page load timed out. Check your connection and try Refresh.")
+        } finally {
+            // This runs on Main before the caller can close/reuse the browser, including cancellation.
+            // A posted stopLoading callback could otherwise interrupt a later navigation.
+            if (!complete && !closed && !ownerDestroyed() && view.webViewClient === requestClient) view.stopLoading()
         }
     }
     suspend fun post(url: String, body: String): String = withContext(Dispatchers.Main) {
@@ -139,7 +156,10 @@ class LemidaBrowser(context: Context, agent: String?, supplied: WebView? = null)
         if (value != null) withContext(Dispatchers.IO) { cookies.save(value) }
     }
     suspend fun close() = withContext(Dispatchers.Main + kotlinx.coroutines.NonCancellable) {
-        view.webViewClient = previousClient
+        if (closed) return@withContext
+        closed = true
+        if (ownerDestroyed()) return@withContext
+        if (installedClient == null || view.webViewClient === installedClient) view.webViewClient = previousClient
         if (owned) { view.stopLoading(); view.destroy() }
     }
 }

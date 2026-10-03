@@ -4,6 +4,11 @@ import org.json.JSONObject
 
 /** One browser request, including its abort handle, lives only in the current document. */
 internal object LemidaRequestScript {
+    fun document(url: String) = """(() =>
+        location.origin === '${LemidaParser.BASE}' && location.href === ${JSONObject.quote(url)}
+            ? document.documentElement.outerHTML : null
+    )()"""
+
     fun start(slot: String, url: String, body: String) = """(() => {
         if (location.origin !== '${LemidaParser.BASE}' || new URL(${JSONObject.quote(url)}).origin !== location.origin) return false;
         const state = {controller: new AbortController(), result: null};

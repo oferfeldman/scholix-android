@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 source = (Path(__file__).resolve().parents[2] /
           'app/src/main/java/com/feldman/scholix/lemida/LemidaRequestScript.kt').read_text(encoding='utf-8')
 scripts = {name: re.search(r'fun ' + name + r'\(.*?= """(.*?)"""', source, re.S).group(1)
-           for name in ('start', 'poll', 'cleanup')}
+           for name in ('start', 'poll', 'cleanup', 'document')}
 origin = 'https://lemida.biu.ac.il'
 
 
@@ -26,6 +26,13 @@ with sync_playwright() as runtime:
         body='[]' if route.request.method == 'POST' else '<p>Mock Moodle</p>',
         content_type='application/json' if route.request.method == 'POST' else 'text/html'))
     page.goto(origin + '/my/')
+
+    assert 'Mock Moodle' in page.evaluate(script('document', url=page.url))
+    assert page.evaluate(script('document', url=origin + '/mod/assign/view.php?id=9')) is None
+    old_url = page.url
+    page.evaluate("history.replaceState(null, '', '/my/?updated=1')")
+    assert page.evaluate(script('document', url=old_url)) is None
+    assert 'Mock Moodle' in page.evaluate(script('document', url=page.url))
 
     # A real fetch, intercepted locally, preserves the JSON response and disappears on cleanup.
     assert page.evaluate(script('start')) is True
@@ -68,7 +75,8 @@ with sync_playwright() as runtime:
     for url in ('https://login.microsoftonline.com/test', 'http://lemida.biu.ac.il/my/'):
         page.goto(url)
         assert page.evaluate(script('start')) is False
+        assert page.evaluate(script('document', url=page.url)) is None
         assert json.loads(page.evaluate(script('poll'))) == {'verification': True}
     browser.close()
 
-print('Browser JSON fetch, cancellation, late completion, network errors, navigation and origin guards passed.')
+print('Browser JSON fetch, cancellation, late completion, network errors, stale document and origin guards passed.')

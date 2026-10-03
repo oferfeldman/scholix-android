@@ -70,6 +70,10 @@ replays even with the same cookies, so OkHttp is not used for Lemida reads.
 Main-page network and HTTP errors fail promptly without treating broken images
 as sync failures. AJAX requests have a deadline covering startup and polling,
 are aborted on timeout/cancellation, and detect navigation during an update.
+Page cancellation stops loading on the UI thread before the browser is reused,
+and document snapshots check the completed URL as well as the origin. Late page
+callbacks whose URL no longer matches the document are ignored; cleanup is idempotent and avoids
+touching a sign-in WebView after its Activity has been destroyed.
 Cookie file encryption and reads run on an IO dispatcher.
 The sign-in window loads homework through its own browser before closing; a
 failure remains visible instead of returning silently to an empty page.
@@ -130,6 +134,9 @@ reminders. These tests send no notifications and read no saved account session.
 Homework notification taps reuse MainActivity when present and navigate to a fresh
 homework list, clearing prior local filters and detail selection. Other navigation
 stacks remain available. Warm notification routing still needs device verification.
+`LemidaBrowserLifecycleTest` uses controlled, non-network WebView loads to check
+page cancellation before reuse and idempotent client cleanup. It does not prepare
+cookies or read the saved session; device execution remains pending.
 `tools/lemida/verify_browser_requests.py` exercises the Android request scripts
 in Chromium with intercepted traffic, including late completion after cancellation,
 network failure, page navigation and HTTPS origin checks; no live account is used.
