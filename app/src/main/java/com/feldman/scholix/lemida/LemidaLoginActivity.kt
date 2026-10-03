@@ -34,13 +34,33 @@ class LemidaLoginActivity : ComponentActivity() {
     private val loginScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
     private val mfa = LemidaMfaState()
+    private val smsConsent = LemidaSmsConsentState()
     private lateinit var status: TextView
     private lateinit var retry: Button
     private var receiverRegistered = false
     private var consentRegistered = false
-    private var smsReady = false
     private var consentLaunched = false
     private fun currentChallenge() = mfa.active(SystemClock.elapsedRealtime())
+    private fun directSmsGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+    private fun startSmsConsent() {
+        val request = smsConsent.start(SystemClock.elapsedRealtime())
+        runCatching {
+            SmsRetriever.getClient(this).startSmsUserConsent(null).addOnCompleteListener { result ->
+                if (!isFinishing && !isDestroyed)
+                    smsConsent.complete(request, result.isSuccessful, SystemClock.elapsedRealtime())
+            }
+        }.onFailure { smsConsent.complete(request, false, SystemClock.elapsedRealtime()) }
+    }
+    private fun prepareSmsReception(): Boolean {
+        if (directSmsGranted()) return true
+        val now = SystemClock.elapsedRealtime()
+        if (!smsConsent.ready(now)) return false
+        if (smsConsent.prepareChallenge(now)) {
+            startSmsConsent()
+            return false // Reinspect the picker after listener startup; never click a stale choice.
+        }
+        return true
+    }
     private val consentLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (currentChallenge() && result.resultCode == RESULT_OK) {
             mfa.acceptCode(result.data?.getStringExtra(SmsRetriever.EXTRA_SMS_MESSAGE).orEmpty(), "", SystemClock.elapsedRealtime())
@@ -73,7 +93,9 @@ class LemidaLoginActivity : ComponentActivity() {
     private val poll = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
-            if (!smsReady) { handler.postDelayed(this, 250); return }
+            if (!directSmsGranted() && !smsConsent.ready(SystemClock.elapsedRealtime())) {
+                handler.postDelayed(this, 250); return
+            }
             browser.evaluateJavascript(LemidaSms.selectScript(mfa.alternativeClicked, mfa.smsSelected)) { raw ->
                 if (isFinishing || isDestroyed) return@evaluateJavascript
                 when (runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()) {
@@ -81,7 +103,7 @@ class LemidaLoginActivity : ComponentActivity() {
                         if (mfa.prepareAlternative()) browser.evaluateJavascript(LemidaSms.chooseScript("alternative"), null)
                     }
                     "sms" -> {
-                        if (mfa.prepareSms(SystemClock.elapsedRealtime())) {
+                        if (prepareSmsReception() && mfa.prepareSms(SystemClock.elapsedRealtime())) {
                             status.text = "SMS requested. Waiting for the Microsoft verification code…"
                             browser.evaluateJavascript(LemidaSms.chooseScript("sms")) { result ->
                                 if (result == "false" && !isFinishing && !isDestroyed)
@@ -91,6 +113,7 @@ class LemidaLoginActivity : ComponentActivity() {
                     }
                     "otp", "otp-waiting" -> {
                         mfa.observeOtp(SystemClock.elapsedRealtime())
+                        prepareSmsReception() // Manual selection can also follow a long password/CAPTCHA step.
                         val code = mfa.pendingCode(SystemClock.elapsedRealtime())
                         if (code != null) {
                             // Filling may enable Verify asynchronously. Keep the code until it can be submitted.
@@ -202,15 +225,9 @@ class LemidaLoginActivity : ComponentActivity() {
         } else {
             status.text = "SMS will be selected automatically. Android may ask to share the verification message; you can also enter the code here."
         }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED) {
-            smsReady = true
-        } else {
+        if (!directSmsGranted()) {
             // Start listening before the picker can request an SMS; failure keeps manual entry available.
-            runCatching {
-                SmsRetriever.getClient(this).startSmsUserConsent(null).addOnCompleteListener { smsReady = true }
-            }.onFailure { smsReady = true }
-            // An unavailable/stalled Play services task must not block method selection forever.
-            handler.postDelayed({ smsReady = true }, 5_000)
+            startSmsConsent()
         }
         browser.loadUrl("${LemidaParser.BASE}/my/")
         handler.postDelayed(poll, 750)

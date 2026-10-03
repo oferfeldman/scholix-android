@@ -7,6 +7,12 @@ Microsoft offers it. In the direct-SMS development build, allow SMS reception
 and a fresh Microsoft verification code is entered and submitted automatically.
 Other senders and ambiguous messages are ignored; codes are not logged, and no
 automatic resend is made. CAPTCHA still requires interactive completion.
+If password/CAPTCHA entry takes a long time, the consent listener is renewed before
+the first SMS choice so its remaining time covers the challenge. A manual code-entry
+screen also renews an old listener. Listener renewal does not send a code or reset
+the MFA deadline. Startup failure gets one challenge retry and a five-second wait
+limit; outdated startup callbacks cannot release a newer wait.
+The timing follows [Google's five-minute SMS User Consent window](https://developers.google.com/identity/sms-retriever/user-consent/request).
 The picker is first inspected without clicking. Native request flags are recorded
 before clicking a discovered method, so a page navigation cannot turn a lost
 JavaScript callback into a repeated automatic SMS request. A changed/detached
