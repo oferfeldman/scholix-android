@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -171,5 +172,20 @@ class LemidaExpiryTest {
         val file = File(instrumentation.targetContext.getExternalFilesDir(null), "lemida-expiry-simulation.png")
         try { file.outputStream().use { screenshot.compress(Bitmap.CompressFormat.PNG, 100, it) } }
         finally { screenshot.recycle() }
+    }
+
+    @Test fun expiredDetailOffersExplicitSignInAndRetainsCachedInstructions() = isolated(Response.LOGIN_PAGE) { repo, _, _ ->
+        var reconnects = 0
+        compose.setContent { MaterialTheme {
+            LemidaHomeworkDetail(item, repo, onBack = {}, onReconnect = { reconnects++ })
+        } }
+        compose.waitUntil(5_000) { repo.needsLogin() }
+        compose.onNodeWithText("Sign in to Lemida").performScrollTo().assertIsDisplayed()
+        assertEquals("An expired read must not launch interactive login automatically", 0, reconnects)
+        compose.onNodeWithText("Retry loading homework").assertDoesNotExist()
+        compose.onNodeWithText(cachedDetail.description).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Sign in to Lemida").performScrollTo().performClick()
+        assertEquals(1, reconnects)
+        assertEquals(cachedDetail, repo.cachedDetail(item))
     }
 }

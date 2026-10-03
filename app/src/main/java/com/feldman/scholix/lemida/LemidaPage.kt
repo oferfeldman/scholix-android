@@ -59,16 +59,20 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "")
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+    val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         homework = repo.cached(); status = repo.status(); updated = repo.lastSync()
         needsLogin = repo.needsLogin(); enabled = repo.enabled()
+        // A completed sign-in may change accounts. Return to the freshly loaded list.
+        if (result.resultCode == android.app.Activity.RESULT_OK) selectedId = null
     }
     LaunchedEffect(homework, courseFilter, selectedId) {
         if (courseFilter != null && homework.none { it.courseId == courseFilter }) courseFilter = null
         if (selectedId != null && homework.none { it.id == selectedId }) selectedId = null
     }
     homework.firstOrNull { it.id == selectedId }?.let { item ->
-        LemidaHomeworkDetail(item, repo) { selectedId = null }; return
+        LemidaHomeworkDetail(item, repo, onBack = { selectedId = null }, onReconnect = {
+            login.launch(Intent(context, LemidaLoginActivity::class.java))
+        }); return
     }
     LaunchedEffect(lifecycle) {
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -186,18 +190,23 @@ internal fun LemidaHomeworkFilters(
 }
 
 @Composable
-private fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack: () -> Unit) {
+internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack: () -> Unit, onReconnect: () -> Unit) {
     BackHandler(onBack = onBack)
     var detail by remember(item.id) { mutableStateOf(repo.cachedDetail(item)) }
     var loading by remember(item.id) { mutableStateOf(true) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
+    var requiresSignIn by remember(item.id) { mutableStateOf(false) }
     var retry by remember(item.id) { mutableIntStateOf(0) }
     LaunchedEffect(item.id, retry) {
         loading = true
         error = null
+        requiresSignIn = false
         try { detail = repo.detail(item) }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (e: Exception) { error = e.message ?: "Could not update homework details." }
+        catch (e: Exception) {
+            error = e.message ?: "Could not update homework details."
+            requiresSignIn = e is LemidaSessionExpired
+        }
         finally { loading = false }
     }
     MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = { SettingsTopBar("Homework details", onBack = onBack) }) {
@@ -208,7 +217,9 @@ private fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack:
         } }
         error?.let { message -> Section {
             Item { Text(message, color = MaterialTheme.colorScheme.error) }
-            PageItem(title = "Retry loading homework", icon = rememberVectorPainter(Icons.Default.Refresh), onClick = { retry++ })
+            if (requiresSignIn) PageItem(title = "Sign in to Lemida", description = "Reconnect to update this homework",
+                icon = painterResource(R.drawable.ic_docs), onClick = onReconnect)
+            else PageItem(title = "Retry loading homework", icon = rememberVectorPainter(Icons.Default.Refresh), onClick = { retry++ })
         } }
         detail?.let { data ->
             if (data.notices.isNotEmpty()) {

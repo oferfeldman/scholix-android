@@ -64,6 +64,9 @@ of their order, and combines the homework field with Scholix's app search. The f
 has a clear button. Course filters are reset when the selected course no longer has
 homework in the complete snapshot. The selected detail survives screen recreation;
 failed detail reads keep cached content visible and offer **Retry loading homework**.
+If a detail read requires interactive verification, it offers **Sign in to Lemida**
+directly. Successful sign-in returns to the newly loaded list, so a changed account
+cannot leave the old selected detail on screen; cancelling leaves that detail open.
 Before requiring interactive sign-in, a homepage read follows the observed
 university login page and Microsoft provider entry once each, allowing an existing
 Microsoft session to redirect back to Lemida automatically. A session rejected
@@ -94,8 +97,11 @@ notifications were allowed and automatic updates were enabled at completion.
 `LemidaExpiryTest` exercises logged-out pages, rejected session keys, Microsoft
 redirects, successful recovery and ordinary network errors using synthetic browser
 responses and separate preferences. Its seven device tests also check full-snapshot
-restart after mid-sync expiry, detail retry and rejection of another account's detail. Its native screen check verifies that sign-in
-returns while cached homework remains visible. These tests do not expire the real
+restart after mid-sync expiry, detail retry and rejection of another account's detail.
+Its native screen check verifies that sign-in returns while cached homework remains
+visible. An additional detail-screen check verifies that cached instructions remain
+available and interactive sign-in is offered only as an explicit action. This new
+check compiled but has not run on a device; USB disconnected before this follow-up. These tests do not expire the real
 account, read cookies, contact Microsoft/Moodle or send a verification SMS.
 
 Implementation: phone WebView CookieManager cookies are retained in a device-only
