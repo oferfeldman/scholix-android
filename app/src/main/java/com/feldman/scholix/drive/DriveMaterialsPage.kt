@@ -82,13 +82,17 @@ fun DriveMaterialsPage(searchQuery: String = "") {
         DriveSyncWorker.schedule(context)
     }
     val authorization = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            try {
-                val auth = Identity.getAuthorizationClient(context).getAuthorizationResultFromIntent(result.data)
-                val token = auth.accessToken ?: throw DriveNeedsConsent()
-                connected(token)
-            } catch (e: Exception) { error = DriveAuth.message(e) }
-        } else error = "Google Drive connection was cancelled."
+        try {
+            if (result.data?.hasExtra(ActivityResultContracts.StartIntentSenderForResult.EXTRA_SEND_INTENT_EXCEPTION) == true)
+                throw java.io.IOException("Google sign-in could not open. Try connecting again.")
+            val token = DriveAuth.complete(result.resultCode, result.data != null) {
+                Identity.getAuthorizationClient(context).getAuthorizationResultFromIntent(result.data).accessToken
+            }
+            connected(token)
+        } catch (e: Exception) {
+            android.util.Log.i("ScholixDriveAuth", "Authorization result=${result.resultCode}, data=${result.data != null}, sdkStatus=${(e as? com.google.android.gms.common.api.ApiException)?.statusCode}")
+            error = DriveAuth.message(e)
+        }
     }
     fun connect() = run {
         val result = DriveAuth.authorize(context, state.account.takeIf { it.isNotBlank() })

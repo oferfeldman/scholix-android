@@ -1,10 +1,19 @@
 # Lemida homework on the phone
 
-Open **More → Homework** in Scholix, allow notifications, and tap **Sign in to
-Lemida**. Complete Microsoft's password, Authenticator/SMS, and any CAPTCHA in
-the visible sign-in window. The sign-in window selects SMS automatically when
-Microsoft offers it. In the direct-SMS development build, allow SMS reception
-and a fresh Microsoft verification code is entered and submitted automatically.
+Open **More → Homework** in Scholix and allow notifications. A remembered
+Microsoft account is selected by tapping its matching email tile automatically,
+before considering an email-entry field. In the direct-SMS development build,
+automatic recovery runs in an owned, invisible WebView during homework sync:
+it selects SMS and enters a fresh matching verification code without opening a
+sign-in Activity. Enable SMS reception on the phone first. **Automatic sign-in**
+in Homework's menu lets you save the university email and, optionally, a password
+using Android's autofill/Password Manager UI. The account and optional password
+are encrypted with Android Keystore under `noBackupFilesDir`; they are not
+included in homework exports or logs. An existing Microsoft session can recover
+with a remembered email alone. A password page without a matching saved password,
+an absent/ambiguous account tile, a different account, a visible error or CAPTCHA
+requires **Open sign-in screen**. Background recovery never opens a consent dialog.
+The foreground sign-in window also selects the matching tile and SMS automatically.
 Other senders and ambiguous messages are ignored; codes are not logged, and no
 automatic resend is made. CAPTCHA still requires interactive completion.
 If password/CAPTCHA entry takes a long time, the consent listener is renewed before
@@ -74,11 +83,16 @@ partway through AJAX discovery restarts the entire snapshot once with a fresh
 session key. Expired homework-detail reads also get one dashboard reconnect and
 retry; they verify the saved account before caching any content. Detail recovery
 does not advance the full homework sync timestamp.
-Visible Microsoft input/choice controls require interactive login. The attempt is
-bounded and does not click MFA controls in the background. If recovery cannot
-complete, the app retains the cache, sends one sign-in reminder and waits for
-interactive sign-in. No SMS resend, password replay or CAPTCHA bypass occurs in
-the background. The visible sign-in window also follows the university entries
+Automatic recovery requires an enabled remembered account and direct SMS
+permission. It is bounded to four minutes overall, with the existing fixed
+three-minute MFA challenge deadline. Email/password/tile actions are attempted
+once per flow; navigation, Retry and lost acknowledgements cannot repeat them.
+A persisted SMS reservation limits foreground and background flows together to
+one automatic request per 15 minutes, including after process restart. No automatic
+resend or CAPTCHA bypass occurs. Manual-only builds retain passive SSO and visible
+SMS consent. If recovery cannot complete, the app retains the cache and offers
+interactive sign-in. Automatic sign-in can be paused separately from updates.
+The visible sign-in window also follows the university entries
 once each. Invalid/external or ambiguous provider links are ignored, and stale
 callbacks cannot navigate another document. An explicit **Retry** invalidates
 pending checks and starts a fresh bounded portal/provider attempt. Existing MFA
@@ -183,8 +197,8 @@ Unit tests cover Hebrew names, dates, activity type and origin filtering,
 baseline behavior, renames, new IDs, per-course identity, expired login pages,
 and observed Moodle config casing. A device test has verified the saved phone
 session can load both enrolled courses and all 19 homework items after process
-restart. New CAPTCHA or Microsoft verification still requires the account
-holder's interactive session when the university asks for it.
+restart. CAPTCHA and verification methods other than the supported SMS flow still
+require the account holder's interactive session when the university asks for them.
 Microsoft picker inspection ignores hidden/disabled controls. An existing disabled
 OTP field still prevents another SMS request. Received codes stay buffered while
 the form is disabled or Verify awaits input validation, within the original fixed
@@ -224,10 +238,10 @@ standalone project reads the root version catalog and requires neither Android
 nor Motion; it does not validate UI, WebView, Keystore or background scheduling.
 Session exceptions were moved into an Android-independent source file without
 changing their names or behavior. Browser request and SMS script checks also passed
-with intercepted traffic. The unmodified full app build now fails because upstream
-requires the unavailable `Motion beta52-local` artifact. Available Motion source
-still provides `beta49-local`; main's new styling/navigation and dependency versions
-were preserved. No new APK or phone verification is claimed for this rebase.
+with intercepted traffic. On 2026-10-03 the full app build was blocked by the
+unavailable `Motion beta52-local` artifact; upstream styling/navigation and
+dependency versions were preserved. The 2026-10-04 validation below supersedes
+that dependency blocker.
 
 The three additional probe-timeout tests passed in the focused JVM check. Native
 MFA timer wiring also passed the focused Android compilation described below;
@@ -262,7 +276,7 @@ unavailable items, and one alert when restricted homework becomes available. The
 API authorization, accepted activity types and same-university URL checks still
 apply. The new visibility cases have not been verified with a live phone session.
 
-The focused Android check compiles 14 actual Lemida production source files,
+The focused Android check compiles 19 actual Lemida production source files,
 excluding the Motion homework screen, including the current login Activity's native
 timer/receiver binding, WebView transport, encrypted cookie store, repository and
 worker. It uses the upstream AGP/Kotlin versions and reads SDK levels, Java targets
@@ -274,7 +288,7 @@ and the SMS dependency from the app build file:
 ```
 
 This check passed with AGP 9.4.1, Gradle 9.8.0 and SDK 37; all 75 existing focused
-unit tests and eight controlled browser host cases passed (83 total). The selected source files and
+unit tests and eight controlled browser host cases passed (83 total at that time). The selected source files and
 notification icon were verified byte-identical to production. It builds a library
 AAR, not a Scholix APK. MainActivity is a compilation fixture used only to resolve
 the worker's notification destination; the real MainActivity, navigation and Motion
@@ -282,7 +296,7 @@ screen are excluded. This validates native compilation without downgrading or
 substituting Motion. It does not execute SMS delivery, Play services, Keystore,
 WebView, worker scheduling or notification routing on a phone. See the
 [checker boundaries](../tools/lemida/android-checks/README.md) before interpreting
-the results. Full app and pending device checks remain required for an updated APK.
+the results. The full app/device validation below is not inferred from this AAR.
 
 The browser transport now invalidates document-read and Microsoft-control callbacks
 on each main-frame page start, even when a reload keeps the same URL and client.
@@ -294,7 +308,7 @@ All eight methods now run under Robolectric SDK 37 in the focused Android projec
 using the actual device suite and production browser with controlled callbacks.
 The host-only Main dispatcher fixture and WebView subclass do not render pages,
 execute JavaScript, prepare cookies or read a saved session. This adds local
-callback/lifecycle coverage; the new cases have not run on a phone and do not
+callback/lifecycle coverage; all eight also passed on the phone on 2026-10-04. They do not
 validate real Microsoft SSO, SMS delivery or full app behavior.
 
 Python live sync now publishes its JSON snapshot only after all selected course,
@@ -318,3 +332,35 @@ reproduced the prior behavior and now pass; a fourth confirms that an interrupte
 SMS click still requests only once. All 33 Python tests passed with two private
 HTML skips. These tests run the actual Python login loop with mocked controls;
 they neither send SMS nor verify a real Microsoft session or phone behavior.
+
+## 2026-10-04 automatic sign-in validation
+
+Upstream Motion `release/beta13` at `bfbc2cf` now supplies `beta52-local`.
+It was built and published to Maven Local in a separate checkout, disabling only
+publication signing there. The original Motion checkout's local properties/font
+edits were preserved. The complete app, including the real Motion screen,
+MainActivity/navigation and pulled Google Drive feature, builds with the upstream
+dependency versions. The development APK was installed without clearing data.
+All 151 app unit tests passed; the Android focused check passed 83 production
+unit cases plus eight controlled Robolectric browser cases (91 total), and the
+Android-independent check passed 83 cases. These are overlapping suites,
+not independent counts to add together.
+
+`LemidaCredentialsDeviceTest` exercises the real phone's Keystore and WebView
+JavaScript engine using synthetic Microsoft-origin documents with network access
+disabled. Its 16 cases cover encrypted restart, account-tile priority, account
+mismatch, detached/changed controls, errors/CAPTCHA, quoted passwords, input
+validation and persistent SMS reservation. The hidden controller case pauses
+while a page is not ready, then selects the account, requests SMS once, accepts a
+synthetic decoded message, fills the OTP and submits without an Activity. It does
+not send a real SMS, prove cellular delivery or force real Microsoft MFA expiry.
+A foreground sign-in recovered the live phone's two courses and 19 homework
+items on this date; no password was extracted from desktop Chrome. The phone's
+preferred university account is saved, but no university password is saved.
+Full real-server background MFA and notification-tap checks remain pending.
+The latest offline device batch passed 34 of 38 cases: all 16 credential/hidden
+controller cases, eight browser lifecycle cases, six non-UI expiry cases and four
+alert cases. The two layout and two Compose expiry/detail cases failed to find a
+Compose hierarchy while the phone was locked/dozing; they remain pending on an
+unlocked phone. The SMS-reservation fixture now clears only its own test
+preferences before/after execution so repeated runs start from an isolated state.

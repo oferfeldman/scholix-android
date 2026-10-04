@@ -32,6 +32,9 @@ import com.feldman.motion.MotionThemeDefaults
 import com.feldman.scholix.R
 import com.feldman.scholix.ui.components.SettingsTopBar
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
@@ -65,18 +68,28 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "")
         // A completed sign-in may change accounts. Return to the freshly loaded list.
         if (result.resultCode == android.app.Activity.RESULT_OK) selectedId = null
     }
+    val signInScope = rememberCoroutineScope()
+    fun reconnect() {
+        signInScope.launch {
+            val automatic = withContext(Dispatchers.IO) { LemidaSignInStore(context).canRecover() } &&
+                LemidaBackgroundSignIn.available(context) && !repo.status().startsWith("Open Sign in to Lemida")
+            if (automatic) LemidaSyncWorker.refresh(context, manual = true)
+            else login.launch(Intent(context, LemidaLoginActivity::class.java))
+        }
+    }
     LaunchedEffect(homework, courseFilter, selectedId) {
         if (courseFilter != null && homework.none { it.courseId == courseFilter }) courseFilter = null
         if (selectedId != null && homework.none { it.id == selectedId }) selectedId = null
     }
     homework.firstOrNull { it.id == selectedId }?.let { item ->
         LemidaHomeworkDetail(item, repo, onBack = { selectedId = null }, onReconnect = {
-            login.launch(Intent(context, LemidaLoginActivity::class.java))
+            reconnect()
         }); return
     }
     LaunchedEffect(lifecycle) {
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (repo.enabled() && !repo.needsLogin() && !repo.syncing.value) LemidaSyncWorker.refresh(context)
+            val canRecover = withContext(Dispatchers.IO) { LemidaSignInStore(context).canRecover() } && LemidaBackgroundSignIn.available(context)
+            if (repo.enabled() && (!repo.needsLogin() || canRecover) && !repo.syncing.value) LemidaSyncWorker.refresh(context)
             while (true) {
                 homework = repo.cached(); status = repo.status(); updated = repo.lastSync(); needsLogin = repo.needsLogin()
                 enabled = repo.enabled()
@@ -97,7 +110,19 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "")
             Box {
                 IconButton(onClick = { options = true }) { Icon(Icons.Default.MoreVert, "Homework settings") }
                 DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                    DropdownMenuItem(text = { Text(if (LemidaSignInStore(context).enabled()) "Pause automatic sign-in" else "Resume automatic sign-in") }, onClick = {
+                        LemidaSignInStore(context).apply { setEnabled(!enabled()) }
+                        options = false
+                    })
+                    DropdownMenuItem(text = { Text("Automatic sign-in") }, onClick = {
+                        options = false
+                        login.launch(Intent(context, LemidaLoginActivity::class.java).putExtra("edit_sign_in_details", true))
+                    })
                     DropdownMenuItem(text = { Text("Reconnect Lemida") }, enabled = !syncing, onClick = {
+                        options = false
+                        reconnect()
+                    })
+                    DropdownMenuItem(text = { Text("Open sign-in screen") }, onClick = {
                         options = false
                         login.launch(Intent(context, LemidaLoginActivity::class.java))
                     })
@@ -120,7 +145,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "")
         }
         if (updated == 0L || needsLogin) Section {
             PageItem(title = "Sign in to Lemida", description = "Connect to resume homework updates", icon = painterResource(R.drawable.ic_docs), onClick = {
-                permission.launch(Manifest.permission.POST_NOTIFICATIONS); login.launch(Intent(context, LemidaLoginActivity::class.java))
+                permission.launch(Manifest.permission.POST_NOTIFICATIONS); reconnect()
             })
         }
         if (status.startsWith("Update failed")) Item { Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }

@@ -90,4 +90,27 @@ not an installable Scholix APK, and excludes the real main navigation.
 Manual device checks: connect and cancel consent; browse nested shared folders;
 follow/unfollow; read a multi-page PDF and pinch zoom; save, enable airplane mode,
 reopen and remove an offline file; reconnect after revoked permissions; disconnect
-and confirm cached/offline copies are gone. No phone was connected for this batch.
+and confirm cached/offline copies are gone. No phone was connected for that initial batch.
+
+2026-10-04 follow-up: pulled the Drive feature into `feat/lemida-homework` and
+installed the complete development APK without clearing phone data. Google error
+intents are now parsed even when the Activity result is cancelled; previously
+every such return was incorrectly labelled cancellation. Four actual unit cases
+cover the result parsing, missing tokens, true cancellation and SDK failures.
+All 151 full app unit tests passed, including the existing 11 Drive HTTP cases.
+Safe diagnostics record only the request/result stage and numeric SDK status,
+never intents, accounts or tokens. The phone reported authorization status 8
+(Google's internal error), not evidence of a successful Drive connection or a
+confirmed registration failure. Live OAuth/PDF/offline/worker checks remain pending.
+
+The currently installed development APK uses package `com.feldman.scholix.inbar.dev`
+and certificate SHA-1 `F9:51:31:18:F7:8C:27:22:6A:0C:00:8B:5B:C5:03:45:DD:67:87:02`.
+Register that exact pair for this build; a client for `com.feldman.scholix` does
+not match the development suffix. Verify the certificate again when changing
+build machines or signing configuration. Status 8 alone does not identify which
+Google Cloud setting, device service or temporary failure caused the rejection.
+Read-only inspection of the existing Scholix Cloud project found one Android
+client matching the certificate above but registering `com.feldman.scholix` only.
+The development package needs a separate matching client; the original client's
+package should be preserved for that installed version. Creating the development
+client and a successful live authorization remain pending.

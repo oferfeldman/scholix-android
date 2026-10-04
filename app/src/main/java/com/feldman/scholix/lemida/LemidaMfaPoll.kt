@@ -12,6 +12,7 @@ internal class LemidaMfaPoll(
     private val evaluate: (String, (String?) -> Unit) -> Unit,
     private val scheduleTimeout: (() -> Unit) -> Unit,
     private val status: (String) -> Unit,
+    private val requestSms: () -> Boolean = { true },
 ) {
     private val probe = LemidaLoginProbe()
     fun invalidate() = probe.invalidate()
@@ -33,7 +34,7 @@ internal class LemidaMfaPoll(
                     }
                 }
                 "sms" -> {
-                    if (!prepareReception() || !mfa.prepareSms(now())) { finish(); return@selected }
+                    if (!prepareReception() || mfa.smsSelected || !requestSms() || !mfa.prepareSms(now())) { finish(); return@selected }
                     status("SMS requested. Waiting for the Microsoft verification code…")
                     evaluate(LemidaSms.chooseScript("sms")) {
                         if (current()) {
