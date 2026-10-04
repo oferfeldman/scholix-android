@@ -63,6 +63,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
     var selected by remember { mutableStateOf<DriveItem?>(null) }
     var preview by remember { mutableStateOf<File?>(null) }
     var disconnect by remember { mutableStateOf(false) }
+    var starReading by remember { mutableStateOf(false) }
     val folder = stack.lastOrNull()
     fun run(block: suspend () -> Unit) {
         if (busy) return
@@ -128,7 +129,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
     }
     LaunchedEffect(state.account) { stack.clear(); selected = null; preview = null }
     LaunchedEffect(state.account, state.followed, folder?.effectiveId, tab, lifecycle) {
-        if (state.account.isBlank() || tab == "offline" && folder == null) return@LaunchedEffect
+        if (state.account.isBlank() || tab in listOf("offline", "star") && folder == null) return@LaunchedEffect
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 try {
@@ -169,7 +170,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                 Button(onClick = { connect() }, enabled = !busy) { Text("Connect Google Drive") }
                 return@Column
             }
-            if (state.needsConsent) Button(onClick = { connect() }, enabled = !busy) { Text("Reconnect Google Drive") }
+            if (state.needsConsent && !starReading) Button(onClick = { connect() }, enabled = !busy) { Text("Reconnect Google Drive") }
             if (selected != null && preview != null) {
                 val item = selected!!
                 Row {
@@ -179,13 +180,19 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                 DrivePdfReader(preview!!, Modifier.weight(1f))
                 return@Column
             }
+            if (!starReading) {
             Text(state.account, style = MaterialTheme.typography.labelMedium)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("followed" to "Course folders", "shared" to "Shared with me", "root" to "My Drive", "offline" to "Offline").forEach { (id, title) ->
+                listOf("followed" to "Course folders", "shared" to "Shared with me", "root" to "My Drive", "star" to "StarNote", "offline" to "Offline").forEach { (id, title) ->
                     FilterChip(selected = tab == id, onClick = { if (!busy) { tab = id; stack.clear() } }, label = { Text(title) })
                 }
             }
             OutlinedTextField(query, { query = it }, label = { Text("Search this list") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            }
+            if (tab == "star") {
+                key(state.account) { StarNotePage(repo, query, Modifier.weight(1f), onReader = { starReading = it }) }
+                return@Column
+            }
             if (folder != null) {
                 val followed = state.followed.any { it.effectiveId == folder.effectiveId }
                 TextButton(onClick = { run { repo.follow(folder) } }, enabled = !busy) {

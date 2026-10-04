@@ -81,16 +81,25 @@ class DriveRepository private constructor(private val context: Context) {
             else current.followed + folder))
         DriveSyncWorker.schedule(context)
     } }
-    private suspend fun <T> authorized(block: suspend (String) -> T): T {
+    private suspend fun <T> authorized(edits: Boolean = false, block: suspend (String) -> T): T {
         val account = mutable.value.account
         if (account.isBlank()) throw DriveNeedsConsent()
-        val token = DriveAuth.token(context, account)
+        val token = DriveAuth.token(context, account, edits)
         return try { block(token) } catch (e: DriveHttpError) {
             if (e.status != 401) throw e
             DriveAuth.clear(context, token)
             // One retry with a new token, never an unbounded authorization loop.
-            block(DriveAuth.token(context, account))
+            block(DriveAuth.token(context, account, edits))
         }
+    }
+    internal suspend fun <T> starAccess(edits: Boolean = false, block: suspend (DriveApi, String, String) -> T): T = mutex.withLock {
+        val account = mutable.value.account
+        authorized(edits) { block(api, it, account) }
+    }
+    internal suspend fun <T> starLocalAccess(block: suspend (String) -> T): T = mutex.withLock {
+        val account = mutable.value.account
+        require(account.isNotBlank()) { "Connect Google Drive first." }
+        block(account)
     }
     suspend fun refresh(folder: DriveItem? = null, shared: Boolean = false) = mutex.withLock {
         try {

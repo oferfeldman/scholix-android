@@ -6,6 +6,9 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MultipartBody
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -68,11 +71,11 @@ class DriveApi(private val client: OkHttpClient = OkHttpClient.Builder()
             .getJSONObject("user").getString("emailAddress").also { require(it.isNotBlank()) }
     }
     // A complete page sequence is returned before the repository replaces a cached listing.
-    suspend fun list(token: String, folder: DriveItem? = null, shared: Boolean = false): List<DriveItem> =
+    suspend fun list(token: String, folder: DriveItem? = null, shared: Boolean = false, search: String? = null): List<DriveItem> =
         withContext(Dispatchers.IO) {
             val id = folder?.effectiveId ?: "root"
             require(Regex("[A-Za-z0-9_-]+").matches(id)) { "Invalid Drive folder ID" }
-            val query = if (shared) "trashed = false and sharedWithMe = true" else
+            val query = search ?: if (shared) "trashed = false and sharedWithMe = true" else
                 "trashed = false and '$id' in parents"
             val items = linkedMapOf<String, DriveItem>()
             val seen = hashSetOf<String>()
@@ -96,6 +99,22 @@ class DriveApi(private val client: OkHttpClient = OkHttpClient.Builder()
             } while (page.isNotEmpty())
             items.values.sortedWith(compareBy<DriveItem> { !it.folder }.thenBy { it.name.lowercase() })
         }
+
+    // Every save creates a new revision. No StarNote sync file is ever overwritten.
+    suspend fun create(token: String, metadata: JSONObject, content: String? = null): DriveItem = withContext(Dispatchers.IO) {
+        val url = if (content == null) base.newBuilder().addPathSegment("files")
+            else base.newBuilder().encodedPath(base.encodedPath.replace("/drive/v3/", "/upload/drive/v3/") + "files")
+                .addQueryParameter("uploadType", "multipart")
+        val body = if (content == null) metadata.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            else MultipartBody.Builder().setType("multipart/related".toMediaType())
+                .addPart(metadata.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .addPart(content.toRequestBody("application/json; charset=utf-8".toMediaType())).build()
+        client.newCall(Request.Builder().url(url.addQueryParameter("fields", "id,name,mimeType,modifiedTime,size").build())
+            .header("Authorization", "Bearer $token").post(body).build()).execute().use {
+            if (!it.isSuccessful) throw DriveHttpError(it.code)
+            DriveItem.parse(JSONObject(it.body.string()))
+        }
+    }
 
     suspend fun download(token: String, item: DriveItem, destination: File, maxBytes: Long = 100L * 1024 * 1024) =
         withContext(Dispatchers.IO) {

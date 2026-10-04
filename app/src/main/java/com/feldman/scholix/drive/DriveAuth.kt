@@ -23,21 +23,22 @@ object DriveAuth {
         if (!hasData && resultCode == Activity.RESULT_CANCELED) throw DriveAuthorizationCancelled()
         return parse()?.takeIf { it.isNotBlank() } ?: throw DriveNeedsConsent()
     }
-    fun request(account: String?) = AuthorizationRequest.builder()
-        .setRequestedScopes(listOf(Scope(SCOPE))).apply {
+    const val EDIT_SCOPE = "https://www.googleapis.com/auth/drive.file"
+    fun request(account: String?, edits: Boolean = false) = AuthorizationRequest.builder()
+        .setRequestedScopes(if (edits) listOf(Scope(SCOPE), Scope(EDIT_SCOPE)) else listOf(Scope(SCOPE))).apply {
             if (!account.isNullOrBlank()) setAccount(Account(account, "com.google"))
         }.build()
-    suspend fun authorize(context: Context, account: String?): AuthorizationResult =
+    suspend fun authorize(context: Context, account: String?, edits: Boolean = false): AuthorizationResult =
         suspendCancellableCoroutine { continuation ->
-            Identity.getAuthorizationClient(context).authorize(request(account))
+            Identity.getAuthorizationClient(context).authorize(request(account, edits))
                 .addOnSuccessListener { if (continuation.isActive) continuation.resume(it) }
                 .addOnFailureListener {
                     android.util.Log.i("ScholixDriveAuth", "Authorization request failed, sdkStatus=${(it as? ApiException)?.statusCode}")
                     if (continuation.isActive) continuation.resumeWithException(it)
                 }
         }
-    suspend fun token(context: Context, account: String): String {
-        val result = authorize(context, account)
+    suspend fun token(context: Context, account: String, edits: Boolean = false): String {
+        val result = authorize(context, account, edits)
         if (result.hasResolution()) throw DriveNeedsConsent()
         return result.accessToken ?: throw DriveNeedsConsent()
     }
