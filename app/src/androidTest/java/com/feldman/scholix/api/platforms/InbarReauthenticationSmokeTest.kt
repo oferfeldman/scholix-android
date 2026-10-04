@@ -7,6 +7,10 @@ import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.feldman.scholix.MainActivity
 import com.feldman.scholix.api.PlatformStorage
 import org.json.JSONArray
@@ -14,12 +18,14 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import org.junit.Rule
 import org.junit.runner.RunWith
 
 /** Opt-in live test: expires only the development app's local Inbar session, retaining its account. */
 @RunWith(AndroidJUnit4::class)
 class InbarReauthenticationSmokeTest {
-    @Test fun expiredSessionAutomaticallySignsInAndRestoresGrades() {
+    @get:Rule val compose = createEmptyComposeRule()
+    @Test fun openingInbarGradesSignsInAndRestoresGrades() {
         assumeTrue(InstrumentationRegistry.getArguments().getString("inbarLiveReauthentication") == "true")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assumeTrue(context.packageName.endsWith(".inbar.dev"))
@@ -40,6 +46,10 @@ class InbarReauthenticationSmokeTest {
         var restored = false
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithText("Load Inbar grades").fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithText("Load Inbar grades").performClick()
                 val deadline = SystemClock.elapsedRealtime() + 60_000
                 while (SystemClock.elapsedRealtime() < deadline) {
                     val current = findInbar(profiles())

@@ -435,6 +435,14 @@ fun MainScreen(
     }
 
     val backStack = rememberMotionDestBackStack(startDestination)
+    // Opening the app on its default Grades page is not a request for an Inbar SMS.
+    var userOpenedPages by remember { mutableStateOf<Set<AppDest>>(emptySet()) }
+    fun navigateFromUser(destination: MotionDest, topLevel: Boolean = false) {
+        if (destination == AppDest.Grades || destination == AppDest.Schedule) {
+            userOpenedPages = userOpenedPages + (destination as AppDest)
+        }
+        if (topLevel) backStack.navigateTop(destination) else backStack.navigateTo(destination)
+    }
     var handledHomeworkOpenRequest by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(homeworkOpenRequest) {
         if (homeworkOpenRequest > handledHomeworkOpenRequest) {
@@ -479,7 +487,7 @@ fun MainScreen(
                 OverflowMenuFab(
                     overflowPages = overflowPagesList,
                     selectedDest = selectedNavbarDest,
-                    onNavigate = { dest -> backStack.navigateTo(dest) }
+                    onNavigate = { dest -> navigateFromUser(dest) }
                 )
             }
         )
@@ -497,7 +505,7 @@ fun MainScreen(
     val messagesViewModel: MessagesViewModel = viewModel()
     LaunchedEffect(platforms) { messagesViewModel.configure(platforms) }
 
-    val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, navbarPages, visibleNavbarDestinations, overflowPagesList, homeworkOpenRequest) {
+    val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, navbarPages, visibleNavbarDestinations, overflowPagesList, homeworkOpenRequest, userOpenedPages, currentScreen) {
         AppState(
             preloadedCourses = preloadedCourses,
             repository = repository,
@@ -510,6 +518,8 @@ fun MainScreen(
             overflowPages = overflowPagesList,
             messagesViewModel = messagesViewModel,
             homeworkOpenRequest = homeworkOpenRequest,
+            userOpenedPages = userOpenedPages,
+            activePage = currentScreen,
         )
     }
 
@@ -528,7 +538,7 @@ fun MainScreen(
                             val selected = selectedNavbarDest == destination
                             NavigationRailItem(
                                 selected = selected,
-                                onClick = { backStack.navigateTop(destination) },
+                                onClick = { navigateFromUser(destination, topLevel = true) },
                                 icon = {
                                     Icon(
                                         painter = painterResource(
@@ -562,7 +572,7 @@ fun MainScreen(
                             destinations = destinations,
                             navigationState = navigationState,
                             modifier = Modifier.fillMaxSize(),
-                            onNavigate = { dest -> backStack.navigateTo(dest) },
+                            onNavigate = { dest -> navigateFromUser(dest) },
                             onRootBack = {}
                         )
                     }
@@ -585,7 +595,7 @@ fun MainScreen(
                         currentDest = currentScreen,
                         selectedDest = selectedNavbarDest,
                         destinations = visibleNavbarDestinations,
-                        onNavigate = { dest -> backStack.navigateTop(dest) },
+                        onNavigate = { dest -> navigateFromUser(dest, topLevel = true) },
                         onHeightChanged = { bottomBarHeight = it },
                         modifier = Modifier.fillMaxWidth(),
                         floatingActionButton = if (overflowPagesList.isNotEmpty()) {
@@ -614,7 +624,7 @@ fun MainScreen(
                         content = {
                             OverflowFabMenu(
                                 overflowPages = overflowPagesList,
-                                onNavigate = { dest -> backStack.navigateTo(dest) }
+                                onNavigate = { dest -> navigateFromUser(dest) }
                             )
                         },
                         modifier = Modifier.matchParentSize()
@@ -644,7 +654,7 @@ fun MainScreen(
                     val selected = selectedNavbarDest == destination
                     NavigationBarItem(
                         selected = selected,
-                        onClick = { backStack.navigateTop(destination) },
+                        onClick = { navigateFromUser(destination, topLevel = true) },
                         icon = {
                             Icon(
                                 painter = painterResource(
