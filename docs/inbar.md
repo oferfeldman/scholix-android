@@ -1,5 +1,7 @@
 # Inbar (Bar-Ilan) provider
 
+Inbar can temporarily refuse both SMS delivery and code verification. Its portal reports this in a JavaScript alert even though the code-entry form is still present. Scholix detects that response, ends sign-in immediately with a **try again later** error, and does not submit further codes against the refused challenge. The portal does not specify when the restriction expires.
+
 Choose **Inbar (Bar-Ilan)** during onboarding or in Settings → Add provider. Enter the ID/passport and mobile number registered with Bar-Ilan and submit the same login form used by the other providers. Inbar requests and verifies the SMS in the background while a Material `ContainedLoadingIndicator` is shown. There is no SMS form or Verify button. This provider is separate from the existing Bar-Ilan/Michlol math provider.
 
 ID and mobile are saved through the same `PlatformStorage` provider preferences used by other platforms, as soon as the portal accepts an SMS request. Subsequent sign-ins prefill the shared fields with those details. If a grades request finds an expired session, the Grades page signs in behind its loading indicator and retries after verification. Declined consent, invalid credentials/codes, unavailable reception, network failures, and a 90-second SMS timeout return to the existing login error display; Grades offers **Retry login**. Credentials remain editable in the common forms. Only an interactive sign-in requests an SMS, and each successful reauthentication replaces the existing provider under the same ID.

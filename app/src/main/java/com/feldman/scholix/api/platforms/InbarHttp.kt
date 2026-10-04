@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit
 
 internal class InbarSessionExpired : IOException("Inbar session expired. Sign in again with an SMS code.")
 internal class InbarSmsCodeRejected : IOException("The SMS code was not accepted. Please sign in again.")
+internal class InbarSmsRestricted : IOException("Inbar has temporarily blocked sending SMS codes and verifying them. Please try again later.")
 
 internal class InbarCookieJar : CookieJar {
     private val cookies = mutableListOf<Cookie>()
@@ -112,6 +113,7 @@ internal class InbarHttp(
         }
         val button = doc.selectFirst("input[name=btnLogin]") ?: throw IOException("Inbar login button missing")
         val next = post(page, mapOf("edtUsername" to identity, "edtMobile" to phone, "btnLogin" to button.attr("value")))
+        checkSmsRestriction(next)
         if (next.document().selectFirst("input[name=edtCode]") == null) throw IOException("Inbar did not accept the login. Check ID and registered mobile.")
         challenge = next
         smsTime = System.nanoTime()
@@ -121,7 +123,9 @@ internal class InbarHttp(
         val page = challenge ?: throw IOException("Request an SMS first")
         if (System.nanoTime() - smsTime < TimeUnit.SECONDS.toNanos(45)) throw IOException("Wait 45 seconds before requesting another SMS")
         val button = page.document().selectFirst("input[name=btnSendSmsCode]") ?: throw IOException("Inbar resend button missing")
-        challenge = post(page, mapOf("btnSendSmsCode" to button.attr("value")))
+        val next = post(page, mapOf("btnSendSmsCode" to button.attr("value")))
+        checkSmsRestriction(next)
+        challenge = next
         smsTime = System.nanoTime()
     }
 
@@ -130,6 +134,7 @@ internal class InbarHttp(
         val page = challenge ?: throw IOException("Request an SMS first")
         val button = page.document().selectFirst("input[name=btnVerify]") ?: throw IOException("Inbar verify button missing")
         val next = post(page, mapOf("edtCode" to code, "btnVerify" to button.attr("value")))
+        checkSmsRestriction(next)
         if (next.document().selectFirst("input[name=edtCode]") != null) {
             challenge = next // Keep fresh state for a manually corrected code.
             throw InbarSmsCodeRejected()
@@ -139,6 +144,19 @@ internal class InbarHttp(
         } else grades()
         challenge = null
         return grades
+    }
+
+    private fun checkSmsRestriction(page: InbarPage) {
+        // Orbit reports the restriction in a JavaScript alert while still rendering edtCode.
+        // Treat it as a server refusal, rather than waiting for an SMS or trying more codes.
+        val restricted = page.document().select("script").any {
+            it.data().replace(Regex("\\s+"), " ")
+                .contains("לא ניתן לשלוח עוד הודעות/לאמת קוד בשלב זה")
+        }
+        if (restricted) {
+            challenge = null
+            throw InbarSmsRestricted()
+        }
     }
 
     @Synchronized fun grades(year: Int? = null): InbarGradePage {
