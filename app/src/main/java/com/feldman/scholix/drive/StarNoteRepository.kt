@@ -38,52 +38,110 @@ data class StarEdits(val source: String, val title: String = "", val annotations
     }
 }
 data class StarOpen(val account: String, val document: StarDocument, val edits: StarEdits,
-    val resources: Map<String,File>, val templates: Map<String,JSONObject>)
+    val resources: Map<String,File>, val templates: Map<String,JSONObject>,val title:String="StarNote",val local:Boolean=false)
+
+private class StarSource(val account:String,val offline:Boolean,val list:suspend(DriveItem)->List<DriveItem>,
+    val download:suspend(DriveItem,File,Long)->Unit,val search:suspend(String)->List<DriveItem>)
 
 class StarNoteRepository(private val context: Context, private val drive: DriveRepository) {
     private fun root(account: String) = File(context.noBackupFilesDir,"drive-materials/starnote/" +
         MessageDigest.getInstance("SHA-256").digest(account.toByteArray()).joinToString("") { "%02x".format(it) })
     private fun safeId(id:String):String { require(Regex("[A-Za-z0-9_-]+").matches(id)); return id }
     private fun draft(account:String,id:String)=File(root(account),"${safeId(id)}/edits.json")
-    suspend fun notes(): List<DriveItem> = drive.starAccess { api, token, _ ->
-        val roots=api.list(token,search="trashed = false and mimeType = '${DriveItem.FOLDER}' and name = 'StarNote'")
+    private fun write(file:File,value:String) {file.parentFile!!.mkdirs();val temp=File(file.parentFile,file.name+".tmp");temp.writeText(value)
+        java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE)}
+    private fun listing(account:String,folder:DriveItem)=File(root(account),"lists/${safeId(folder.effectiveId)}.json")
+    private fun decode(value:String)=JSONArray(value).let {a->(0 until a.length()).map {DriveItem.parse(a.getJSONObject(it))}}
+    private fun encode(items:List<DriveItem>)=JSONArray().apply {items.forEach {put(it.json())}}.toString()
+    private suspend fun <T> source(refresh:Boolean=false,block:suspend(StarSource)->T):T {
+        if(!refresh) {
+            try {return drive.starLocalAccess {account->withContext(Dispatchers.IO) {
+                block(StarSource(account,true,list={folder->
+                    runCatching {drive.cachedList(folder)}.getOrElse {decode(listing(account,folder).readText())}
+                },download={item,file,max->
+                    val saved=drive.cachedFile(item)
+                    if(saved!=null) {require(saved.length()<=max);file.parentFile!!.mkdirs();if(saved!=file)saved.copyTo(file,true)}
+                    else {
+                        val version=File(file.parentFile,file.name+".version")
+                        require(file.isFile && version.isFile && version.readText()=="${item.modified}:${file.length()}" && file.length()<=max) {"Download this note to read it locally."}
+                    }
+                },search={_->
+                    val saved=drive.state.value.savedFolders.filter {it.name=="StarNote"}
+                    if(saved.isNotEmpty())saved else decode(File(root(account),"roots.json").readText())
+                }))
+            }} }catch(e:Exception){if(e is kotlinx.coroutines.CancellationException)throw e}
+        }
+        return drive.starAccess {api,token,account->withContext(Dispatchers.IO) {
+            block(StarSource(account,false,list={folder->api.list(token,folder).also {write(listing(account,folder),encode(it))}},
+                download={item,file,max->
+                    val version=File(file.parentFile,file.name+".version")
+                    val saved=drive.cachedFile(item)
+                    if(saved!=null) {require(saved.length()<=max);file.parentFile!!.mkdirs();if(saved!=file)saved.copyTo(file,true)}
+                    else if(!file.isFile || !version.isFile || version.readText()!="${item.modified}:${file.length()}")api.download(token,item,file,max)
+                    require(file.length()<=max);write(version,"${item.modified}:${file.length()}")
+                },search={query->api.list(token,search=query)}))
+        }}
+    }
+    suspend fun roots(refresh:Boolean=false):List<DriveItem> = source(refresh) {s->
+        s.search("trashed = false and mimeType = '${DriveItem.FOLDER}' and name = 'StarNote'").also {write(File(root(s.account),"roots.json"),encode(it))}
+    }
+    suspend fun notes(refresh:Boolean=false): List<DriveItem> = source(refresh) { s ->
+        val roots=s.search("trashed = false and mimeType = '${DriveItem.FOLDER}' and name = 'StarNote'")
+        write(File(root(s.account),"roots.json"),encode(roots))
         val result=mutableListOf<DriveItem>()
         for(root in roots) {
-            val sync=api.list(token,root).firstOrNull { it.folder && it.name == "sync" } ?: continue
-            val version=api.list(token,sync).firstOrNull { it.folder && it.name == "v1" } ?: continue
-            for(account in api.list(token,version).filter { it.folder }) {
-                val docs=api.list(token,account).firstOrNull { it.folder && it.name == "document" } ?: continue
-                result += api.list(token,docs).filter { it.folder }
+            val sync=s.list(root).firstOrNull { it.folder && it.name == "sync" } ?: continue
+            val version=s.list(sync).firstOrNull { it.folder && it.name == "v1" } ?: continue
+            for(account in s.list(version).filter { it.folder }) {
+                val docs=s.list(account).firstOrNull { it.folder && it.name == "document" } ?: continue
+                result += s.list(docs).filter { it.folder }
             }
         }
         withContext(Dispatchers.IO) { result.distinctBy { it.id }.map { note ->
-            val title=runCatching { JSONObject(draft(drive.state.value.account,note.id).readText()).optString("title") }.getOrDefault("")
-            note.copy(name=title.ifBlank { note.name })
+            val title=runCatching { JSONObject(draft(s.account,note.id).readText()).optString("title") }.getOrDefault("")
+            val native=note.sourceTitle.ifBlank {runCatching {File(root(s.account),"${safeId(note.id)}/title.txt").readText()}.getOrDefault("")}
+            note.copy(name=title.ifBlank { native.ifBlank {note.name} },sourceTitle=native)
         } }
     }
-    suspend fun cover(note:DriveItem):File? = drive.starAccess { api,token,account ->
+    suspend fun cover(note:DriveItem):File? = source { s ->
+        val account=s.account
         val dir=File(root(account),safeId(note.id));dir.mkdirs()
-        val cover=api.list(token,note).firstOrNull { !it.folder && it.name.startsWith("thumbnail") && it.mime=="image/png" }
-        cover?.let { val file=File(dir,"thumbnail.png");api.download(token,it,file,2L*1024*1024);file }
+        val cover=s.list(note).firstOrNull { !it.folder && it.name.startsWith("thumbnail") && it.mime=="image/png" }
+        cover?.let { val file=File(dir,"thumbnail.png");s.download(it,file,2L*1024*1024);file }
     }
-    suspend fun open(note:DriveItem):StarOpen = drive.starAccess { api,token,account -> withContext(Dispatchers.IO) {
+    suspend fun title(note:DriveItem):String = source {s->
+        if(note.sourceTitle.isNotBlank())return@source note.sourceTitle
+        val cached=File(root(s.account),"${safeId(note.id)}/title.txt")
+        if(cached.isFile)return@source cached.readText()
+        val pdfs=mutableListOf<String>()
+        suspend fun find(folder:DriveItem,depth:Int) {
+            for(item in s.list(folder)) {
+                if(item.pdf)pdfs+=item.name.substringBeforeLast('.')
+                else if(item.folder&&depth<2)find(item,depth+1)
+            }
+        }
+        s.list(note).filter {it.folder&&it.name in listOf("resource","template")}.forEach {find(it,0)}
+        pdfs.distinct().singleOrNull().orEmpty().also {if(it.isNotBlank())write(cached,it)}
+    }
+    suspend fun open(note:DriveItem,refresh:Boolean=false):StarOpen = source(refresh) { s -> withContext(Dispatchers.IO) {
+        val account=s.account
         val dir=File(root(account),safeId(note.id));dir.mkdirs()
-        val children=api.list(token,note)
+        val children=s.list(note)
         val inc=children.firstOrNull { it.folder && it.name=="inc" } ?: error("Unsupported StarNote backup. Export this note as PDF in StarNote.")
         val archives=mutableListOf<DriveItem>()
-        for(month in api.list(token,inc).filter { it.folder }) archives += api.list(token,month).filter { it.name.endsWith(".zip") }
+        for(month in s.list(inc).filter { it.folder }) archives += s.list(month).filter { it.name.endsWith(".zip") }
         require(archives.size <= 200 && archives.sumOf { it.size } <= 64L*1024*1024) { "This note is too large to open here. Export it as PDF from StarNote." }
         val raw=archives.sortedBy { it.name }.map { item ->
-            val file=File(dir,"${safeId(item.id)}.zip");api.download(token,item,file,64L*1024*1024);file.readBytes()
+            val file=File(dir,"${safeId(item.id)}.zip");s.download(item,file,64L*1024*1024);file.readBytes()
         }
         val document=StarNoteFormat.read(raw)
         val resources=linkedMapOf<String,File>(); val templates=linkedMapOf<String,JSONObject>()
         suspend fun collect(folder:DriveItem,path:String,depth:Int) {
             require(depth<=3)
-            for(item in api.list(token,folder)) {
+            for(item in s.list(folder)) {
                 if(item.folder) collect(item,"$path${item.name}/",depth+1)
                 else if(document.pages.any { it.resource=="$path${item.name}" || it.template==item.name }) {
-                    val file=File(dir,"${safeId(item.id)}.asset");api.download(token,item,file,32L*1024*1024)
+                    val file=File(dir,"${safeId(item.id)}.asset");s.download(item,file,32L*1024*1024)
                     if(item.name.endsWith(".template_json")) templates[item.name]=JSONObject(file.readText())
                     else resources["$path${item.name}"]=file
                 }
@@ -91,13 +149,17 @@ class StarNoteRepository(private val context: Context, private val drive: DriveR
         }
         children.filter { it.folder && it.name in listOf("resource","template") }.forEach { collect(it,"",0) }
         val local=runCatching { val j=JSONObject(draft(account,note.id).readText());StarEdits.read(j,note.id,j.optBoolean("backedUp")) }.getOrNull()
-        val remote=api.list(token,search="trashed = false and appProperties has { key='scholixStarSource' and value='${safeId(note.id)}' }")
+        val remote=if(s.offline)null else s.search("trashed = false and appProperties has { key='scholixStarSource' and value='${safeId(note.id)}' }")
             .maxByOrNull { it.modified }
         val edits=if(local!=null && !local.backedUp) local else if(remote!=null) {
-            val file=File(dir,"remote.json");api.download(token,remote,file,4L*1024*1024)
+            val file=File(dir,"remote.json");s.download(remote,file,4L*1024*1024)
             StarEdits.read(JSONObject(file.readText()),note.id,true)
         } else local ?: StarEdits(note.id,backedUp=true)
-        StarOpen(account,document,edits,resources,templates)
+        val title=document.title.ifBlank {note.sourceTitle}.ifBlank {
+            document.pages.map {it.resource.substringAfterLast('/')}.filter {it.endsWith(".pdf",true)}.distinct().singleOrNull()?.substringBeforeLast('.').orEmpty()
+        }
+        if(title.isNotBlank())write(File(dir,"title.txt"),title)
+        StarOpen(account,document,edits,resources,templates,title.ifBlank {if(Regex("[a-fA-F0-9-]{32,36}").matches(note.name))"Untitled StarNote" else note.name},s.offline)
     } }
     suspend fun saveLocal(account:String, edits:StarEdits, acknowledge:Boolean = false) = drive.starLocalAccess { current -> withContext(Dispatchers.IO) {
         require(account==current) { "The connected Google account changed. Reopen this note." }

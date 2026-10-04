@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 data class DriveItem(val id: String, val name: String, val mime: String,
     val modified: String = "", val size: Long = 0, val resourceKey: String = "",
     val canDownload: Boolean = true, val targetId: String = "", val targetMime: String = "",
-    val targetKey: String = "") {
+    val targetKey: String = "", val sourceTitle:String="") {
     val folder get() = effectiveMime == FOLDER
     val effectiveId get() = targetId.ifEmpty { id }
     val effectiveMime get() = targetMime.ifEmpty { mime }
@@ -27,6 +27,7 @@ data class DriveItem(val id: String, val name: String, val mime: String,
         (!effectiveMime.startsWith("application/vnd.google-apps.") || effectiveMime in NATIVE_PDF)
     fun json() = JSONObject().put("id", id).put("name", name).put("mimeType", mime)
         .put("modifiedTime", modified).put("size", size).put("resourceKey", resourceKey)
+        .put("scholixSourceTitle",sourceTitle)
         .put("capabilities", JSONObject().put("canDownload", canDownload))
         .put("shortcutDetails", JSONObject().put("targetId", targetId).put("targetMimeType", targetMime)
             .put("targetResourceKey", targetKey))
@@ -40,7 +41,11 @@ data class DriveItem(val id: String, val name: String, val mime: String,
                 j.optString("modifiedTime"), j.optString("size").toLongOrNull() ?: 0,
                 j.optString("resourceKey"), j.optJSONObject("capabilities")?.optBoolean("canDownload", true) ?: true,
                 s?.optString("targetId").orEmpty(), s?.optString("targetMimeType").orEmpty(),
-                s?.optString("targetResourceKey").orEmpty())
+                s?.optString("targetResourceKey").orEmpty(),j.optString("scholixSourceTitle").ifBlank {
+                    StarNoteTitles.fromJson(j.optJSONObject("properties") ?: JSONObject()).ifBlank {
+                        runCatching {StarNoteTitles.fromJson(JSONObject(j.optString("description")))}.getOrDefault("")
+                    }
+                })
         }
     }
 }
@@ -84,7 +89,7 @@ class DriveApi(private val client: OkHttpClient = OkHttpClient.Builder()
                 val url = base.newBuilder().addPathSegment("files").addQueryParameter("q", query)
                     .addQueryParameter("pageSize", "200").addQueryParameter("supportsAllDrives", "true")
                     .addQueryParameter("includeItemsFromAllDrives", "true")
-                    .addQueryParameter("fields", "nextPageToken,incompleteSearch,files(id,name,mimeType,modifiedTime,size,resourceKey,capabilities(canDownload),shortcutDetails)")
+                    .addQueryParameter("fields", "nextPageToken,incompleteSearch,files(id,name,mimeType,modifiedTime,size,resourceKey,description,properties,capabilities(canDownload),shortcutDetails)")
                     .apply { if (page.isNotEmpty()) addQueryParameter("pageToken", page) }.build()
                 val response = json(url, token, id, folder?.effectiveKey.orEmpty())
                 if (response.optBoolean("incompleteSearch")) throw IOException("Drive returned an incomplete listing. Try refreshing this folder.")

@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -15,7 +16,7 @@ import java.security.MessageDigest
 data class DriveListing(val items: List<DriveItem> = emptyList(), val updated: Long = 0)
 data class DriveState(val account: String = "", val followed: List<DriveItem> = emptyList(),
     val listings: Map<String, DriveListing> = emptyMap(), val offline: List<DriveItem> = emptyList(),
-    val status: String = "", val needsConsent: Boolean = false)
+    val status: String = "", val needsConsent: Boolean = false, val savedFolders:List<DriveItem> = emptyList())
 
 class DriveRepository private constructor(private val context: Context) {
     private val root = File(context.noBackupFilesDir, "drive-materials")
@@ -30,13 +31,15 @@ class DriveRepository private constructor(private val context: Context) {
         DriveState(j.getString("account"), decode(j.getJSONArray("followed")),
             listings.keys().asSequence().associateWith { k -> listings.getJSONObject(k).let {
                 DriveListing(decode(it.getJSONArray("items")), it.getLong("updated"))
-            } }, decode(j.getJSONArray("offline")).filter { offlineFile(it).isFile })
+            } }, decode(j.getJSONArray("offline")).filter { offlineFile(it).isFile },
+            savedFolders=decode(j.optJSONArray("savedFolders") ?: JSONArray()))
     }.getOrDefault(DriveState())
     private fun decode(a: JSONArray) = (0 until a.length()).map { DriveItem.parse(a.getJSONObject(it)) }
     private fun encode(items: List<DriveItem>) = JSONArray().apply { items.forEach { put(it.json()) } }
     private fun publish(s: DriveState) {
         root.mkdirs()
         val j = JSONObject().put("account", s.account).put("followed", encode(s.followed))
+            .put("savedFolders",encode(s.savedFolders))
             .put("offline", encode(s.offline)).put("listings", JSONObject().apply {
                 s.listings.forEach { (k, v) -> put(k, JSONObject().put("items", encode(v.items)).put("updated", v.updated)) }
             })
@@ -59,6 +62,7 @@ class DriveRepository private constructor(private val context: Context) {
         val account = api.account(token)
         if (mutable.value.account != account) {
             clearFiles()
+            androidx.work.WorkManager.getInstance(context).cancelAllWorkByTag(DriveFolderDownloadWorker.TAG)
             publish(DriveState(account = account))
         } else publish(mutable.value.copy(status = "", needsConsent = false))
     } }
@@ -66,6 +70,7 @@ class DriveRepository private constructor(private val context: Context) {
         clearFiles()
         mutable.value = DriveState()
         DriveSyncWorker.cancel(context)
+        androidx.work.WorkManager.getInstance(context).cancelAllWorkByTag(DriveFolderDownloadWorker.TAG)
     } }
     private fun clearFiles() {
         // Refuse an account switch if old private files could survive it.
@@ -119,6 +124,41 @@ class DriveRepository private constructor(private val context: Context) {
         withContext(Dispatchers.IO) { publish(mutable.value.copy(
             offline = mutable.value.offline.filterNot { it.effectiveId == item.effectiveId } + item)) }
     }
+    suspend fun downloadFolder(account:String,folder:DriveItem,progress:suspend(Int,Int,String)->Unit) {
+        progress(0,0,"Finding files…")
+        val plan=DriveFolderPlanner.scan(folder) { child -> starAccess { api,token,current ->
+            require(current==account) {"The connected account changed."};api.list(token,child)
+        } }
+        starLocalAccess {current->withContext(Dispatchers.IO) {
+            require(current==account)
+            require(root.apply {mkdirs()}.usableSpace>plan.files.sumOf {it.size}+64L*1024*1024) {"There is not enough free storage for this folder."}
+            publish(mutable.value.copy(listings=mutable.value.listings+plan.folders.mapValues {(_,pair)->DriveListing(pair.second,System.currentTimeMillis())}))
+        }}
+        var bytes=0L
+        for((index,item) in plan.files.withIndex()) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            mutex.withLock {
+                require(mutable.value.account==account) {"The connected account changed."}
+                val saved=mutable.value.offline.firstOrNull {it.effectiveId==item.effectiveId}
+                if(saved==null || saved.modified!=item.modified || !offlineFile(item).isFile) {
+                    authorized {api.download(it,item,offlineFile(item))}
+                    mutable.value=mutable.value.copy(offline=mutable.value.offline.filterNot {it.effectiveId==item.effectiveId}+item)
+                }
+                if(index % 10 == 0 || index==plan.files.lastIndex)withContext(Dispatchers.IO){publish(mutable.value)}
+                bytes+=offlineFile(item).length()
+                require(bytes<=2L*1024*1024*1024) {"This folder exceeds the 2 GB download limit. Saved files are still available."}
+            }
+            progress(index+1,plan.files.size,item.name)
+        }
+        starLocalAccess {current->withContext(Dispatchers.IO) {
+            require(current==account)
+            publish(mutable.value.copy(savedFolders=mutable.value.savedFolders.filterNot {it.effectiveId==folder.effectiveId}+folder,
+                status=if(plan.skipped>0)"Folder saved. ${plan.skipped} unavailable or oversized files were skipped." else "Folder saved locally."))
+        }}
+    }
+    internal fun cachedList(folder:DriveItem):List<DriveItem> = mutable.value.listings[folder.effectiveId]?.items
+        ?: throw java.io.IOException("This folder has not been fully downloaded yet.")
+    internal fun cachedFile(item:DriveItem):File? = offlineFile(item).takeIf {it.isFile && mutable.value.offline.any {saved->saved.effectiveId==item.effectiveId && saved.modified==item.modified}}
     suspend fun removeOffline(item: DriveItem) = mutex.withLock { withContext(Dispatchers.IO) {
         offlineFile(item).delete()
         publish(mutable.value.copy(offline = mutable.value.offline.filterNot { it.effectiveId == item.effectiveId }))

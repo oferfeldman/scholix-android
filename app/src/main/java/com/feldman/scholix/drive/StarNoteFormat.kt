@@ -13,7 +13,7 @@ data class StarStroke(val id: String, val color: Int, val width: Float, val poin
 data class StarPage(val id: String, val order: Float, val width: Float, val height: Float,
     val kind: String, val resource: String, val resourcePage: Int, val template: String,
     val strokes: List<StarStroke> = emptyList())
-data class StarDocument(val pages: List<StarPage>, val warnings: List<String>)
+data class StarDocument(val pages: List<StarPage>, val warnings: List<String>, val title:String="")
 
 /** Observed sync/v1 wire format. Read only: do not emit StarNote's undocumented sync protocol. */
 object StarNoteFormat {
@@ -78,6 +78,7 @@ object StarNoteFormat {
         val pages = linkedMapOf<String,StarPage>()
         val shapes = linkedMapOf<String,MutableMap<String,Pair<Long,StarStroke?>>>()
         val warnings = linkedSetOf<String>()
+        var title=""
         var expanded = 0L
         var pointCount = 0L
         fun unpack(bytes: ByteArray): Map<String,ByteArray> = archive(bytes).also { files ->
@@ -97,7 +98,7 @@ object StarNoteFormat {
                     require(id.isNotBlank() && width.isFinite() && height.isFinite() && width > 0 && height > 0)
                     if (kind !in listOf("geo_layout", "import_pdf")) warnings += "Some page backgrounds use an unsupported StarNote format."
                     pages[id] = StarPage(id, f.float(4), width, height, kind,
-                        if (kind == "import_pdf") resource.substringAfter("/resource/") else "",
+                        if (kind == "import_pdf") resource.substringAfter("/resource/").substringAfter("/template/") else "",
                         if (kind == "import_pdf") JSONObject(f.text(11)).optInt("pageIndex") else 0,
                         if (kind == "geo_layout") resource.substringAfterLast('/') else "")
                     require(pages.size <= 1000) { "This note has too many pages" }
@@ -133,10 +134,22 @@ object StarNoteFormat {
                             records[id] = time to StarStroke(id, f.number(4).toInt(), width.coerceIn(.1f,100f), points, matrix)
                     }
                 }
-                "/docData/doc/" !in path -> warnings += "Some StarNote sync updates are unsupported; this preview may be incomplete."
+                "/docData/doc/" in path -> {
+                    fields(data).filter {it.wire==2}.forEach {field->
+                        val text=field.bytes.toString(Charsets.UTF_8)
+                        if(text.startsWith("{"))runCatching {StarNoteTitles.fromJson(JSONObject(text))}.getOrNull()?.takeIf {it.isNotBlank()}?.let {title=it}
+                    }
+                }
+                else -> warnings += "Some StarNote sync updates are unsupported; this preview may be incomplete."
             }
         }
         require(pages.isNotEmpty()) { "This StarNote backup has no supported pages. Export it as PDF from StarNote to open it here." }
-        return StarDocument(pages.values.sortedBy { it.order }.map { it.copy(strokes = shapes[it.id]?.values?.mapNotNull { p -> p.second }.orEmpty()) }, warnings.toList())
+        return StarDocument(pages.values.sortedBy { it.order }.map { it.copy(strokes = shapes[it.id]?.values?.mapNotNull { p -> p.second }.orEmpty()) }, warnings.toList(),title)
     }
+}
+
+object StarNoteTitles {
+    fun fromJson(j:JSONObject):String = listOf("noteName","documentName","title","name").firstNotNullOfOrNull {key->
+        (j.opt(key) as? String)?.trim()?.takeIf {it.isNotBlank() && it.length<=300 && !Regex("[a-fA-F0-9-]{32,36}").matches(it)}
+    }.orEmpty()
 }

@@ -64,6 +64,9 @@ fun DriveMaterialsPage(searchQuery: String = "") {
     var preview by remember { mutableStateOf<File?>(null) }
     var disconnect by remember { mutableStateOf(false) }
     var starReading by remember { mutableStateOf(false) }
+    val layoutPrefs=remember {context.getSharedPreferences("materials_layout",android.content.Context.MODE_PRIVATE)}
+    var filters by remember {mutableStateOf(MaterialsFilters.read(layoutPrefs.getString("filters","").orEmpty()))}
+    var arrangeFilters by remember {mutableStateOf(false)}
     val folder = stack.lastOrNull()
     fun run(block: suspend () -> Unit) {
         if (busy) return
@@ -143,9 +146,10 @@ fun DriveMaterialsPage(searchQuery: String = "") {
     }
     val listing = state.listings[repo.listingKey(folder, folder == null && tab == "shared")]
     val allItems = if (folder != null || tab in listOf("shared", "root")) listing?.items.orEmpty()
-        else if (tab == "offline") state.offline else state.followed
-    val items = allItems.filter { it.name.contains(query, true) && it.name.contains(searchQuery, true) }
+        else if (tab == "offline") state.savedFolders + state.offline else state.followed
+    val items = allItems.distinctBy {it.id}.filter { it.name.contains(query, true) && it.name.contains(searchQuery, true) }
     Scaffold(topBar = {
+        if(!starReading) {
         CenterAlignedTopAppBar(title = { Text(selected?.name ?: folder?.name ?: "Materials", maxLines = 1) },
             navigationIcon = { if (selected != null || stack.isNotEmpty()) IconButton(onClick = {
                 if (selected != null) { selected = null; preview = null } else stack.removeAt(stack.lastIndex)
@@ -153,6 +157,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
             actions = {
                 if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 if (state.account.isNotBlank() && selected == null) {
+                    IconButton(onClick={arrangeFilters=true}) {Icon(Icons.Default.Tune,"Arrange filters")}
                     IconButton(onClick = { connect() }, enabled = !busy) { Icon(Icons.Default.Link, "Reconnect Google Drive") }
                     IconButton(onClick = { if (folder == null && tab == "followed") run {
                         state.followed.forEach { repo.refresh(it) }
@@ -160,6 +165,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                     IconButton(onClick = { disconnect = true }, enabled = !busy) { Icon(Icons.Default.LinkOff, "Disconnect Google Drive") }
                 }
             }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer))
+        }
     }, containerColor = MaterialTheme.colorScheme.surfaceContainer) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).padding(bottom = 80.dp)) {
             val message = error.ifBlank { state.status }
@@ -180,13 +186,9 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                 DrivePdfReader(preview!!, Modifier.weight(1f))
                 return@Column
             }
+            MaterialFilterLayout(filters,tab,visible=!starReading,onSelect={if(!busy){tab=it;stack.clear()}},modifier=Modifier.weight(1f)) {
+            Column(Modifier.fillMaxSize()) {
             if (!starReading) {
-            Text(state.account, style = MaterialTheme.typography.labelMedium)
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("followed" to "Course folders", "shared" to "Shared with me", "root" to "My Drive", "star" to "StarNote", "offline" to "Offline").forEach { (id, title) ->
-                    FilterChip(selected = tab == id, onClick = { if (!busy) { tab = id; stack.clear() } }, label = { Text(title) })
-                }
-            }
             OutlinedTextField(query, { query = it }, label = { Text("Search this list") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             }
             if (tab == "star") {
@@ -198,6 +200,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                 TextButton(onClick = { run { repo.follow(folder) } }, enabled = !busy) {
                     Text(if (followed) "Unfollow folder" else "Follow as course folder")
                 }
+                FolderDownloadButton(folder,repo)
             }
             if (listing != null && (folder != null || tab in listOf("shared", "root"))) Text(
                 "Last refreshed ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(listing.updated))}",
@@ -217,6 +220,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                             }
                             if (saved != null) Text(if (saved.modified != item.modified) "Saved offline · newer version online" else "Saved offline",
                                 style = MaterialTheme.typography.labelSmall)
+                            if(item.folder && state.savedFolders.any {it.effectiveId==item.effectiveId})Text("Downloaded locally",style=MaterialTheme.typography.labelSmall)
                             if (!item.folder) Row {
                                 if (item.downloadable) TextButton(onClick = { run { repo.saveOffline(item) } }, enabled = !busy) {
                                     Text(if (saved == null) "Save offline" else "Update offline copy")
@@ -228,8 +232,13 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                     }
                 }
             }
+            }
+            }
         }
     }
+    if(arrangeFilters)MaterialsFilterDialog(filters,onDismiss={arrangeFilters=false},onSave={
+        filters=MaterialsFilters.normalize(it);layoutPrefs.edit().putString("filters",MaterialsFilters.encode(filters)).apply();arrangeFilters=false
+    })
     if (disconnect) AlertDialog(onDismissRequest = { disconnect = false }, title = { Text("Disconnect Google Drive?") },
         text = { Text("This removes Scholix’s cached lists and offline copies. Your files in Google Drive stay intact.") },
         confirmButton = { TextButton(onClick = { disconnect = false; run { repo.disconnect() } }) { Text("Disconnect") } },
@@ -244,6 +253,8 @@ private fun DrivePdfReader(file: File, modifier: Modifier = Modifier) {
     var error by remember(file) { mutableStateOf("") }
     var zoom by remember(file, page) { mutableFloatStateOf(1f) }
     var offset by remember(file, page) { mutableStateOf(Offset.Zero) }
+    var fit by remember(file) {mutableStateOf(ReaderFit.Page)}
+    var fitRequest by remember(file) {mutableIntStateOf(0)}
     val transform = rememberTransformableState { scale, pan, _ ->
         zoom = (zoom * scale).coerceIn(1f, 5f)
         offset = if (zoom == 1f) Offset.Zero else Offset(
@@ -279,11 +290,19 @@ private fun DrivePdfReader(file: File, modifier: Modifier = Modifier) {
     Column(modifier) {
         if (error.isNotEmpty()) Text(error)
         bitmap?.let { image ->
-            Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().transformable(transform)) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().clipToBounds().transformable(transform)) {
+                LaunchedEffect(page,fitRequest,maxWidth,maxHeight) {
+                    zoom=if(fit==ReaderFit.Width)ReaderSizing.widthZoom(image.width.toFloat(),image.height.toFloat(),maxWidth.value,maxHeight.value) else 1f
+                    offset=Offset.Zero
+                }
                 Image(image.asImageBitmap(), "Page ${page + 1}", Modifier.fillMaxSize().graphicsLayer {
                     scaleX = zoom; scaleY = zoom; translationX = offset.x; translationY = offset.y
                 }, contentScale = ContentScale.Fit)
             }
+        }
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.Center) {
+            TextButton(onClick={fit=ReaderFit.Page;fitRequest++}){Text("Fit page")}
+            TextButton(onClick={fit=ReaderFit.Width;fitRequest++}){Text("Fit width")}
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = { page-- }, enabled = page > 0) { Text("Previous") }
