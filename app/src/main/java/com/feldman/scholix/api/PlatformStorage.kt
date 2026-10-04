@@ -276,6 +276,8 @@ object PlatformStorage {
 
         val results = platforms.map { p ->
             async {
+                // Inbar is checked when the user opens its grades or timetable.
+                if (p is InbarPlatform) return@async null
                 val success = try {
                     p.refreshCookies()
                 } catch (e: Exception) {
