@@ -22,8 +22,14 @@ fun FolderDownloadButton(folder:DriveItem,repo:DriveRepository,modifier:Modifier
     val manager=remember(context){WorkManager.getInstance(context)}
     val name=DriveFolderDownloadWorker.name(account,folder)
     val work by remember(name){manager.getWorkInfosForUniqueWorkFlow(name)}.collectAsState(initial=emptyList())
-    val latest=work.maxByOrNull {it.runAttemptCount} ?: work.firstOrNull()
+    val latest=work.firstOrNull {it.state!=WorkInfo.State.CANCELLED}
     val running=work.firstOrNull {!it.state.isFinished}
+    // Resume DNS failures left terminal by builds that stopped retrying after four attempts.
+    // New work retries network failures instead of writing a terminal DNS error.
+    LaunchedEffect(latest?.id,latest?.state) {
+        if(latest?.state==WorkInfo.State.FAILED && latest.outputData.getString("error")?.startsWith("Unable to resolve host")==true)
+            DriveFolderDownloadWorker.start(context,folder)
+    }
     Column(modifier) {
         if(running==null) OutlinedButton(onClick={DriveFolderDownloadWorker.start(context,folder)}) {
             Text(if(repo.state.value.savedFolders.any {it.effectiveId==folder.effectiveId})"Update local folder" else "Download folder")
@@ -38,7 +44,7 @@ fun FolderDownloadButton(folder:DriveItem,repo:DriveRepository,modifier:Modifier
         }
         if(running==null) latest?.outputData?.getString("error")?.let {
             // Older builds stored the raw Android DNS error in completed download work.
-            val message=if(it.startsWith("Unable to resolve host"))DriveConnection.OFFLINE else it
+            val message="Last folder download failed: $it"
             Text(message,color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.labelSmall)
         }
     }
