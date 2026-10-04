@@ -112,5 +112,9 @@ Google Cloud setting, device service or temporary failure caused the rejection.
 Read-only inspection of the existing Scholix Cloud project found one Android
 client matching the certificate above but registering `com.feldman.scholix` only.
 The development package needs a separate matching client; the original client's
-package should be preserved for that installed version. Creating the development
-client and a successful live authorization remain pending.
+package should be preserved for that installed version. With the account holder's
+explicit approval, a separate matching development Android client was created
+successfully on 2026-10-04, retaining the existing client, scope and test users.
+Google's console warns that new settings can take five minutes to a few hours to
+propagate. A successful live authorization and the remaining Drive device checks
+are still pending; client creation alone does not prove that status 8 is resolved.
