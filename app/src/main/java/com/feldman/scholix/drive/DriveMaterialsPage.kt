@@ -74,7 +74,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
             busy = true; error = ""
             try { block() } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                error = DriveAuth.message(e)
+                error = if(DriveConnection.unavailable(e) && repo.state.value.networkUnavailable)"" else DriveAuth.message(e)
             } finally { busy = false }
         }
     }
@@ -169,7 +169,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
     }, containerColor = MaterialTheme.colorScheme.surfaceContainer) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).padding(bottom = 80.dp)) {
             val message = error.ifBlank { state.status }
-            if (message.isNotEmpty()) Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
+            if (message.isNotEmpty()) Text(message, color = if(state.networkUnavailable&&error.isBlank())MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
             if (state.account.isBlank()) {
                 Text("Your course folders, notes and past exams from Google Drive.", Modifier.padding(vertical = 12.dp))
                 Text("Browse online. Save only the files you want to read offline.")

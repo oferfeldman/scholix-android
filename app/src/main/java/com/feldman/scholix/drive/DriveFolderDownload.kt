@@ -32,11 +32,15 @@ fun FolderDownloadButton(folder:DriveItem,repo:DriveRepository,modifier:Modifier
             if(total>0)LinearProgressIndicator(progress={done.toFloat()/total},modifier=Modifier.fillMaxWidth())
             else LinearProgressIndicator(Modifier.fillMaxWidth())
             Row {
-                Text(if(total>0)"Downloading $done / $total" else "Preparing download…",Modifier.weight(1f).padding(top=12.dp),style=MaterialTheme.typography.labelSmall)
+                Text(if(running.state==WorkInfo.State.ENQUEUED && running.runAttemptCount>0)"Waiting for connection · saved files stay available" else if(total>0)"Downloading $done / $total" else "Preparing download…",Modifier.weight(1f).padding(top=12.dp),style=MaterialTheme.typography.labelSmall)
                 TextButton(onClick={manager.cancelUniqueWork(name)}){Text("Cancel")}
             }
         }
-        latest?.outputData?.getString("error")?.let {Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.labelSmall)}
+        if(running==null) latest?.outputData?.getString("error")?.let {
+            // Older builds stored the raw Android DNS error in completed download work.
+            val message=if(it.startsWith("Unable to resolve host"))DriveConnection.OFFLINE else it
+            Text(message,color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.labelSmall)
+        }
     }
 }
 
@@ -76,7 +80,7 @@ class DriveFolderDownloadWorker(context:Context,params:WorkerParameters):Corouti
             Result.success()
         }catch(e:Exception) {
             if(e is CancellationException)throw e
-            if(e is IOException && e !is DriveHttpError && runAttemptCount<3)Result.retry()
+            if(DriveConnection.unavailable(e) || e is IOException && e !is DriveHttpError && runAttemptCount<3)Result.retry()
             else Result.failure(workDataOf("error" to DriveAuth.message(e).take(500)))
         }
     }

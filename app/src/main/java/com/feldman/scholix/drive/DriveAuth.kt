@@ -48,6 +48,7 @@ object DriveAuth {
             .addOnFailureListener { if (c.isActive) c.resumeWithException(it) }
     }
     fun message(e: Exception): String = when {
+        DriveConnection.unavailable(e) -> "Google Drive is unreachable. Check your internet connection or try again later."
         e is DriveAuthorizationCancelled || (e is ApiException && e.statusCode == 16) -> "Google Drive connection was cancelled."
         e is ApiException && e.statusCode == 10 -> "Google sign-in is not configured for this Scholix build. Register its Android package and signing certificate in Google Cloud."
         e is ApiException && e.statusCode == 8 -> "Google could not complete authorization (8). Try connecting again. If it keeps failing, check this app's Google Cloud registration."

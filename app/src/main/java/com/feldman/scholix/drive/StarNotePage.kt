@@ -40,7 +40,8 @@ import com.google.android.gms.auth.api.identity.Identity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
+import androidx.work.WorkManager
+import androidx.work.WorkInfo
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -71,7 +72,11 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
     var fit by remember {mutableStateOf(ReaderFit.Page)}
     var fitRequest by remember {mutableIntStateOf(0)}
     fun run(block:suspend ()->Unit) { if(busy)return;scope.launch {busy=true;error="";try{block()}
-        catch(e:Exception){if(e is CancellationException)throw e;error=DriveAuth.message(e)}finally{busy=false}} }
+        catch(e:Exception){if(e is CancellationException)throw e
+            if(DriveConnection.unavailable(e)&&opened!=null&&edits?.backedUp==false) {
+                status=DriveConnection.PENDING;error=""
+            } else error=DriveAuth.message(e)
+        }finally{busy=false}} }
     fun refresh(force:Boolean=true)=run {notes=repository.notes(force);roots=repository.roots()}
     fun backup()=run {
         val current=edits ?: return@run; val account=opened?.account ?: return@run
@@ -108,19 +113,44 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
     LaunchedEffect(edits?.revision,edits?.backedUp) {
         val current=edits ?: return@LaunchedEffect;val account=opened?.account ?: return@LaunchedEffect
         try {
-            withContext(NonCancellable) { repository.saveLocal(account,current) }
+            withContext(NonCancellable) {
+                repository.saveLocal(account,current)
+                if(!current.backedUp)StarNoteBackupWorker.schedule(context,account,current.source)
+            }
             if(!current.backedUp) {
                 status="Saved on this device · waiting for Drive backup"
-                delay(1500)
-                val saved=repository.backup(account,current)
-                repository.saveLocal(account,saved,acknowledge=true)
-                if(edits?.revision==saved.revision)edits=saved
-                status="Backed up in Google Drive";enableBackup=false
             } else status=if(current.annotations.isEmpty() && current.title.isBlank()) "No Scholix edits yet" else "Backed up in Google Drive"
         } catch(e:Exception) {
             if(e is CancellationException)throw e
             enableBackup=e is DriveNeedsConsent
             error=if(enableBackup) "Enable Drive backups to save your Scholix edits online." else DriveAuth.message(e)
+        }
+    }
+    val backupAccount=opened?.account
+    val backupSource=edits?.source
+    val backupManager=remember(context){WorkManager.getInstance(context)}
+    LaunchedEffect(backupAccount,backupSource) {
+        if(backupAccount==null||backupSource==null)return@LaunchedEffect
+        backupManager.getWorkInfosForUniqueWorkFlow(StarNoteBackupWorker.name(backupAccount,backupSource)).collect {work->
+            val running=work.firstOrNull {!it.state.isFinished}
+            val completed=work.firstOrNull {it.state==WorkInfo.State.SUCCEEDED||it.state==WorkInfo.State.FAILED}
+            if(running!=null) {
+                if(edits?.backedUp==false) {
+                    status=if(running.runAttemptCount>0)DriveConnection.PENDING else "Saved on this device · waiting for Drive backup"
+                    error=""
+                }
+            } else if(completed?.state==WorkInfo.State.SUCCEEDED) {
+                val saved=try {repository.localDraft(backupAccount,backupSource)} catch(e:Exception) {
+                    if(e is CancellationException)throw e
+                    error=DriveAuth.message(e);null
+                }
+                if(saved?.backedUp==true&&edits?.revision==saved.revision) {
+                    edits=saved;error="";enableBackup=false
+                }
+            } else if(completed?.state==WorkInfo.State.FAILED&&edits?.backedUp==false) {
+                enableBackup=completed.outputData.getBoolean("needsConsent",false)
+                error=if(enableBackup)"Enable Drive backups to save your Scholix edits online." else completed.outputData.getString("error").orEmpty()
+            }
         }
     }
     fun close() {

@@ -16,7 +16,7 @@ import java.security.MessageDigest
 data class DriveListing(val items: List<DriveItem> = emptyList(), val updated: Long = 0)
 data class DriveState(val account: String = "", val followed: List<DriveItem> = emptyList(),
     val listings: Map<String, DriveListing> = emptyMap(), val offline: List<DriveItem> = emptyList(),
-    val status: String = "", val needsConsent: Boolean = false, val savedFolders:List<DriveItem> = emptyList())
+    val status: String = "", val needsConsent: Boolean = false, val savedFolders:List<DriveItem> = emptyList(),val networkUnavailable:Boolean=false)
 
 class DriveRepository private constructor(private val context: Context) {
     private val root = File(context.noBackupFilesDir, "drive-materials")
@@ -63,14 +63,16 @@ class DriveRepository private constructor(private val context: Context) {
         if (mutable.value.account != account) {
             clearFiles()
             androidx.work.WorkManager.getInstance(context).cancelAllWorkByTag(DriveFolderDownloadWorker.TAG)
+            androidx.work.WorkManager.getInstance(context).cancelAllWorkByTag(StarNoteBackupWorker.TAG)
             publish(DriveState(account = account))
-        } else publish(mutable.value.copy(status = "", needsConsent = false))
+        } else publish(mutable.value.copy(status = "", needsConsent = false,networkUnavailable=false))
     } }
     suspend fun disconnect() = mutex.withLock { withContext(Dispatchers.IO) {
         clearFiles()
         mutable.value = DriveState()
         DriveSyncWorker.cancel(context)
         androidx.work.WorkManager.getInstance(context).cancelAllWorkByTag(DriveFolderDownloadWorker.TAG)
+        androidx.work.WorkManager.getInstance(context).cancelAllWorkByTag(StarNoteBackupWorker.TAG)
     } }
     private fun clearFiles() {
         // Refuse an account switch if old private files could survive it.
@@ -111,10 +113,11 @@ class DriveRepository private constructor(private val context: Context) {
             val items = authorized { api.list(it, folder, shared) }
             withContext(Dispatchers.IO) { publish(mutable.value.copy(
                 listings = mutable.value.listings + (listingKey(folder, shared) to DriveListing(items, System.currentTimeMillis())),
-                status = "", needsConsent = false)) }
+                status = "", needsConsent = false,networkUnavailable=false)) }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            mutable.value = mutable.value.copy(status = DriveAuth.message(e),
+            mutable.value = mutable.value.copy(status = if(DriveConnection.unavailable(e))DriveConnection.OFFLINE else DriveAuth.message(e),
+                networkUnavailable=DriveConnection.unavailable(e),
                 needsConsent = e is DriveNeedsConsent || e is DriveHttpError && e.status == 401)
             throw e
         }

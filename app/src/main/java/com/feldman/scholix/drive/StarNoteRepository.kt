@@ -170,6 +170,11 @@ class StarNoteRepository(private val context: Context, private val drive: DriveR
         val temp=File(file.parentFile,"edits.tmp");temp.writeText(edits.json().put("backedUp",edits.backedUp).toString())
         java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE)
     } }
+    suspend fun localDraft(account:String,source:String):StarEdits? = drive.starLocalAccess {current->withContext(Dispatchers.IO) {
+        require(current==account) {"The connected account changed."}
+        val file=draft(account,source)
+        if(!file.exists())null else JSONObject(file.readText()).let {StarEdits.read(it,source,it.optBoolean("backedUp"))}
+    }}
     suspend fun backup(account:String, edits:StarEdits):StarEdits = drive.starAccess(edits=true) { api,token,current ->
         require(account==current) { "The connected Google account changed. Reopen this note." }
         safeId(edits.source); safeId(edits.revision)
