@@ -78,6 +78,29 @@ class InbarHttpTest {
         assertEquals(setOf("__PageDataKey", "__EVENTVALIDATION", "edtCode", "btnVerify"), sent.keys)
     }
 
+    private fun restrictedChallenge() = challenge() + """<script>
+        function OLScriptCounter0alert() { window.alert('לא ניתן לשלוח עוד הודעות/לאמת קוד בשלב זה , יש לנסות מאוחר יותר'); }
+        </script>"""
+
+    @Test fun serverSmsRestrictionFailsImmediatelyDespiteCodeField() {
+        val requests = mutableListOf<Request>()
+        val http = InbarHttp(transport = transport(requests, login, restrictedChallenge()))
+        val error = assertThrows(InbarSmsRestricted::class.java) { http.requestSms("test", "test") }
+        assertTrue(error.message!!.contains("try again later"))
+        assertEquals(2, requests.size)
+        assertThrows(IOException::class.java) { http.verifySms("12345") }
+        assertEquals(2, requests.size)
+    }
+
+    @Test fun serverVerificationRestrictionIsDistinctFromIncorrectCode() {
+        val requests = mutableListOf<Request>()
+        val http = InbarHttp(transport = transport(requests, login, challenge(), restrictedChallenge()))
+        http.requestSms("test", "test")
+        assertThrows(InbarSmsRestricted::class.java) { http.verifySms("12345") }
+        assertThrows(IOException::class.java) { http.verifySms("56789") }
+        assertEquals(3, requests.size)
+    }
+
     @Test fun yearSelectionPostsFreshStateToGradesEndpoint() {
         val requests = mutableListOf<Request>()
         val http = InbarHttp(transport = transport(requests, grades(2027), grades(2026)))
