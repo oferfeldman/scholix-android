@@ -8,5 +8,6 @@ class ScholixApp : Application() {
         super.onCreate()
         CrashHandler.install(this)
         com.feldman.scholix.lemida.LemidaSyncWorker.schedule(this)
+        com.feldman.scholix.drive.DriveSyncWorker.schedule(this)
     }
 }

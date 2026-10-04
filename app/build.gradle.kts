@@ -134,11 +134,13 @@ dependencies {
     implementation(libs.navigation.compose)
     implementation(libs.jsoup)
     implementation("com.google.android.gms:play-services-auth-api-phone:18.2.0")
+    implementation("com.google.android.gms:play-services-auth:22.0.0")
 
     // Tests
     testImplementation(libs.junit)
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("org.json:json:20240303")
+    testImplementation("com.squareup.okhttp3:mockwebserver:5.3.0")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.espresso.core)
