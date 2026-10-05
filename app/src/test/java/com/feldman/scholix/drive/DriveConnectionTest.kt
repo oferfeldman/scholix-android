@@ -8,6 +8,11 @@ import java.net.ConnectException
 import java.net.SocketTimeoutException
 
 class DriveConnectionTest {
+    @Test fun temporaryServerErrorsRetryWithoutTreatingPermissionsAsOffline() {
+        for(status in listOf(429,500,503))assertTrue(DriveConnection.retryable(DriveHttpError(status)))
+        for(status in listOf(401,403,404))assertFalse(DriveConnection.retryable(DriveHttpError(status)))
+        assertFalse(DriveConnection.unavailable(DriveHttpError(503)))
+    }
     @Test fun dnsAndWrappedConnectionFailuresAreOffline() {
         assertTrue(DriveConnection.unavailable(UnknownHostException("www.googleapis.com")))
         assertTrue(DriveConnection.unavailable(IOException("wrapped",ConnectException())))

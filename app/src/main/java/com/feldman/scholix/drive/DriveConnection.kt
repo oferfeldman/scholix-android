@@ -6,6 +6,7 @@ import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 
 object DriveConnection {
+    fun retryable(error:Throwable)=unavailable(error) || error is DriveHttpError && (error.status==429 || error.status in 500..599)
     fun unavailable(error:Throwable):Boolean {
         val seen=java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable,Boolean>())
         var current:Throwable?=error

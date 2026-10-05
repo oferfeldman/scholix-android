@@ -159,7 +159,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                 if (state.account.isNotBlank() && selected == null) {
                     IconButton(onClick={arrangeFilters=true}) {Icon(Icons.Default.Tune,"Arrange filters")}
                     IconButton(onClick = { connect() }, enabled = !busy) { Icon(Icons.Default.Link, "Reconnect Google Drive") }
-                    IconButton(onClick = { if (folder == null && tab == "followed") run {
+                    if(tab!="star") IconButton(onClick = { if (folder == null && tab == "followed") run {
                         state.followed.forEach { repo.refresh(it) }
                     } else refresh() }, enabled = !busy && tab != "offline") { Icon(Icons.Default.Refresh, "Refresh") }
                     IconButton(onClick = { disconnect = true }, enabled = !busy) { Icon(Icons.Default.LinkOff, "Disconnect Google Drive") }
@@ -189,7 +189,9 @@ fun DriveMaterialsPage(searchQuery: String = "") {
             MaterialFilterLayout(filters,tab,visible=!starReading,onSelect={if(!busy){tab=it;stack.clear()}},modifier=Modifier.weight(1f)) {
             Column(Modifier.fillMaxSize()) {
             if (!starReading) {
-            OutlinedTextField(query, { query = it }, label = { Text("Search this list") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(query, { query = it }, label = { Text(if(tab=="star")"Search notes" else "Search materials") },
+                trailingIcon={if(query.isNotEmpty())IconButton(onClick={query=""}){Icon(Icons.Default.Close,"Clear search")}},
+                singleLine = true, modifier = Modifier.fillMaxWidth())
             }
             if (tab == "star") {
                 key(state.account) { StarNotePage(repo, query, Modifier.weight(1f), onReader = { starReading = it }) }
@@ -205,7 +207,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
             if (listing != null && (folder != null || tab in listOf("shared", "root"))) Text(
                 "Last refreshed ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(listing.updated))}",
                 style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(vertical = 6.dp))
-            if (tab == "followed" && folder == null) Text("Open a folder from Shared with me or My Drive, then follow it for automatic updates.",
+            if (tab == "followed" && folder == null) Text(if(state.followed.isEmpty())"Open a folder from Shared with me or My Drive, then follow it for automatic updates." else "Your followed folders update automatically.",
                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (items.isEmpty()) item { Text(if (query.isNotBlank() || searchQuery.isNotBlank()) "No matching materials." else
@@ -221,6 +223,9 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                             if (saved != null) Text(if (saved.modified != item.modified) "Saved offline · newer version online" else "Saved offline",
                                 style = MaterialTheme.typography.labelSmall)
                             if(item.folder && state.savedFolders.any {it.effectiveId==item.effectiveId})Text("Downloaded locally",style=MaterialTheme.typography.labelSmall)
+                            if(item.folder)state.listings[item.effectiveId]?.let {cached->
+                                Text(if(cached.items.isEmpty())"Empty folder" else "${cached.items.size} items",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             if (!item.folder) Row {
                                 if (item.downloadable) TextButton(onClick = { run { repo.saveOffline(item) } }, enabled = !busy) {
                                     Text(if (saved == null) "Save offline" else "Update offline copy")

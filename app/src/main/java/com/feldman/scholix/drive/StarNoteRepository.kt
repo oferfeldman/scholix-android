@@ -109,6 +109,25 @@ class StarNoteRepository(private val context: Context, private val drive: DriveR
         val cover=s.list(note).firstOrNull { !it.folder && it.name.startsWith("thumbnail") && it.mime=="image/png" }
         cover?.let { val file=File(dir,"thumbnail.png");s.download(it,file,2L*1024*1024);file }
     }
+    /** Bulk library indexing must never authorize or fetch from Drive. */
+    suspend fun cachedTitle(note:DriveItem):String = drive.starLocalAccess {account->withContext(Dispatchers.IO) {
+        if(note.sourceTitle.isNotBlank())return@withContext note.sourceTitle
+        val cached=File(root(account),"${safeId(note.id)}/title.txt")
+        if(cached.isFile)return@withContext cached.readText()
+        fun children(folder:DriveItem)=runCatching {drive.cachedList(folder)}.getOrElse {
+            // A missing listing is incomplete knowledge, not an empty folder.
+            decode(listing(account,folder).readText())
+        }
+        val pdfs=mutableListOf<String>()
+        fun find(folder:DriveItem,depth:Int) {
+            for(item in children(folder)) {
+                if(item.pdf)pdfs+=item.name.substringBeforeLast('.')
+                else if(item.folder&&depth<2)find(item,depth+1)
+            }
+        }
+        children(note).filter {it.folder&&it.name in listOf("resource","template")}.forEach {find(it,0)}
+        pdfs.distinct().singleOrNull().orEmpty().also {if(it.isNotBlank())write(cached,it)}
+    }}
     suspend fun title(note:DriveItem):String = source {s->
         if(note.sourceTitle.isNotBlank())return@source note.sourceTitle
         val cached=File(root(s.account),"${safeId(note.id)}/title.txt")

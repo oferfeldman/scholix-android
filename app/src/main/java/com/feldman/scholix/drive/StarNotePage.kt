@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
@@ -46,6 +47,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import coil.compose.AsyncImage
+
+private data class StarLibraryPresentation(val modified:String, val title:String="", val cover:File?=null,
+    val titleChecked:Boolean=false, val titleLoading:Boolean=false, val titleFailed:Boolean=false,
+    val coverChecked:Boolean=false, val coverLoading:Boolean=false)
 
 @Composable
 fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier, onReader:(Boolean)->Unit={}) {
@@ -71,13 +76,66 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
     var commentsExpanded by remember {mutableStateOf(false)}
     var fit by remember {mutableStateOf(ReaderFit.Page)}
     var fitRequest by remember {mutableIntStateOf(0)}
+    val driveState by drive.state.collectAsState()
+    // Lazy rows are disposed while scrolling. Keep their resolved names and covers with the library.
+    val presentations=remember(driveState.account) {mutableStateMapOf<String,StarLibraryPresentation>()}
+    var sortName by rememberSaveable {mutableStateOf(StarNoteSort.Title.name)}
+    val sort=StarNoteSort.entries.firstOrNull {it.name==sortName} ?: StarNoteSort.Title
+    var sortMenu by remember {mutableStateOf(false)}
+    var presentationGeneration by remember {mutableIntStateOf(0)}
+    var checkingCachedNames by remember {mutableStateOf(false)}
+    var loadingMoreNames by remember {mutableStateOf(false)}
+    fun presentation(item:DriveItem)=presentations[item.id]?.takeIf {it.modified==item.modified}
+        ?: StarLibraryPresentation(item.modified)
+    fun updatePresentation(item:DriveItem, update:(StarLibraryPresentation)->StarLibraryPresentation) {
+        if(notes.none {it.id==item.id&&it.modified==item.modified})return
+        presentations[item.id]=update(presentation(item))
+    }
+    suspend fun resolveTitle(item:DriveItem) {
+        val cached=presentation(item)
+        if(cached.titleChecked||cached.titleLoading||StarNoteLibrary.hasTitle(item,cached.title))return
+        updatePresentation(item) {it.copy(titleLoading=true)}
+        try {
+            val title=repository.title(item)
+            updatePresentation(item) {it.copy(title=title,titleChecked=true,titleFailed=false)}
+        } catch(e:Exception) {
+            if(e is CancellationException)throw e
+            updatePresentation(item) {it.copy(titleChecked=true,titleFailed=true)}
+        } finally {updatePresentation(item) {it.copy(titleLoading=false)}}
+    }
+    fun resolveCover(item:DriveItem) {
+        val cached=presentation(item)
+        if(cached.coverChecked||cached.coverLoading)return
+        updatePresentation(item) {it.copy(coverLoading=true)}
+        scope.launch {
+            try {
+                val cover=repository.cover(item)
+                updatePresentation(item) {it.copy(cover=cover,coverChecked=true)}
+            } catch(e:Exception) {
+                if(e is CancellationException)throw e
+                updatePresentation(item) {it.copy(coverChecked=true)}
+            } finally {updatePresentation(item) {it.copy(coverLoading=false)}}
+        }
+    }
     fun run(block:suspend ()->Unit) { if(busy)return;scope.launch {busy=true;error="";try{block()}
         catch(e:Exception){if(e is CancellationException)throw e
             if(DriveConnection.unavailable(e)&&opened!=null&&edits?.backedUp==false) {
                 status=DriveConnection.PENDING;error=""
             } else error=DriveAuth.message(e)
         }finally{busy=false}} }
-    fun refresh(force:Boolean=true)=run {notes=repository.notes(force);roots=repository.roots()}
+    fun refresh(force:Boolean=true)=run {
+        notes=repository.notes(force);roots=repository.roots()
+        val existing=notes.map {it.id}.toSet()
+        presentations.keys.toList().filter {it !in existing}.forEach {presentations.remove(it)}
+        if(force) {
+            presentations.keys.toList().forEach {id ->
+                presentations[id]?.let {cached->presentations[id]=cached.copy(
+                    titleChecked=if(cached.titleFailed)false else cached.titleChecked,titleFailed=false,
+                    coverChecked=if(cached.cover==null)false else cached.coverChecked)}
+            }
+            presentationGeneration++
+        }
+    }
     fun backup()=run {
         val current=edits ?: return@run; val account=opened?.account ?: return@run
         repository.saveLocal(account,current)
@@ -107,6 +165,21 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
         }
     }
     LaunchedEffect(Unit) { refresh(false) }
+    // Index every available local name, including notes outside visible rows, without network requests.
+    LaunchedEffect(notes,presentationGeneration) {
+        checkingCachedNames=true
+        try {
+            notes.forEach {item->
+                if(!StarNoteLibrary.hasTitle(item,presentation(item).title)) {
+                    val title=try {repository.cachedTitle(item)} catch(e:Exception) {
+                        if(e is CancellationException)throw e
+                        ""
+                    }
+                    if(title.isNotBlank())updatePresentation(item) {it.copy(title=title,titleFailed=false)}
+                }
+            }
+        } finally {checkingCachedNames=false}
+    }
     LaunchedEffect(opened) { onReader(opened!=null) }
     DisposableEffect(Unit) { onDispose { onReader(false) } }
     // Persist locally before a cloud request. Unsent revisions survive process death and network loss.
@@ -163,27 +236,64 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
         if(error.isNotEmpty()&&opened==null) Text(error,color=MaterialTheme.colorScheme.error)
         val note=opened
         if(note==null) {
+            val resolved=notes.associate {it.id to presentation(it).title}
+            val visible=StarNoteLibrary.visible(notes,resolved,query,sort)
+            val checkingNames=query.isNotBlank()&&(checkingCachedNames||loadingMoreNames)
+            val unnamed=notes.filter {!StarNoteLibrary.hasTitle(it,presentation(it).title)}
+            val uncheckedNames=unnamed.filter {!presentation(it).titleChecked&&!presentation(it).titleLoading}
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Text("StarNote",Modifier.weight(1f),style=MaterialTheme.typography.titleLarge)
+                Box {
+                    TextButton(onClick={sortMenu=true}) {Text(sort.label);Icon(Icons.Default.ArrowDropDown,"Sort notes")}
+                    DropdownMenu(sortMenu,onDismissRequest={sortMenu=false}) {
+                        StarNoteSort.entries.forEach {option->
+                            DropdownMenuItem(text={Text(option.label)},
+                                onClick={sortName=option.name;sortMenu=false})
+                        }
+                    }
+                }
                 IconButton(onClick={refresh()},enabled=!busy){Icon(Icons.Default.Refresh,"Refresh StarNote notes")}
             }
             roots.forEach {FolderDownloadButton(it,drive)}
-            LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                if(notes.isEmpty()&&!busy)item {Text("No sync/v1 notes found. Turn on Google Drive sync in StarNote.")}
-                items(notes.filter {it.name.contains(query,true)},key={it.id}) {item ->
-                    var cover by remember(item.id) {mutableStateOf<File?>(null)}
-                    var title by remember(item.name) {mutableStateOf(if(Regex("[a-fA-F0-9-]{32,36}").matches(item.name))"StarNote note" else item.name)}
-                    LaunchedEffect(item.id) {
-                        try{cover=repository.cover(item)}catch(e:Exception){if(e is CancellationException)throw e}
-                        if(Regex("[a-fA-F0-9-]{32,36}").matches(item.name))
-                            try{repository.title(item).takeIf {it.isNotBlank()}?.let {title=it}}catch(e:Exception){if(e is CancellationException)throw e}
+            if(notes.isNotEmpty()) Text(if(checkingNames)"Checking note names…" else
+                if(query.isNotBlank())"${visible.size} ${if(visible.size==1)"match" else "matches"}" else
+                    "${notes.size} ${if(notes.size==1)"note" else "notes"}",
+                style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            if(query.isNotBlank()&&unnamed.isNotEmpty()&&!checkingCachedNames) {
+                Text("Search checks available names. ${unnamed.size} ${if(unnamed.size==1)"title is" else "titles are"} unavailable.",
+                    style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                if(uncheckedNames.isNotEmpty()) TextButton(onClick={
+                    loadingMoreNames=true
+                    scope.launch {
+                        try {uncheckedNames.take(12).forEach {resolveTitle(it)}} finally {loadingMoreNames=false}
                     }
-                    ElevatedCard(onClick={run {val value=repository.open(item);selectedNote=item;opened=value;edits=value.edits;pageIndex=0;mode="read";fit=ReaderFit.Page;fitRequest++;status=""}},modifier=Modifier.fillMaxWidth()) {
+                },enabled=!loadingMoreNames&&!busy) {Text("Load more names from Drive")}
+            }
+            LazyColumn(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                if(notes.isEmpty()&&!busy)item {Text("No StarNote notes found. Turn on Google Drive sync in StarNote, then refresh.")}
+                else if(visible.isEmpty()&&!busy)item {
+                    Text(if(checkingNames)"Looking for matching note names…" else if(unnamed.isNotEmpty())
+                        "No matches in the available names. Open an untitled note to name it in Scholix." else
+                        "No notes match “${query.trim()}”.")
+                }
+                items(visible,key={it.id}) {item ->
+                    val cached=presentation(item)
+                    val title=StarNoteLibrary.title(item,cached.title)
+                    LaunchedEffect(item.id,item.modified,presentationGeneration) {
+                        resolveCover(item)
+                        scope.launch {resolveTitle(item)}
+                    }
+                    ElevatedCard(onClick={run {
+                        val value=repository.open(item)
+                        updatePresentation(item) {it.copy(title=value.title.takeUnless {it==StarNoteLibrary.UNTITLED}.orEmpty(),titleChecked=true,titleFailed=false)}
+                        selectedNote=item;opened=value;edits=value.edits;pageIndex=0;mode="read";fit=ReaderFit.Page;fitRequest++;status=""
+                    }},modifier=Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                            cover?.let {AsyncImage(it,"Note cover",Modifier.size(76.dp),contentScale=ContentScale.Fit)}
+                            cached.cover?.let {AsyncImage(it,"Note cover",Modifier.size(76.dp),contentScale=ContentScale.Fit)}
                         Column {
                             Text(title,style=MaterialTheme.typography.titleMedium)
-                            Text(if(roots.any {r->drive.state.value.savedFolders.any {it.effectiveId==r.effectiveId}})"Saved on device" else "Google Drive",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            if(!StarNoteLibrary.hasTitle(item,cached.title)) Text("Title unavailable",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if(roots.any {r->driveState.savedFolders.any {it.effectiveId==r.effectiveId}})"Saved on device" else "Google Drive",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         }
                     }

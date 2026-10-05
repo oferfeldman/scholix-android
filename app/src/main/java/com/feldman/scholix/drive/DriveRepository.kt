@@ -129,25 +129,31 @@ class DriveRepository private constructor(private val context: Context) {
     }
     suspend fun downloadFolder(account:String,folder:DriveItem,progress:suspend(Int,Int,String)->Unit) {
         progress(0,0,"Finding files…")
-        val plan=DriveFolderPlanner.scan(folder) { child -> starAccess { api,token,current ->
-            require(current==account) {"The connected account changed."};api.list(token,child)
+        val session=DriveDownloadSession(authorize={DriveAuth.token(context,account)},clear={DriveAuth.clear(context,it)})
+        val plan=DriveFolderPlanner.scan(folder,onScan={folders,files->progress(folders,0,"Finding files · $folders folders · $files files")}) { child -> mutex.withLock {
+            require(mutable.value.account==account) {"The connected account changed."}
+            session.request {api.list(it,child)}
         } }
         starLocalAccess {current->withContext(Dispatchers.IO) {
             require(current==account)
-            require(root.apply {mkdirs()}.usableSpace>plan.files.sumOf {it.size}+64L*1024*1024) {"There is not enough free storage for this folder."}
+            val remaining=DriveFolderPlanner.remainingBytes(plan.files,mutable.value.offline){offlineFile(it).isFile}
+            require(root.apply {mkdirs()}.usableSpace>remaining+64L*1024*1024) {"There is not enough free storage for the remaining files."}
             publish(mutable.value.copy(listings=mutable.value.listings+plan.folders.mapValues {(_,pair)->DriveListing(pair.second,System.currentTimeMillis())}))
         }}
+        progress(0,plan.files.size,"Saving files…")
         var bytes=0L
+        var metadataDirty=false
         for((index,item) in plan.files.withIndex()) {
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             mutex.withLock {
                 require(mutable.value.account==account) {"The connected account changed."}
                 val saved=mutable.value.offline.firstOrNull {it.effectiveId==item.effectiveId}
                 if(saved==null || saved.modified!=item.modified || !offlineFile(item).isFile) {
-                    authorized {api.download(it,item,offlineFile(item))}
+                    session.request {api.download(it,item,offlineFile(item))}
                     mutable.value=mutable.value.copy(offline=mutable.value.offline.filterNot {it.effectiveId==item.effectiveId}+item)
+                    metadataDirty=true
                 }
-                if(index % 10 == 0 || index==plan.files.lastIndex)withContext(Dispatchers.IO){publish(mutable.value)}
+                if(metadataDirty && (index % 10 == 0 || index==plan.files.lastIndex))withContext(Dispatchers.IO){publish(mutable.value);metadataDirty=false}
                 bytes+=offlineFile(item).length()
                 require(bytes<=2L*1024*1024*1024) {"This folder exceeds the 2 GB download limit. Saved files are still available."}
             }
@@ -156,7 +162,8 @@ class DriveRepository private constructor(private val context: Context) {
         starLocalAccess {current->withContext(Dispatchers.IO) {
             require(current==account)
             publish(mutable.value.copy(savedFolders=mutable.value.savedFolders.filterNot {it.effectiveId==folder.effectiveId}+folder,
-                status=if(plan.skipped>0)"Folder saved. ${plan.skipped} unavailable or oversized files were skipped." else "Folder saved locally."))
+                status=if(plan.skipped>0)"Folder saved. ${plan.skipped} unavailable or oversized files were skipped." else "Folder saved locally.",
+                networkUnavailable=false,needsConsent=false))
         }}
     }
     internal fun cachedList(folder:DriveItem):List<DriveItem> = mutable.value.listings[folder.effectiveId]?.items

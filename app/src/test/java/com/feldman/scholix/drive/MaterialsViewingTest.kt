@@ -39,4 +39,32 @@ class MaterialsViewingTest {
         assertEquals("Linear Algebra",StarNoteTitles.fromJson(org.json.JSONObject("{\"noteName\":\"Linear Algebra\"}")))
         assertEquals("",StarNoteTitles.fromJson(org.json.JSONObject("{\"name\":\"900a1c6a-d284-4b09-808a-897007118586\"}")))
     }
+    @Test fun scanReportsProgressForEmptyFoldersAndSkipsCycles()=runTest {
+        val root=DriveItem("root","Root",DriveItem.FOLDER)
+        val empty=DriveItem("empty","Empty",DriveItem.FOLDER)
+        val pdf=DriveItem("pdf","Note.pdf","application/pdf",size=100)
+        val updates=mutableListOf<Pair<Int,Int>>()
+        DriveFolderPlanner.scan(root,onScan={folders,files->updates+=folders to files}) {folder->
+            if(folder.id=="root")listOf(empty,pdf,root) else emptyList()
+        }
+        assertEquals(listOf(1 to 1,2 to 1),updates)
+    }
+    @Test fun cancellingScanStopsBeforeTheNextFolder()=runTest {
+        var calls=0
+        try {
+            DriveFolderPlanner.scan(DriveItem("root","Root",DriveItem.FOLDER),onScan={_,_->throw kotlinx.coroutines.CancellationException()}) {
+                calls++;listOf(DriveItem("child","Child",DriveItem.FOLDER))
+            }
+            fail("Expected cancellation")
+        }catch(_:kotlinx.coroutines.CancellationException){}
+        assertEquals(1,calls)
+    }
+    @Test fun resumedDownloadsOnlyReserveSpaceForMissingAndChangedFiles() {
+        val current=DriveItem("current","Saved.pdf","application/pdf",modified="same",size=100)
+        val stale=current.copy(id="stale",modified="new",size=200)
+        val missing=current.copy(id="missing",size=300)
+        val saved=listOf(current,stale.copy(modified="old"),missing)
+        assertEquals(0L,DriveFolderPlanner.remainingBytes(listOf(current),saved){true})
+        assertEquals(500L,DriveFolderPlanner.remainingBytes(listOf(current,stale,missing),saved){it.id!="missing"})
+    }
 }
