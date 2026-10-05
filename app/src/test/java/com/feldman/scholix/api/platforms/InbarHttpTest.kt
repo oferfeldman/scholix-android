@@ -35,7 +35,9 @@ class InbarHttpTest {
         <select id="cmbActiveYear" name="ctl00${'$'}cmbActiveYear">
         <option value="2026" ${if (year == 2026) "selected" else ""}>2026</option>
         <option value="2027" ${if (year == 2027) "selected" else ""}>2027</option></select>
-        <table id="ContentPlaceHolder1_gvGradesList"><tbody><tr><th>Code</th></tr>
+        <table id="ContentPlaceHolder1_gvGradesList"><tbody><tr>
+        <th>קוד קבוצת קורס</th><th>שם</th><th>מרצה</th><th>תקופה</th><th>נ"ז</th><th>ציון עובר</th>
+        <th>ציון סופי</th><th>ת.עדכון</th><th>הערה</th><th>מטלות</th><th>בקשה לציון עובר</th></tr>
         <tr><td>sample-01</td><td>Sample algebra</td><td>Lecturer</td><td>סמסטר קיץ</td><td>4</td><td>60</td>
         <td><span id="ContentPlaceHolder1_gvGradesList_lblRowFinalGrade_0">73</span></td><td>01/09/2026</td><td></td>
         <td><div style="display:none"><table><tr class="AssignmentHeader"><td></td><td>Weight</td><td>Grade</td></tr>
@@ -164,6 +166,119 @@ class InbarHttpTest {
         assertEquals("73", grades.getJSONObject(2).getString("grade"))
         assertEquals(0, parsed.courses[1].getJSONArray("grades").length())
         assertEquals("a", parsed.courses[1].getString("semester"))
+    }
+
+    private fun emptyGrades(year: Int = 2027, row: String = "<tr><td colspan='11'>אין נתונים</td></tr>"): String {
+        val doc = org.jsoup.Jsoup.parse(grades(year))
+        doc.selectFirst("#ContentPlaceHolder1_gvGradesList")!!.html(row)
+        return doc.outerHtml()
+    }
+
+    @Test fun emptyAcademicYearRetainsYearChoicesWithoutInventingCourses() {
+        for (row in listOf("<tr><td colspan='11'>אין נתונים</td></tr>",
+            "<tr><td colspan='11'>No records</td></tr>", "<tr><td colspan='11'>&nbsp;</td></tr>")) {
+            val parsed = InbarGrades.parse(emptyGrades(row = row))
+            assertEquals(2027, parsed.year)
+            assertEquals(listOf(2026, 2027), parsed.years)
+            assertTrue(parsed.courses.isEmpty())
+        }
+    }
+
+    @Test fun loginWithEmptyCurrentYearCanLoadOlderGradesWithoutAnotherSms() {
+        val requests = mutableListOf<Request>()
+        val http = InbarHttp(transport = transport(requests, login, challenge(), "<html>Signed in</html>",
+            emptyGrades(), grades(2026)))
+        http.requestSms("test", "test")
+        assertTrue(http.verifySms("12345").courses.isEmpty())
+        assertEquals(2, http.grades(2026).courses.size)
+        assertEquals("/Live/StudentGradesList.aspx", requests.last().url.encodedPath)
+        assertEquals("2026", fields(requests.last())["ctl00${'$'}cmbActiveYear"])
+        assertEquals(5, requests.size)
+    }
+
+    @Test fun hiddenOptionalAndReorderedColumnsKeepGradesWithTheCorrectCourse() {
+        val doc = org.jsoup.Jsoup.parse(grades())
+        for (row in doc.select("#ContentPlaceHolder1_gvGradesList > tbody > tr")) {
+            row.children().last()!!.remove() // Optional pass-request column is not always displayed.
+            val final = row.children()[6]
+            final.remove()
+            row.prependChild(final) // Final grade moves before the course code.
+        }
+        val course = InbarGrades.parse(doc.outerHtml()).courses.first()
+        assertEquals("sample-01", course.getString("id"))
+        assertEquals("Sample algebra", course.getString("name"))
+        assertEquals("Lecturer", course.getString("teacher"))
+        assertEquals("", course.getString("passRequestRemark"))
+        assertEquals(3, course.getJSONArray("grades").length())
+        assertEquals("73", course.getJSONArray("grades").getJSONObject(2).getString("grade"))
+    }
+
+    @Test fun unrecognizedOrTruncatedRowsStillFailInsteadOfErasingCachedGrades() {
+        assertThrows(IOException::class.java) {
+            InbarGrades.parse(emptyGrades(row = "<tr><td colspan='11'>Unexpected portal response</td></tr>"))
+        }
+        val truncated = org.jsoup.Jsoup.parse(grades())
+        truncated.select("#ContentPlaceHolder1_gvGradesList > tbody > tr")[1].children().last()!!.remove()
+        assertThrows(IOException::class.java) { InbarGrades.parse(truncated.outerHtml()) }
+        assertThrows(IOException::class.java) { InbarGrades.parse(grades().replace("<th>שם</th>", "<th>Unknown</th>")) }
+    }
+
+    @Test fun suppliedPrivateGradesPageRemainsReadable() {
+        val path = System.getenv("SCHOLIX_INBAR_GRADES_FIXTURE") ?: return
+        val parsed = InbarGrades.parse(java.io.File(path).readText())
+        assertTrue(parsed.year in parsed.years)
+        assertTrue(parsed.courses.isNotEmpty())
+        assertTrue(parsed.courses.all { it.getString("name").isNotBlank() && it.getString("id").isNotBlank() })
+    }
+
+    private fun pagedGrades(page: Int): String {
+        val doc = org.jsoup.Jsoup.parse(grades())
+        val rows = doc.select("#ContentPlaceHolder1_gvGradesList > tbody > tr")
+        rows[if(page==1)2 else 1].remove()
+        val target = "ctl00${'$'}ContentPlaceHolder1${'$'}gvGradesList"
+        val links = (1..2).joinToString("") { number ->
+            if(number==page)"<td><span>$number</span></td>"
+            else "<td><a href=\"javascript:__doPostBack('$target','Page${'$'}$number')\">$number</a></td>"
+        }
+        doc.selectFirst("#ContentPlaceHolder1_gvGradesList > tbody")!!.append(
+            "<tr><td colspan='11'><table><tr>$links</tr></table></td></tr>")
+        doc.selectFirst("input[name=__PageDataKey]")!!.attr("value", "page-$page-state")
+        return doc.outerHtml()
+    }
+
+    @Test fun pagerRowsLoadAllCoursesUsingFreshPostbackState() {
+        val requests = mutableListOf<Request>()
+        val http = InbarHttp(transport = transport(requests, pagedGrades(1), pagedGrades(2), grades(2027)))
+        val result = http.grades()
+        assertEquals(listOf("sample-01", "sample-02"), result.courses.map { it.getString("id") })
+        assertEquals("Page${'$'}2", fields(requests[1])["__EVENTARGUMENT"])
+        assertEquals("ctl00${'$'}ContentPlaceHolder1${'$'}gvGradesList", fields(requests[1])["__EVENTTARGET"])
+        assertEquals("page-1-state", fields(requests[1])["__PageDataKey"])
+        http.grades(2027)
+        assertEquals("page-2-state", fields(requests[2])["__PageDataKey"])
+    }
+
+    @Test fun successfulSmsSignInIncludesTheSecondGradesPage() {
+        val requests = mutableListOf<Request>()
+        val http = InbarHttp(transport = transport(requests, login, challenge(), "<html>Signed in</html>", pagedGrades(1), pagedGrades(2)))
+        http.requestSms("test", "test")
+        assertEquals(2, http.verifySms("12345").courses.size)
+        assertEquals(5, requests.size)
+        assertEquals("Page${'$'}2", fields(requests.last())["__EVENTARGUMENT"])
+    }
+
+    @Test fun repeatedPagerResponseFailsWithoutReturningPartialCourses() {
+        val requests = mutableListOf<Request>()
+        val http = InbarHttp(transport = transport(requests, pagedGrades(1), pagedGrades(1)))
+        assertThrows(IOException::class.java) { http.grades() }
+        assertEquals(2, requests.size)
+    }
+
+    @Test fun teachingGroupsAreCombinedAcrossGradePages() {
+        val second = pagedGrades(2).replace("Pending course", "Sample algebra").replace("סמסטר א'", "סמסטר קיץ")
+        val result = InbarHttp(transport = transport(mutableListOf(), pagedGrades(1), second)).grades()
+        assertEquals(1, result.courses.size)
+        assertEquals("sample-02", result.courses.single().getJSONArray("relatedGroups").getJSONObject(0).getString("id"))
     }
 
     @Test fun badCodeKeepsUpdatedChallengeForManualRetry() {

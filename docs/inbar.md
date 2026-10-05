@@ -26,6 +26,27 @@ The login ReturnUrl goes directly to grades. If verification lands on the grades
 
 Available years are loaded when adding the provider. Course keys include the year, so opening an older course requests its own academic year. Blank final grades remain pending. Attendance and messages are not implemented. An expired session uses hidden SMS reauthentication from Grades, Schedule, or the shared provider form. Grade and schedule GETs/postbacks stop before following login or SMS-authentication redirects, so background reads cannot create a competing challenge.
 
+Grades are matched to table headers rather than fixed column numbers, so optional
+columns can disappear or move without misassigning a grade. Recognized empty-year
+rows retain the academic-year choices and allow sign-in to continue to older
+years. Unknown or truncated populated rows still fail without replacing cached
+grades. Regression tests cover empty-year sign-in, reordered/optional columns and
+malformed rows. `SCHOLIX_INBAR_GRADES_FIXTURE` optionally points to a private saved
+grades page for local validation; it must remain outside version control.
+
+The grades grid's page-number controls are navigation, not course rows. Scholix
+follows their Web Forms postbacks with fresh state, validates forward progress,
+then combines teaching groups across the complete result. Repeated pages or failed
+later pages do not replace cached courses with a partial list. An accepted SMS
+session is preserved even when grade parsing fails, avoiding another SMS merely
+because the reader encountered an unsupported layout.
+
+The opt-in `InbarLoginSmokeTest` (`inbarLiveLogin=true`) checks the saved development
+account without deliberately expiring it. It reuses a valid session or performs
+one normal SMS sign-in, then reads all available grade years and checks that the
+provider ID and course customizations were retained. It requires the private
+direct-SMS build and its existing SMS permission.
+
 ## Period schedule
 
 The shared Schedule page now includes Inbar, using the authenticated `/Live/StudentPeriodSchedule.aspx` endpoint and the same cookie jar, TLS checks, and fresh Web Forms state as grades. Academic-year and semester pickers replace school grade/class filters for this provider. Year changes post `ctl00$cmbActiveYear`; semester changes post `ctl00$tbMain$ctl03$ddlPeriodTypeFilter2`, each using the latest returned form. The portal exposes Semester A, Semester B, Summer, and All semesters. All matching period grids are read when multiple semesters are selected.

@@ -66,7 +66,8 @@ fun HiddenInbarLogin(
             throw cancelled
         } catch (exception: Exception) {
             Log.d("InbarLogin", "Sign-in failed (${exception.javaClass.simpleName})")
-            finish(null, "Login failed: ${exception.localizedMessage ?: "Unable to sign in"}")
+            finish(null, if(exception is com.feldman.scholix.api.platforms.InbarGradeLayoutChanged)
+                exception.message else "Login failed: ${exception.localizedMessage ?: "Unable to sign in"}")
         }
     }
 }
