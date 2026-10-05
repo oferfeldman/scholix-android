@@ -2,6 +2,7 @@ package com.feldman.scholix.api.platforms
 
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -60,7 +61,8 @@ class InbarOnDemandUiTest {
     @Test fun defaultGradesKeepCachedDataUntilTheUserRequestsInbar() {
         val (context, account) = fixture()
         compose.setContent {
-            CompositionLocalProvider(LocalContext provides context) {
+            val owner = checkNotNull(LocalActivityResultRegistryOwner.current)
+            CompositionLocalProvider(LocalContext provides context, LocalActivityResultRegistryOwner provides owner) {
                 AppTheme { GradesScreen(Modifier, account.getCourses()) }
             }
         }
@@ -74,7 +76,8 @@ class InbarOnDemandUiTest {
     @Test fun emptySavedAccountDoesNotStartSignInOnAppOpening() {
         val (context, _) = fixture(withCourses = false)
         compose.setContent {
-            CompositionLocalProvider(LocalContext provides context) {
+            val owner = checkNotNull(LocalActivityResultRegistryOwner.current)
+            CompositionLocalProvider(LocalContext provides context, LocalActivityResultRegistryOwner provides owner) {
                 AppTheme { GradesScreen(Modifier, emptyList()) }
             }
         }
@@ -87,7 +90,8 @@ class InbarOnDemandUiTest {
     @Test fun scheduleSignInRequiresOpeningInbarSchedule() {
         val (context, account) = fixture()
         compose.setContent {
-            CompositionLocalProvider(LocalContext provides context) {
+            val owner = checkNotNull(LocalActivityResultRegistryOwner.current)
+            CompositionLocalProvider(LocalContext provides context, LocalActivityResultRegistryOwner provides owner) {
                 AppTheme { SchedulePage(listOf(account)) }
             }
         }

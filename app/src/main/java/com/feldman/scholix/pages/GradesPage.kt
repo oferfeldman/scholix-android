@@ -510,7 +510,7 @@ fun GradesScreen(
                     inbarRelogin = account
                 } else {
                     courses = withContext(Dispatchers.IO) {
-                        PlatformStorage.addPlatforms(context, listOf(account))
+                        PlatformStorage.saveInbarLoginProgress(context, account)
                         PlatformStorage.getCourses(context)
                     }
                     courseLoadFinished = true
@@ -817,12 +817,12 @@ fun GradesScreen(
         HiddenInbarLogin(account = pending,
             reuseSavedSession = { withContext(Dispatchers.IO) { PlatformStorage.restoreVerifiedInbarSession(context, pending) } },
             onSmsRequested = { account ->
-                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) }
             }, onResult = { account, error ->
                 if (account != null) {
                     val selectedKey = courses.getOrNull(selectedTab)?.optString("courseKey")
                     val refreshed = withContext(Dispatchers.IO) {
-                        PlatformStorage.addPlatforms(context, listOf(account))
+                        PlatformStorage.saveInbarLoginProgress(context, account)
                         PlatformStorage.getCourses(context)
                     }
                     inbarRelogin = null

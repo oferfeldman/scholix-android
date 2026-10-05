@@ -420,10 +420,10 @@ fun SchedulePage(
     inbarRelogin?.takeIf { canAccessInbar }?.let { pending ->
         HiddenInbarLogin(account = pending,
             reuseSavedSession = { withContext(Dispatchers.IO) { PlatformStorage.restoreVerifiedInbarSession(context, pending) } },
-            onSmsRequested = { account -> withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) } },
+            onSmsRequested = { account -> withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) } },
             onResult = { account, error ->
                 if (account != null) {
-                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                    withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) }
                     inbarRelogin = null
                     recoveredProviders = recoveredProviders + (account.id to account)
                     allSchedulesUpdated.clear()

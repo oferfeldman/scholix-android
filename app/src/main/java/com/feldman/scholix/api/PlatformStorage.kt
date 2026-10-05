@@ -69,6 +69,18 @@ object PlatformStorage {
         return current.takeIf { it.refreshCookies() }
     }
 
+    /** Completion after navigation must not recreate a provider the user removed or edited. */
+    @Synchronized fun saveInbarLoginProgress(context: Context, account: InbarPlatform) {
+        if (account.isLoggedIn()) {
+            val current = loadPlatforms(context).filterIsInstance<InbarPlatform>().firstOrNull {
+                it.id == account.id && it.getUsername() == account.getUsername() && it.mobile == account.mobile
+            } ?: throw IOException("The Inbar account was removed or changed during sign-in.")
+            account.setName(current.getName())
+            account.platformDisplayName = current.platformDisplayName
+        }
+        addPlatforms(context, listOf(account))
+    }
+
     // --- free periods ("חלונות") ---------------------------------------------
     // Subjects the user no longer attends (e.g. a bagrut already completed) are
     // shown in the schedule as free periods rather than lessons.
