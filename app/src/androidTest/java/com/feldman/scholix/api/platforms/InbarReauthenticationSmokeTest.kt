@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.feldman.scholix.MainActivity
@@ -46,10 +47,17 @@ class InbarReauthenticationSmokeTest {
         var restored = false
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                compose.waitUntil(10_000) {
-                    compose.onAllNodesWithText("Load Inbar grades").fetchSemanticsNodes().isNotEmpty()
+                val firstInbar = PlatformStorage.getCourses(context).indexOfFirst { it.optString("platformId") == originalId }
+                assertTrue("No visible Inbar course available for this check", firstInbar >= 0)
+                if (firstInbar == 0) {
+                    compose.waitUntil(10_000) {
+                        compose.onAllNodesWithText("Load Inbar grades").fetchSemanticsNodes().isNotEmpty()
+                    }
+                    compose.onNodeWithText("Load Inbar grades").performClick()
+                } else {
+                    // Other providers may appear first; explicitly selecting Inbar requests sign-in.
+                    repeat(firstInbar) { compose.onNodeWithContentDescription("Next course").performClick() }
                 }
-                compose.onNodeWithText("Load Inbar grades").performClick()
                 val deadline = SystemClock.elapsedRealtime() + 60_000
                 while (SystemClock.elapsedRealtime() < deadline) {
                     val current = findInbar(profiles())

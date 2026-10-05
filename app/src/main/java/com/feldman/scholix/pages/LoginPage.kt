@@ -325,10 +325,10 @@ fun LoginPage(
         inbarLogin?.let { pending ->
             HiddenInbarLogin(account = pending,
                 onSmsRequested = { account ->
-                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                    withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) }
                 }, onResult = { account, error ->
                     if (account != null) withContext(Dispatchers.IO) {
-                        PlatformStorage.addPlatforms(context, listOf(account))
+                        PlatformStorage.saveInbarLoginProgress(context, account)
                     }
                     inbarLogin = null
                     isLoading = false
