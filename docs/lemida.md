@@ -43,13 +43,19 @@ navigation.
 The first successful update loads existing homework without alerting for every
 old assignment. Subsequent updates refresh the cached list and notify for newly
 seen Moodle activity IDs. Assignments, quizzes, and workshops are included;
-resource links alone do not count as homework. Tapping an item opens a native
+resource links alone do not count as homework.
+Each successful update also saves the complete enrolled-course catalog. Newly
+enrolled courses appear automatically in the course filters, including courses
+with no homework yet. Existing installations derive their initial filters from
+saved homework until the first complete refresh. Failed or partial updates retain
+the previous catalog; changing accounts replaces it together with the homework.
+Tapping an item opens a native
 Scholix detail screen with instructions, dates, and submission/grading tables.
 Details are refreshed through the phone's browser session and cached for offline
 reading. The app does not submit assignments or start quiz attempts.
 Instructions retain paragraph breaks and list items instead of collapsing into a
-single block. Screen cache polling pauses when the app is in the background;
-WorkManager remains responsible for scheduled checks.
+single block. The screen observes saved-data changes and decodes snapshots off the
+UI thread, without periodic polling. WorkManager remains responsible for scheduled checks.
 
 WorkManager checks about every 30 minutes when network access is available.
 Android battery restrictions can delay a check. The **Refresh** button queues
@@ -70,8 +76,8 @@ sync and returns when the session expires. Dates learned from a detail page rema
 in the cached list across subsequent JSON updates.
 Search matches all entered words across the course and activity title, independently
 of their order, and combines the homework field with Scholix's app search. The field
-has a clear button. Course filters are reset when the selected course no longer has
-homework in the complete snapshot. The selected detail survives screen recreation;
+has a clear button. Course filters are reset when the selected course leaves the
+complete enrollment catalog. The selected detail survives screen recreation;
 failed detail reads keep cached content visible and offer **Retry loading homework**.
 If a detail read requires interactive verification, it offers **Sign in to Lemida**
 directly. Successful sign-in returns to the newly loaded list, so a changed account

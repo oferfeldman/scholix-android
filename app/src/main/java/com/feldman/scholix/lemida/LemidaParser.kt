@@ -10,6 +10,19 @@ import java.net.URI
 import java.net.URLDecoder
 import java.math.BigInteger
 
+data class LemidaCourse(val id: Int, val name: String) {
+    companion object {
+        fun encode(courses: List<LemidaCourse>) = JSONArray(courses.map {
+            JSONObject().put("id", it.id).put("name", it.name)
+        }).toString()
+        fun decode(raw: String): List<LemidaCourse> = JSONArray(raw).let { array ->
+            (0 until array.length()).map { array.getJSONObject(it).let { course ->
+                LemidaCourse(course.getInt("id"), course.getString("name"))
+            } }
+        }
+    }
+}
+
 data class Homework(val id: String, val courseId: Int, val course: String,
                     val title: String, val type: String, val url: String, val dates: String) {
     fun matchesSearch(vararg queries: String): Boolean {
