@@ -82,10 +82,14 @@ internal class InbarSmsLoginSession {
             withContext(Dispatchers.IO) { account.requestSms(account.getUsername(), account.mobile) }
             Log.d("InbarLogin", "SMS request completed in ${SystemClock.elapsedRealtime() - requestedAt} ms")
             saveAccount(account)
-            verifyInbarSmsCandidates(codes,
+            try { verifyInbarSmsCandidates(codes,
                 timeoutMs = (timeoutMs - (SystemClock.elapsedRealtime() - requestedAt)).coerceAtLeast(1)) { code ->
                 Log.d("InbarLogin", "SMS candidate received after ${SystemClock.elapsedRealtime() - requestedAt} ms")
                 withContext(Dispatchers.IO) { account.verifySms(code) }
+            } } catch (e: InbarGradeLayoutChanged) {
+                // A reader error must not discard successful authentication and send another SMS.
+                if (account.isLoggedIn()) saveAccount(account)
+                throw e
             }
             saveAccount(account) // Save verified cookies even when the requesting page has closed.
             Log.d("InbarLogin", "Sign-in verified and saved")

@@ -18,6 +18,8 @@ import java.util.concurrent.TimeUnit
 internal class InbarSessionExpired : IOException("Inbar session expired. Sign in again with an SMS code.")
 internal class InbarSmsCodeRejected : IOException("The SMS code was not accepted. Please sign in again.")
 internal class InbarSmsRestricted : IOException("Inbar has temporarily blocked sending SMS codes and verifying them. Please try again later.")
+internal class InbarGradeLayoutChanged(val year: Int, val years: List<Int>, val layout: String) :
+    IOException("Signed in to Inbar, but its grade table could not be read.")
 
 internal class InbarCookieJar : CookieJar {
     private val cookies = mutableListOf<Cookie>()
@@ -139,9 +141,12 @@ internal class InbarHttp(
             challenge = next // Keep fresh state for a manually corrected code.
             throw InbarSmsCodeRejected()
         }
-        val grades = if (next.url.encodedPath == "/Live/StudentGradesList.aspx") {
-            InbarGrades.parse(next.html).also { gradePage = next; gradeYear = it.year }
-        } else grades()
+        val grades = try { if (next.url.encodedPath == "/Live/StudentGradesList.aspx") {
+            readGradePages(next, InbarGrades.parse(next.html, combineGroups = false))
+        } else grades() } catch (e: InbarGradeLayoutChanged) {
+            challenge = null // The authenticated grades page proves that SMS verification succeeded.
+            throw e
+        }
         challenge = null
         return grades
     }
@@ -162,18 +167,36 @@ internal class InbarHttp(
     @Synchronized fun grades(year: Int? = null): InbarGradePage {
         // A year switch posts the latest form directly. Refreshing the same year still GETs it.
         var page = gradePage?.takeIf { year != null && gradeYear != year } ?: get(GRADES)
-        var result = InbarGrades.parse(page.html)
+        var result = InbarGrades.parse(page.html, combineGroups = false)
         if (year != null && result.year != year) {
             if (year !in result.years) throw IOException("Academic year $year is not available in Inbar")
             val selector = page.document().selectFirst("select#cmbActiveYear") ?: throw IOException("Inbar year selector missing")
             val name = selector.attr("name")
             page = post(page, mapOf(name to year.toString(), "__EVENTTARGET" to name, "__EVENTARGUMENT" to ""))
-            result = InbarGrades.parse(page.html)
+            result = InbarGrades.parse(page.html, combineGroups = false)
             if (result.year != year) throw IOException("Inbar did not select year $year")
         }
+        return readGradePages(page, result)
+    }
+
+    private fun readGradePages(initial: InbarPage, first: InbarGradePage): InbarGradePage {
+        var page = initial
+        var parsed = first
+        val courses = first.courses.toMutableList()
+        val visited = mutableSetOf(first.page)
+        while (parsed.next != null) {
+            if (visited.size >= 100) throw IOException("Inbar grade pagination did not finish. Previous grades preserved.")
+            val next = parsed.next!!
+            page = post(page, mapOf("__EVENTTARGET" to next.target, "__EVENTARGUMENT" to next.argument))
+            val loaded = InbarGrades.parse(page.html, combineGroups = false)
+            if (loaded.year != first.year || loaded.page != parsed.page + 1 || !visited.add(loaded.page))
+                throw IOException("Inbar did not advance the grades page. Previous grades preserved.")
+            courses += loaded.courses
+            parsed = loaded
+        }
         gradePage = page
-        gradeYear = result.year
-        return result
+        gradeYear = first.year
+        return first.copy(courses = InbarGrades.combineTeachingGroups(courses), next = null)
     }
 
     /** One timetable request serves every weekday; filters use the latest returned form state. */
@@ -233,27 +256,60 @@ internal class InbarHttp(
     }
 }
 
-internal data class InbarGradePage(val year: Int, val years: List<Int>, val courses: List<JSONObject>)
+internal data class InbarGradePostback(val target: String, val argument: String)
+internal data class InbarGradePage(val year: Int, val years: List<Int>, val courses: List<JSONObject>,
+    val page: Int = 1, val next: InbarGradePostback? = null)
 
 internal object InbarGrades {
-    fun parse(html: String): InbarGradePage {
+    fun parse(html: String, combineGroups: Boolean = true): InbarGradePage {
         val doc = Jsoup.parse(html)
         val table = doc.selectFirst("table#ContentPlaceHolder1_gvGradesList") ?: throw InbarSessionExpired()
         val selector = doc.selectFirst("select#cmbActiveYear") ?: throw IOException("Inbar year selector missing")
         val selected = selector.selectFirst("option[selected]") ?: selector.selectFirst("option")
         val year = selected?.attr("value")?.toIntOrNull() ?: throw IOException("Invalid Inbar academic year")
         val years = selector.select("option").mapNotNull { it.attr("value").toIntOrNull() }
+        val rows = table.select("tr").filter { it.parents().firstOrNull { parent -> parent.tagName() == "table" } === table }
+        fun label(value: String) = value.replace(Regex("[\\s\\u00a0]+"), " ").trim()
+        val headers = rows.firstOrNull { row -> row.children().any { it.tagName() == "th" } }
+            ?.children()?.filter { it.tagName() == "th" }?.map { label(it.text()) }.orEmpty()
         val courses = mutableListOf<JSONObject>()
-        for (row in table.select("tr")) {
-            if (row.parents().firstOrNull { it.tagName() == "table" } !== table) continue
+        var currentPage = 1
+        var nextPage: InbarGradePostback? = null
+        for (row in rows) {
             val cells = row.children().filter { it.tagName() == "td" }
             if (cells.isEmpty()) continue
-            if (cells.size < 11) throw IOException("Inbar grade columns changed")
-            val code = cells[0].text()
-            val name = cells[1].text()
+            fun changed(): Nothing = throw InbarGradeLayoutChanged(year, years,
+                "headers=${headers.joinToString("|")}; cells=${cells.size}; spans=${cells.map { it.attr("colspan") }}; " +
+                    "singleCellLabel=${if(cells.size==1)label(cells.single().text()).take(120) else ""}")
+            val pageLinks = row.select("a[href]").mapNotNull { link ->
+                Regex("__doPostBack\\('([^']*gvGradesList)',\\s*'(Page\\$(?:[0-9]+|Next|Previous|First|Last))'\\)")
+                    .find(link.attr("href"))?.let { InbarGradePostback(it.groupValues[1], it.groupValues[2]) }
+            }
+            if (cells.size == 1 && (cells.single().attr("colspan").toIntOrNull() ?: 1) > 1 && pageLinks.isNotEmpty()) {
+                currentPage = row.select("span").mapNotNull { it.text().trim().toIntOrNull() }.distinct().singleOrNull() ?: changed()
+                nextPage = pageLinks.firstOrNull { it.argument == "Page\$Next" }
+                    ?: pageLinks.firstOrNull { it.argument == "Page\$${currentPage + 1}" }
+                if (nextPage == null && pageLinks.any { (it.argument.substringAfter('$').toIntOrNull() ?: 0) > currentPage }) changed()
+                continue
+            }
+            // Web Forms can render an empty year as one spanning cell, with no headers.
+            if (cells.all { it.text().isBlank() } ||
+                (label(cells.first().text()) in listOf("אין נתונים", "No data", "No records") &&
+                    cells.drop(1).all { it.text().isBlank() })) continue
+            if (cells.size != headers.size || cells.any { (it.attr("colspan").toIntOrNull() ?: 1) != 1 })
+                changed()
+            fun cell(hebrew: String, english: String, required: Boolean = false): Element? {
+                val index = headers.indexOfFirst { it == hebrew || it.equals(english, ignoreCase = true) }
+                if (required && index < 0) changed()
+                return cells.getOrNull(index)
+            }
+            val code = cell("קוד קבוצת קורס", "Code", true)!!.text()
+            val name = cell("שם", "Name", true)!!.text()
+            if (code.isBlank() || name.isBlank()) throw IOException("Inbar grade course is missing")
+            val date = cell("ת.עדכון", "Updated")?.text().orEmpty()
             val key = "$year:$code"
             val grades = JSONArray()
-            val assignmentTable = cells[9].selectFirst("table")
+            val assignmentTable = cell("מטלות", "Assignments")?.selectFirst("table")
             var assignmentIndex = 0
             var current: JSONObject? = null
             assignmentTable?.select("tr")?.forEach { detail ->
@@ -261,17 +317,17 @@ internal object InbarGrades {
                 if (detail.hasClass("AssignmentText") && values.size == 3) {
                     current = JSONObject().put("id", "$key:assignment:${assignmentIndex++}")
                         .put("subject", name).put("name", values[0]).put("grade", values[2].ifBlank { JSONObject.NULL })
-                        .put("weight", values[1]).put("date", cells[7].text()).put("submissions", JSONArray())
+                        .put("weight", values[1]).put("date", date).put("submissions", JSONArray())
                     grades.put(current)
                 } else if (current != null && !detail.hasClass("AssignmentHeader") && values.size == 2) {
                     current!!.getJSONArray("submissions").put(JSONObject().put("type", values[0]).put("date", values[0]).put("grade", values[1]))
                     current!!.put("date", values[0].substringBefore(" "))
                 }
             }
-            val final = cells[6].selectFirst("span[id*=lblRowFinalGrade]")?.text().orEmpty()
+            val final = cell("ציון סופי", "Final grade", true)!!.selectFirst("span[id*=lblRowFinalGrade]")?.text().orEmpty()
             if (final.isNotBlank()) grades.put(JSONObject().put("id", "$key:final").put("subject", name)
-                .put("name", "Final grade").put("type", "final").put("grade", final).put("date", cells[7].text()))
-            val period = cells[3].text()
+                .put("name", "Final grade").put("type", "final").put("grade", final).put("date", date))
+            val period = cell("תקופה", "Period", true)!!.text()
             val semester = when {
                 period.contains("קיץ") -> "c"
                 Regex("[אב][׳'\"]?").find(period.substringAfter("סמסטר", ""))?.value?.startsWith("א") == true -> "a"
@@ -279,11 +335,13 @@ internal object InbarGrades {
                 else -> ""
             }
             courses += JSONObject().put("id", code).put("courseKey", key).put("name", name).put("year", year)
-                .put("semester", semester).put("semesterPicker", false).put("teacher", cells[2].text())
-                .put("period", period).put("credits", cells[4].text()).put("passingGrade", cells[5].text())
-                .put("remark", cells[8].text()).put("passRequestRemark", cells[10].text()).put("grades", grades)
+                .put("semester", semester).put("semesterPicker", false).put("teacher", cell("מרצה", "Lecturer")?.text().orEmpty())
+                .put("period", period).put("credits", cell("נ\"ז", "Credits")?.text().orEmpty())
+                .put("passingGrade", cell("ציון עובר", "Passing grade")?.text().orEmpty())
+                .put("remark", cell("הערה", "Remark")?.text().orEmpty())
+                .put("passRequestRemark", cell("בקשה לציון עובר", "Pass request")?.text().orEmpty()).put("grades", grades)
         }
-        return InbarGradePage(year, years, combineTeachingGroups(courses))
+        return InbarGradePage(year, years, if(combineGroups)combineTeachingGroups(courses) else courses, currentPage, nextPage)
     }
 
     /** The portal often lists a lecture and its ungraded tutorial as separate rows. */
