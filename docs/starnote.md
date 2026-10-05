@@ -38,6 +38,17 @@ reads also retain versioned files and listings for faster reopening. Refresh fro
 Drive explicitly obtains fresh metadata; locally preferred views show this in
 Note information. The worker must finish to register a fully downloaded folder.
 
+StarNote reads downloaded originals directly, removing legacy duplicate viewer
+copies as they are reopened. Temporary note originals use a 128 MiB oldest-first
+budget after closing a note; drafts, names and folder metadata are excluded.
+Materials > Storage shows downloads, temporary files and edits separately, with
+controls to clear previews or remove downloads. Removing downloads cancels folder
+jobs and retains Drive originals, followed folders and local annotations.
+
+Repository initialization and storage scans run off the UI thread. Materials
+navigation cancels obsolete HTTP requests, caches list filtering and download
+lookups, and preserves separate scroll positions for filters and folders.
+
 Drafts are stored atomically in `noBackupFilesDir/drive-materials/starnote`,
 partitioned by Google account. Local persistence does not require a token or
 network. Saves attempt a Drive backup after a short debounce; failures retain

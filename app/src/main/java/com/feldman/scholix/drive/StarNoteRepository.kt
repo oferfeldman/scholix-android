@@ -41,7 +41,7 @@ data class StarOpen(val account: String, val document: StarDocument, val edits: 
     val resources: Map<String,File>, val templates: Map<String,JSONObject>,val title:String="StarNote",val local:Boolean=false)
 
 private class StarSource(val account:String,val offline:Boolean,val list:suspend(DriveItem)->List<DriveItem>,
-    val download:suspend(DriveItem,File,Long)->Unit,val search:suspend(String)->List<DriveItem>)
+    val download:suspend(DriveItem,File,Long)->File,val search:suspend(String)->List<DriveItem>)
 
 class StarNoteRepository(private val context: Context, private val drive: DriveRepository) {
     private fun root(account: String) = File(context.noBackupFilesDir,"drive-materials/starnote/" +
@@ -60,10 +60,11 @@ class StarNoteRepository(private val context: Context, private val drive: DriveR
                     runCatching {drive.cachedList(folder)}.getOrElse {decode(listing(account,folder).readText())}
                 },download={item,file,max->
                     val saved=drive.cachedFile(item)
-                    if(saved!=null) {require(saved.length()<=max);file.parentFile!!.mkdirs();if(saved!=file)saved.copyTo(file,true)}
+                    if(saved!=null)DriveCacheStorage.useDownload(saved,file,max)
                     else {
                         val version=File(file.parentFile,file.name+".version")
                         require(file.isFile && version.isFile && version.readText()=="${item.modified}:${file.length()}" && file.length()<=max) {"Download this note to read it locally."}
+                        file.setLastModified(System.currentTimeMillis());file
                     }
                 },search={_->
                     val saved=drive.state.value.savedFolders.filter {it.name=="StarNote"}
@@ -76,9 +77,12 @@ class StarNoteRepository(private val context: Context, private val drive: DriveR
                 download={item,file,max->
                     val version=File(file.parentFile,file.name+".version")
                     val saved=drive.cachedFile(item)
-                    if(saved!=null) {require(saved.length()<=max);file.parentFile!!.mkdirs();if(saved!=file)saved.copyTo(file,true)}
-                    else if(!file.isFile || !version.isFile || version.readText()!="${item.modified}:${file.length()}")api.download(token,item,file,max)
-                    require(file.length()<=max);write(version,"${item.modified}:${file.length()}")
+                    if(saved!=null)DriveCacheStorage.useDownload(saved,file,max)
+                    else {
+                        if(!file.isFile || !version.isFile || version.readText()!="${item.modified}:${file.length()}")api.download(token,item,file,max)
+                        require(file.length()<=max);write(version,"${item.modified}:${file.length()}")
+                        file.setLastModified(System.currentTimeMillis());file
+                    }
                 },search={query->api.list(token,search=query)}))
         }}
     }
@@ -107,7 +111,7 @@ class StarNoteRepository(private val context: Context, private val drive: DriveR
         val account=s.account
         val dir=File(root(account),safeId(note.id));dir.mkdirs()
         val cover=s.list(note).firstOrNull { !it.folder && it.name.startsWith("thumbnail") && it.mime=="image/png" }
-        cover?.let { val file=File(dir,"thumbnail.png");s.download(it,file,2L*1024*1024);file }
+        cover?.let {s.download(it,File(dir,"thumbnail.png"),2L*1024*1024)}
     }
     /** Bulk library indexing must never authorize or fetch from Drive. */
     suspend fun cachedTitle(note:DriveItem):String = drive.starLocalAccess {account->withContext(Dispatchers.IO) {
@@ -151,7 +155,7 @@ class StarNoteRepository(private val context: Context, private val drive: DriveR
         for(month in s.list(inc).filter { it.folder }) archives += s.list(month).filter { it.name.endsWith(".zip") }
         require(archives.size <= 200 && archives.sumOf { it.size } <= 64L*1024*1024) { "This note is too large to open here. Export it as PDF from StarNote." }
         val raw=archives.sortedBy { it.name }.map { item ->
-            val file=File(dir,"${safeId(item.id)}.zip");s.download(item,file,64L*1024*1024);file.readBytes()
+            s.download(item,File(dir,"${safeId(item.id)}.zip"),64L*1024*1024).readBytes()
         }
         val document=StarNoteFormat.read(raw)
         val resources=linkedMapOf<String,File>(); val templates=linkedMapOf<String,JSONObject>()
@@ -160,7 +164,7 @@ class StarNoteRepository(private val context: Context, private val drive: DriveR
             for(item in s.list(folder)) {
                 if(item.folder) collect(item,"$path${item.name}/",depth+1)
                 else if(document.pages.any { it.resource=="$path${item.name}" || it.template==item.name }) {
-                    val file=File(dir,"${safeId(item.id)}.asset");s.download(item,file,32L*1024*1024)
+                    val file=s.download(item,File(dir,"${safeId(item.id)}.asset"),32L*1024*1024)
                     if(item.name.endsWith(".template_json")) templates[item.name]=JSONObject(file.readText())
                     else resources["$path${item.name}"]=file
                 }
@@ -171,7 +175,7 @@ class StarNoteRepository(private val context: Context, private val drive: DriveR
         val remote=if(s.offline)null else s.search("trashed = false and appProperties has { key='scholixStarSource' and value='${safeId(note.id)}' }")
             .maxByOrNull { it.modified }
         val edits=if(local!=null && !local.backedUp) local else if(remote!=null) {
-            val file=File(dir,"remote.json");s.download(remote,file,4L*1024*1024)
+            val file=s.download(remote,File(dir,"remote.json"),4L*1024*1024)
             StarEdits.read(JSONObject(file.readText()),note.id,true)
         } else local ?: StarEdits(note.id,backedUp=true)
         val title=document.title.ifBlank {note.sourceTitle}.ifBlank {

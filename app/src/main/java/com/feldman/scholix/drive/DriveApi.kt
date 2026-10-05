@@ -2,6 +2,12 @@ package com.feldman.scholix.drive
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -66,8 +72,18 @@ class DriveApi(private val client: OkHttpClient = OkHttpClient.Builder()
         Request.Builder().url(url).header("Authorization", "Bearer $token").apply {
             if (key.isNotEmpty()) header("X-Goog-Drive-Resource-Keys", "$id/$key")
         }.build()
-    private fun json(url: HttpUrl, token: String, id: String = "", key: String = ""): JSONObject =
-        client.newCall(request(url, token, id, key)).execute().use {
+    private suspend fun <T> response(request:Request,read:(okhttp3.Response)->T):T=coroutineScope {
+        val call=client.newCall(request)
+        // Closing the socket interrupts blocking reads when a screen or download is cancelled.
+        val cancellation=launch(Dispatchers.IO,start=CoroutineStart.UNDISPATCHED) {
+            try {awaitCancellation()} finally {call.cancel()}
+        }
+        try {call.execute().use(read)} catch(e:Exception) {
+            currentCoroutineContext().ensureActive();throw e
+        } finally {cancellation.cancel()}
+    }
+    private suspend fun json(url: HttpUrl, token: String, id: String = "", key: String = ""): JSONObject =
+        response(request(url, token, id, key)) {
             if (!it.isSuccessful) throw DriveHttpError(it.code)
             JSONObject(it.body.string())
         }
@@ -114,8 +130,8 @@ class DriveApi(private val client: OkHttpClient = OkHttpClient.Builder()
             else MultipartBody.Builder().setType("multipart/related".toMediaType())
                 .addPart(metadata.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .addPart(content.toRequestBody("application/json; charset=utf-8".toMediaType())).build()
-        client.newCall(Request.Builder().url(url.addQueryParameter("fields", "id,name,mimeType,modifiedTime,size").build())
-            .header("Authorization", "Bearer $token").post(body).build()).execute().use {
+        response(Request.Builder().url(url.addQueryParameter("fields", "id,name,mimeType,modifiedTime,size").build())
+            .header("Authorization", "Bearer $token").post(body).build()) {
             if (!it.isSuccessful) throw DriveHttpError(it.code)
             DriveItem.parse(JSONObject(it.body.string()))
         }
@@ -132,14 +148,16 @@ class DriveApi(private val client: OkHttpClient = OkHttpClient.Builder()
             }.build()
             destination.parentFile!!.mkdirs()
             val temp = File.createTempFile("drive-", ".part", destination.parentFile)
+            val coroutine=currentCoroutineContext()
             try {
-                client.newCall(request(url, token, item.effectiveId, item.effectiveKey)).execute().use { response ->
+                response(request(url, token, item.effectiveId, item.effectiveKey)) { response ->
                     if (!response.isSuccessful) throw DriveHttpError(response.code)
                     require(response.body.contentLength() <= maxBytes) { "This file is too large to save offline." }
                     response.body.byteStream().use { input -> temp.outputStream().use { output ->
                         val buffer = ByteArray(32 * 1024)
                         var total = 0L
                         while (true) {
+                            coroutine.ensureActive()
                             val n = input.read(buffer)
                             if (n == -1) break
                             total += n
@@ -148,6 +166,7 @@ class DriveApi(private val client: OkHttpClient = OkHttpClient.Builder()
                         }
                     } }
                 }
+                coroutine.ensureActive()
                 java.nio.file.Files.move(temp.toPath(), destination.toPath(),
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE)
             } finally { temp.delete() }

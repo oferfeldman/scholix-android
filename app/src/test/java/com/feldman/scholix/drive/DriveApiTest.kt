@@ -1,6 +1,7 @@
 package com.feldman.scholix.drive
 
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -94,5 +95,17 @@ class DriveApiTest {
     @Test fun incompleteSearchIsNotPublishedAsComplete() = runTest {
         server.enqueue(MockResponse().setBody("{\"files\":[],\"incompleteSearch\":true}"))
         try { api.list("test-token"); fail() } catch (e: java.io.IOException) { assertTrue(e.message!!.contains("incomplete")) }
+    }
+    @Test fun cancelledDownloadStopsPromptlyAndKeepsTheSavedCopy() = kotlinx.coroutines.runBlocking {
+        val destination=File(dir,"notes.pdf").apply {writeText("saved copy")}
+        server.enqueue(MockResponse().setBody("x".repeat(10000)).throttleBody(1,100,java.util.concurrent.TimeUnit.MILLISECONDS))
+        val operation=kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            api.download("test-token",pdf,destination)
+        }
+        assertNotNull(server.takeRequest(3,java.util.concurrent.TimeUnit.SECONDS))
+        operation.cancel()
+        kotlinx.coroutines.withTimeout(3000){operation.join()}
+        assertEquals("saved copy",destination.readText())
+        assertEquals(listOf("notes.pdf"),dir.list()!!.toList())
     }
 }

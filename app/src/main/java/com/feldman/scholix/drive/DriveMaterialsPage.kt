@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.clipToBounds
@@ -42,6 +43,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.DateFormat
@@ -51,7 +53,14 @@ import java.util.Date
 @Composable
 fun DriveMaterialsPage(searchQuery: String = "") {
     val context = LocalContext.current
-    val repo = remember(context) { DriveRepository.get(context) }
+    val loadedRepository by produceState<DriveRepository?>(null,context.applicationContext) {
+        value=withContext(Dispatchers.IO){DriveRepository.get(context)}
+    }
+    val repo=loadedRepository
+    if(repo==null) {
+        Box(Modifier.fillMaxSize(),contentAlignment=androidx.compose.ui.Alignment.Center){CircularProgressIndicator()}
+        return
+    }
     val state by repo.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current
@@ -59,6 +68,8 @@ fun DriveMaterialsPage(searchQuery: String = "") {
     val stack = remember { mutableStateListOf<DriveItem>() }
     var query by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var operation by remember {mutableStateOf<Job?>(null)}
+    var operationId by remember {mutableIntStateOf(0)}
     var error by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<DriveItem?>(null) }
     var preview by remember { mutableStateOf<File?>(null) }
@@ -67,15 +78,18 @@ fun DriveMaterialsPage(searchQuery: String = "") {
     val layoutPrefs=remember {context.getSharedPreferences("materials_layout",android.content.Context.MODE_PRIVATE)}
     var filters by remember {mutableStateOf(MaterialsFilters.read(layoutPrefs.getString("filters","").orEmpty()))}
     var arrangeFilters by remember {mutableStateOf(false)}
+    var storage by remember {mutableStateOf(false)}
     val folder = stack.lastOrNull()
+    fun stopLoading() {operationId++;operation?.cancel();busy=false;error=""}
     fun run(block: suspend () -> Unit) {
-        if (busy) return
-        scope.launch {
+        stopLoading()
+        val current=operationId
+        operation=scope.launch {
             busy = true; error = ""
             try { block() } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                error = if(DriveConnection.unavailable(e) && repo.state.value.networkUnavailable)"" else DriveAuth.message(e)
-            } finally { busy = false }
+                if(current==operationId)error = if(DriveConnection.unavailable(e) && repo.state.value.networkUnavailable)"" else DriveAuth.message(e)
+            } finally { if(current==operationId)busy = false }
         }
     }
     fun refresh() = run { repo.refresh(folder, shared = folder == null && tab == "shared") }
@@ -117,7 +131,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
         catch (_: android.content.ActivityNotFoundException) { error = "No browser or Drive viewer is available." }
     }
     fun open(item: DriveItem) {
-        if (item.folder) { stack.add(item); return }
+        if (item.folder) { stopLoading();stack.add(item); return }
         if (item.pdf && item.canDownload) run { preview = repo.preview(item); selected = item }
         else if (repo.offlineFile(item).isFile) run {
             val copy = repo.shareCopy(item)
@@ -128,6 +142,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
         } else openInDrive(item)
     }
     BackHandler(selected != null || stack.isNotEmpty()) {
+        stopLoading()
         if (selected != null) { selected = null; preview = null } else stack.removeAt(stack.lastIndex)
     }
     LaunchedEffect(state.account) { stack.clear(); selected = null; preview = null }
@@ -147,11 +162,17 @@ fun DriveMaterialsPage(searchQuery: String = "") {
     val listing = state.listings[repo.listingKey(folder, folder == null && tab == "shared")]
     val allItems = if (folder != null || tab in listOf("shared", "root")) listing?.items.orEmpty()
         else if (tab == "offline") state.savedFolders + state.offline else state.followed
-    val items = allItems.distinctBy {it.id}.filter { it.name.contains(query, true) && it.name.contains(searchQuery, true) }
+    val items = remember(allItems,query,searchQuery) {
+        allItems.distinctBy {it.id}.filter { it.name.contains(query, true) && it.name.contains(searchQuery, true) }
+    }
+    val savedById=remember(state.offline){state.offline.associateBy {it.effectiveId}}
+    val savedFolderIds=remember(state.savedFolders){state.savedFolders.map {it.effectiveId}.toSet()}
+    val scrollStates=rememberSaveableStateHolder()
     Scaffold(topBar = {
         if(!starReading) {
         CenterAlignedTopAppBar(title = { Text(selected?.name ?: folder?.name ?: "Materials", maxLines = 1) },
             navigationIcon = { if (selected != null || stack.isNotEmpty()) IconButton(onClick = {
+                stopLoading()
                 if (selected != null) { selected = null; preview = null } else stack.removeAt(stack.lastIndex)
             }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
             actions = {
@@ -162,7 +183,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                     if(tab!="star") IconButton(onClick = { if (folder == null && tab == "followed") run {
                         state.followed.forEach { repo.refresh(it) }
                     } else refresh() }, enabled = !busy && tab != "offline") { Icon(Icons.Default.Refresh, "Refresh") }
-                    IconButton(onClick = { disconnect = true }, enabled = !busy) { Icon(Icons.Default.LinkOff, "Disconnect Google Drive") }
+                    IconButton(onClick = { storage = true }, enabled = !busy) { Icon(Icons.Default.Storage, "Manage storage") }
                 }
             }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer))
         }
@@ -176,6 +197,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                 Button(onClick = { connect() }, enabled = !busy) { Text("Connect Google Drive") }
                 return@Column
             }
+            if(tab=="offline"&&!starReading)TextButton(onClick={disconnect=true}){Text("Disconnect Google Drive")}
             if (state.needsConsent && !starReading) Button(onClick = { connect() }, enabled = !busy) { Text("Reconnect Google Drive") }
             if (selected != null && preview != null) {
                 val item = selected!!
@@ -186,7 +208,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                 DrivePdfReader(preview!!, Modifier.weight(1f))
                 return@Column
             }
-            MaterialFilterLayout(filters,tab,visible=!starReading,onSelect={if(!busy){tab=it;stack.clear()}},modifier=Modifier.weight(1f)) {
+            MaterialFilterLayout(filters,tab,visible=!starReading,onSelect={stopLoading();tab=it;stack.clear()},modifier=Modifier.weight(1f)) {
             Column(Modifier.fillMaxSize()) {
             if (!starReading) {
             OutlinedTextField(query, { query = it }, label = { Text(if(tab=="star")"Search notes" else "Search materials") },
@@ -209,12 +231,13 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                 style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(vertical = 6.dp))
             if (tab == "followed" && folder == null) Text(if(state.followed.isEmpty())"Open a folder from Shared with me or My Drive, then follow it for automatic updates." else "Your followed folders update automatically.",
                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+            scrollStates.SaveableStateProvider("${state.account}:$tab:${folder?.effectiveId.orEmpty()}") {
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (items.isEmpty()) item { Text(if (query.isNotBlank() || searchQuery.isNotBlank()) "No matching materials." else
                     if (tab == "offline") "No files saved offline." else "No folders or files to show yet.", Modifier.padding(vertical = 16.dp)) }
                 items(items, key = { it.id }) { item ->
-                    val saved = state.offline.firstOrNull { it.effectiveId == item.effectiveId }
-                    ElevatedCard(onClick = { if (!busy) open(item) }, modifier = Modifier.fillMaxWidth()) {
+                    val saved = savedById[item.effectiveId]
+                    ElevatedCard(onClick = { open(item) }, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Icon(if (item.folder) Icons.Default.Folder else Icons.Default.Description, null)
@@ -222,7 +245,7 @@ fun DriveMaterialsPage(searchQuery: String = "") {
                             }
                             if (saved != null) Text(if (saved.modified != item.modified) "Saved offline · newer version online" else "Saved offline",
                                 style = MaterialTheme.typography.labelSmall)
-                            if(item.folder && state.savedFolders.any {it.effectiveId==item.effectiveId})Text("Downloaded locally",style=MaterialTheme.typography.labelSmall)
+                            if(item.folder && item.effectiveId in savedFolderIds)Text("Downloaded locally",style=MaterialTheme.typography.labelSmall)
                             if(item.folder)state.listings[item.effectiveId]?.let {cached->
                                 Text(if(cached.items.isEmpty())"Empty folder" else "${cached.items.size} items",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                             }
@@ -239,11 +262,13 @@ fun DriveMaterialsPage(searchQuery: String = "") {
             }
             }
             }
+            }
         }
     }
     if(arrangeFilters)MaterialsFilterDialog(filters,onDismiss={arrangeFilters=false},onSave={
         filters=MaterialsFilters.normalize(it);layoutPrefs.edit().putString("filters",MaterialsFilters.encode(filters)).apply();arrangeFilters=false
     })
+    if(storage)DriveStorageDialog(repo,onDismiss={storage=false})
     if (disconnect) AlertDialog(onDismissRequest = { disconnect = false }, title = { Text("Disconnect Google Drive?") },
         text = { Text("This removes Scholix’s cached lists and offline copies. Your files in Google Drive stay intact.") },
         confirmButton = { TextButton(onClick = { disconnect = false; run { repo.disconnect() } }) { Text("Disconnect") } },

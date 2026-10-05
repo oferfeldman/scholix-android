@@ -228,7 +228,14 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
     }
     fun close() {
         val current=edits;val account=opened?.account
-        run { if(current!=null && account!=null)repository.saveLocal(account,current);opened=null;edits=null;notes=repository.notes() }
+        run {
+            if(current!=null && account!=null)repository.saveLocal(account,current)
+            opened=null;edits=null
+            if(drive.trimNoteCache()>0)presentations.keys.toList().forEach {id->
+                presentations[id]?.let {presentations[id]=it.copy(cover=null,coverChecked=false)}
+            }
+            notes=repository.notes()
+        }
     }
     BackHandler(opened!=null) { close() }
     Column(modifier.fillMaxSize(),verticalArrangement=Arrangement.spacedBy(6.dp)) {
@@ -237,7 +244,7 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
         val note=opened
         if(note==null) {
             val resolved=notes.associate {it.id to presentation(it).title}
-            val visible=StarNoteLibrary.visible(notes,resolved,query,sort)
+            val visible=remember(notes,resolved,query,sort){StarNoteLibrary.visible(notes,resolved,query,sort)}
             val checkingNames=query.isNotBlank()&&(checkingCachedNames||loadingMoreNames)
             val unnamed=notes.filter {!StarNoteLibrary.hasTitle(it,presentation(it).title)}
             val uncheckedNames=unnamed.filter {!presentation(it).titleChecked&&!presentation(it).titleLoading}
@@ -313,7 +320,9 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
                         DropdownMenuItem(text={Text(if(enableBackup)"Enable Drive backups" else "Back up now")},onClick={more=false;enable()})
                         DropdownMenuItem(text={Text("Refresh from Drive")},onClick={more=false;run {
                             repository.saveLocal(note.account,current)
-                            val fresh=repository.open(selectedNote!!,true);opened=fresh;edits=fresh.edits
+                            val fresh=repository.open(selectedNote!!,true)
+                            pageIndex=pageIndex.coerceAtMost(fresh.document.pages.lastIndex)
+                            opened=fresh;edits=fresh.edits
                         }})
                     }
                 }

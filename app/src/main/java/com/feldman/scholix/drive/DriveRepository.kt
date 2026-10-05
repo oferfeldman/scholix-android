@@ -169,26 +169,67 @@ class DriveRepository private constructor(private val context: Context) {
     internal fun cachedList(folder:DriveItem):List<DriveItem> = mutable.value.listings[folder.effectiveId]?.items
         ?: throw java.io.IOException("This folder has not been fully downloaded yet.")
     internal fun cachedFile(item:DriveItem):File? = offlineFile(item).takeIf {it.isFile && mutable.value.offline.any {saved->saved.effectiveId==item.effectiveId && saved.modified==item.modified}}
+    private fun temporaryBytes(file:File):Long {
+        val original=File(root,"offline/${file.name}")
+        val shared=file.parentFile==File(context.cacheDir,"drive-share") && original.isFile &&
+            runCatching {java.nio.file.Files.isSameFile(file.toPath(),original.toPath())}.getOrDefault(false)
+        return if(shared)0 else file.length()
+    }
+    suspend fun storageUsage():DriveStorageUsage=mutex.withLock {withContext(Dispatchers.IO) {
+        val notes=DriveCacheStorage.files(File(root,"starnote"))
+        DriveStorageUsage(
+            downloads=DriveCacheStorage.files(File(root,"offline")).sumOf {it.length()},
+            temporary=(notes.filter {DriveCacheStorage.noteCache(it)}+DriveCacheStorage.files(File(context.cacheDir,"drive-preview"))+
+                DriveCacheStorage.files(File(context.cacheDir,"drive-share"))).sumOf {temporaryBytes(it)},
+            edits=notes.filter {it.name=="edits.json"||it.name=="edits.tmp"}.sumOf {it.length()})
+    }}
+    suspend fun clearTemporary():Long=mutex.withLock {withContext(Dispatchers.IO) {
+        val files=DriveCacheStorage.files(File(root,"starnote")).filter {DriveCacheStorage.noteCache(it)}+
+            DriveCacheStorage.files(File(context.cacheDir,"drive-preview"))+DriveCacheStorage.files(File(context.cacheDir,"drive-share"))
+        val freed=files.sumOf {temporaryBytes(it)}
+        DriveCacheStorage.remove(files);freed
+    }}
+    suspend fun trimNoteCache():Long=mutex.withLock {withContext(Dispatchers.IO) {
+        DriveCacheStorage.trimNotes(File(root,"starnote"))
+    }}
+    suspend fun clearDownloads() {
+        withContext(Dispatchers.IO) {androidx.work.WorkManager.getInstance(context).cancelAllWorkByTag(DriveFolderDownloadWorker.TAG).result.get()}
+        mutex.withLock {withContext(Dispatchers.IO) {
+            try {
+                DriveCacheStorage.remove(DriveCacheStorage.files(File(context.cacheDir,"drive-share")))
+                DriveCacheStorage.remove(DriveCacheStorage.files(File(root,"offline")))
+            } finally {
+                publish(mutable.value.copy(offline=mutable.value.offline.filter {offlineFile(it).isFile},savedFolders=emptyList()))
+            }
+        }}
+    }
     suspend fun removeOffline(item: DriveItem) = mutex.withLock { withContext(Dispatchers.IO) {
         offlineFile(item).delete()
         publish(mutable.value.copy(offline = mutable.value.offline.filterNot { it.effectiveId == item.effectiveId }))
     } }
-    suspend fun preview(item: DriveItem): File = mutex.withLock {
-        if (offlineFile(item).isFile) return@withLock offlineFile(item)
+    suspend fun preview(item: DriveItem): File = mutex.withLock {withContext(Dispatchers.IO) {
+        if (offlineFile(item).isFile) return@withContext offlineFile(item)
         require(item.pdf) { "Open this file in Google Drive." }
         val target = File(context.cacheDir, "drive-preview/${hash(item.effectiveId)}.pdf")
+        val version=File(target.parentFile,target.name+".version")
+        if(target.isFile && version.isFile && version.readText()=="${item.modified}:${target.length()}")return@withContext target
         authorized { api.download(it, item, target) }
+        version.writeText("${item.modified}:${target.length()}")
         withContext(Dispatchers.IO) {
             // Keep only the current online preview; offline copies are managed separately.
-            target.parentFile!!.listFiles()?.filter { it.isFile && it != target }?.forEach { it.delete() }
+            target.parentFile!!.listFiles()?.filter { it.isFile && it != target && it!=version }?.forEach { it.delete() }
         }
         target
-    }
+    }}
     suspend fun shareCopy(item: DriveItem): File = mutex.withLock { withContext(Dispatchers.IO) {
         require(offlineFile(item).isFile)
         val target = File(context.cacheDir, "drive-share/${hash(item.effectiveId)}${extension(item)}")
         target.parentFile!!.mkdirs()
-        offlineFile(item).copyTo(target, overwrite = true)
+        // A read-only share can reference the same bytes without doubling file storage.
+        java.nio.file.Files.deleteIfExists(target.toPath())
+        try {java.nio.file.Files.createLink(target.toPath(),offlineFile(item).toPath())}
+        catch(_:java.io.IOException){offlineFile(item).copyTo(target,overwrite=true)}
+        catch(_:UnsupportedOperationException){offlineFile(item).copyTo(target,overwrite=true)}
         target.parentFile!!.listFiles()?.filter { it.isFile && it != target }?.forEach { it.delete() }
         target
     } }
