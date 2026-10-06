@@ -94,7 +94,14 @@ fun ClassFiltersRow(
 fun SchedulePage(
     platforms: List<Platform>,
     modifier: Modifier = Modifier,
+    inbarAccessRequested: Boolean = false,
+    isActive: Boolean = true,
 ) {
+    var inbarRequestedByUser by remember { mutableStateOf(false) }
+    val active by rememberUpdatedState(isActive)
+    val navigationRequested by rememberUpdatedState(inbarAccessRequested)
+    fun inbarAllowed() = active && (navigationRequested || inbarRequestedByUser)
+    val canAccessInbar = inbarAllowed()
     val schedulePlatforms = platforms.filter { it.supportsSchedule }
     var selectedPlatformIndex by remember(schedulePlatforms.size) { mutableIntStateOf(0) }
     var platformPickerExpanded by remember { mutableStateOf(false) }
@@ -151,6 +158,13 @@ fun SchedulePage(
     var inbarRelogin by remember { mutableStateOf<InbarPlatform?>(null) }
     var reloginAttempted by remember { mutableStateOf(false) }
     var scheduleReloadTrigger by remember { mutableIntStateOf(0) }
+    LaunchedEffect(isActive) {
+        if (!isActive) {
+            inbarRequestedByUser = false
+            inbarRelogin = null
+            reloginAttempted = false
+        }
+    }
 
     val context = LocalContext.current
     // Every provider that can supply a schedule, so the page can switch between
@@ -198,10 +212,16 @@ fun SchedulePage(
         }
     }
 
-    LaunchedEffect(pagerState.currentPage, platform?.id, selectedValue, scheduleReloadTrigger) {
+    LaunchedEffect(pagerState.currentPage, platform?.id, selectedValue, scheduleReloadTrigger, canAccessInbar, isActive) {
+        if (!isActive) return@LaunchedEffect
         if (inbarRelogin != null) return@LaunchedEffect
         val page = pagerState.currentPage
         if (page !in dayNames.indices) return@LaunchedEffect
+        if (platform is InbarPlatform && !canAccessInbar) {
+            isLoading = false
+            errorMessages[page] = "Tap Load Inbar schedule to view your timetable."
+            return@LaunchedEffect
+        }
         val platformSelection = "${platform?.id}:$selectedValue"
         if (loadedSelection != platformSelection) {
             allSchedulesUpdated.clear()
@@ -255,7 +275,7 @@ fun SchedulePage(
                         val errorCode = schedule.optString("error")
                         val inbar = requestPlatform as? InbarPlatform
                         if (errorCode == "login_failed" && inbar != null &&
-                            inbar.hasSavedLoginDetails() && !reloginAttempted && inbarRelogin == null) {
+                            inbarAllowed() && inbar.hasSavedLoginDetails() && !reloginAttempted && inbarRelogin == null) {
                             reloginAttempted = true
                             inbarRelogin = inbar.forSmsLogin()
                             return@withContext emptyList()
@@ -397,13 +417,13 @@ fun SchedulePage(
         }
     }
 
-    inbarRelogin?.let { pending ->
+    inbarRelogin?.takeIf { canAccessInbar }?.let { pending ->
         HiddenInbarLogin(account = pending,
             reuseSavedSession = { withContext(Dispatchers.IO) { PlatformStorage.restoreVerifiedInbarSession(context, pending) } },
-            onSmsRequested = { account -> withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) } },
+            onSmsRequested = { account -> withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) } },
             onResult = { account, error ->
                 if (account != null) {
-                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                    withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) }
                     inbarRelogin = null
                     recoveredProviders = recoveredProviders + (account.id to account)
                     allSchedulesUpdated.clear()
@@ -471,7 +491,10 @@ fun SchedulePage(
             ProviderPickerBar(
                 providers = schedulePlatforms,
                 selectedIndex = selectedPlatformIndex,
-                onSelected = { selectedPlatformIndex = it },
+                onSelected = {
+                    if (schedulePlatforms.getOrNull(it) is InbarPlatform) inbarRequestedByUser = true
+                    selectedPlatformIndex = it
+                },
                 expanded = platformPickerExpanded,
                 onExpandedChange = { platformPickerExpanded = it },
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -485,12 +508,13 @@ fun SchedulePage(
         ) {
             Box(Modifier.weight(1f)) {
                 ChipPicker(label = stringResource(R.string.year), options = (academicYears + academicYear).distinct(),
-                    selected = academicYear, onSelectedChange = { academicYear = it; reloginAttempted = false })
+                    selected = academicYear, onSelectedChange = { inbarRequestedByUser = true; academicYear = it; reloginAttempted = false })
             }
             Box(Modifier.weight(1f)) {
                 ChipPicker(label = stringResource(R.string.semester), options = academicPeriods.values.toList(),
                     selected = academicPeriods[academicPeriod].orEmpty(),
                     onSelectedChange = { label ->
+                        inbarRequestedByUser = true
                         academicPeriods.entries.firstOrNull { it.value == label }?.let { academicPeriod = it.key }
                         reloginAttempted = false
                     })
@@ -604,10 +628,12 @@ fun SchedulePage(
                         val inbar = platform as? InbarPlatform
                         if (inbar != null && inbar.hasSavedLoginDetails()) {
                             TextButton(onClick = {
+                                inbarRequestedByUser = true
                                 errorMessages[page] = null
                                 isLoading = true
-                                inbarRelogin = inbar.forSmsLogin()
-                            }) { Text("Retry login") }
+                                if (canAccessInbar) inbarRelogin = inbar.forSmsLogin()
+                                else scheduleReloadTrigger++
+                            }) { Text(if (canAccessInbar) "Retry login" else "Load Inbar schedule") }
                         }
                         }
                     }
