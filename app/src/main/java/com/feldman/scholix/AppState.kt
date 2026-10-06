@@ -19,8 +19,6 @@ class AppState(
     val overflowPages: List<AppDest> = emptyList(),
     val messagesViewModel: MessagesViewModel? = null,
     val homeworkOpenRequest: Int = 0,
-    val userOpenedPages: Set<AppDest> = emptySet(),
-    val activePage: com.feldman.motion.MotionDest? = null,
 )
 
 val LocalAppState = compositionLocalOf<AppState> {

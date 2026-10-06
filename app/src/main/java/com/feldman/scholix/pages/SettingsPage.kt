@@ -382,10 +382,10 @@ fun AddPlatformSheet(
     inbarLogin?.let { pending ->
         HiddenInbarLogin(account = pending,
             onSmsRequested = { account ->
-                withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) }
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
             }, onResult = { account, error ->
                 if (account != null) withContext(Dispatchers.IO) {
-                    PlatformStorage.saveInbarLoginProgress(context, account)
+                    PlatformStorage.addPlatforms(context, listOf(account))
                 }
                 inbarLogin = null
                 isLoading = false
@@ -935,11 +935,11 @@ fun EditProviderSheet(
         HiddenInbarLogin(account = pending,
             onSmsRequested = { account ->
                 if (providerName.isNotBlank()) account.setName(providerName)
-                withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) }
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
             }, onResult = { account, error ->
                 if (account != null) {
                     if (providerName.isNotBlank()) account.setName(providerName)
-                    withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) }
+                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
                 }
                 inbarRelogin = null
                 busy = false

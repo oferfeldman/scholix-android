@@ -138,9 +138,7 @@ sealed class AppDest : MotionDest {
             val state = LocalAppState.current
             GradesScreen(
                 preloadedCourses = state.preloadedCourses,
-                modifier = Modifier.fillMaxSize(),
-                inbarAccessRequested = Grades in state.userOpenedPages,
-                isActive = state.activePage == Grades
+                modifier = Modifier.fillMaxSize()
             )
         }
     }
@@ -167,9 +165,7 @@ sealed class AppDest : MotionDest {
         ) {
             SchedulePage(
                 platforms = LocalAppState.current.platforms,
-                modifier = Modifier.fillMaxSize(),
-                inbarAccessRequested = Schedule in LocalAppState.current.userOpenedPages,
-                isActive = LocalAppState.current.activePage == Schedule
+                modifier = Modifier.fillMaxSize()
             )
         }
     }

@@ -7,9 +7,6 @@ import com.feldman.lockerapp.ui.theme.AppTheme
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.pages.SchedulePage
 import com.feldman.scholix.ui.HiddenInbarLogin
-import com.feldman.scholix.ui.InbarSmsLoginSessions
-import androidx.compose.runtime.mutableStateOf
-import kotlinx.coroutines.CompletableDeferred
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Rule
@@ -22,32 +19,6 @@ import java.util.concurrent.atomic.AtomicReference
 @RunWith(AndroidJUnit4::class)
 class InbarScheduleUiTest {
     @get:Rule val compose = createComposeRule()
-
-    @Test fun closingAndReopeningThePageJoinsTheSameSignIn() {
-        val stale = InbarPlatform("SYNTHETIC_PAGE_RETRY").apply { setUsername("synthetic-page-retry") }
-        val saved = InbarPlatform(stale.id).apply { loggedIn = true }
-        val started = CompletableDeferred<Unit>()
-        val continueSignIn = CompletableDeferred<InbarPlatform>()
-        val visible = mutableStateOf(true)
-        val result = AtomicReference<InbarPlatform?>()
-        var attempts = 0
-        compose.setContent {
-            if (visible.value) HiddenInbarLogin(account = stale,
-                reuseSavedSession = { attempts++; started.complete(Unit); continueSignIn.await() },
-                onSmsRequested = { fail("Synthetic session must never send SMS") },
-                onResult = { account, _ -> result.set(account) })
-        }
-        compose.waitUntil(10_000) { started.isCompleted }
-        compose.runOnIdle { visible.value = false }
-        compose.waitForIdle()
-        assertTrue(InbarSmsLoginSessions.find(stale)!!.result.isActive)
-        compose.runOnIdle { visible.value = true }
-        compose.waitForIdle()
-        continueSignIn.complete(saved)
-        compose.waitUntil(10_000) { result.get() != null }
-        assertSame(saved, result.get())
-        assertEquals(1, attempts)
-    }
 
     @Test fun stalePageReusesVerifiedSessionWithoutAnotherSmsRequest() {
         val stale = InbarPlatform("SYNTHETIC_REUSE")
@@ -83,13 +54,8 @@ class InbarScheduleUiTest {
         compose.onNodeWithText("Semester").assertExists()
         compose.onNodeWithText("Version").assertDoesNotExist()
         compose.onNodeWithText("Grade").assertDoesNotExist()
-        // Adjacent pager days may also be composed; validate the visible day's labels.
-        for (text in listOf("09:00", "11:00")) {
-            compose.waitUntil(10_000) {
-                val nodes = compose.onAllNodesWithText(text, useUnmergedTree = true)
-                nodes.fetchSemanticsNodes().indices.any { nodes[it].isDisplayed() }
-            }
-        }
+        compose.onNodeWithText("09:00", useUnmergedTree = true).assertExists()
+        compose.onNodeWithText("11:00", useUnmergedTree = true).assertExists()
         compose.onNodeWithText("540", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("Sat").assertExists()
     }

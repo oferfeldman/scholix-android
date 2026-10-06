@@ -7,11 +7,6 @@ import android.os.SystemClock
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import com.feldman.scholix.MainActivity
 import com.feldman.scholix.api.PlatformStorage
 import org.json.JSONArray
@@ -19,14 +14,12 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
-import org.junit.Rule
 import org.junit.runner.RunWith
 
 /** Opt-in live test: expires only the development app's local Inbar session, retaining its account. */
 @RunWith(AndroidJUnit4::class)
 class InbarReauthenticationSmokeTest {
-    @get:Rule val compose = createEmptyComposeRule()
-    @Test fun openingInbarGradesSignsInAndRestoresGrades() {
+    @Test fun expiredSessionAutomaticallySignsInAndRestoresGrades() {
         assumeTrue(InstrumentationRegistry.getArguments().getString("inbarLiveReauthentication") == "true")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assumeTrue(context.packageName.endsWith(".inbar.dev"))
@@ -47,17 +40,6 @@ class InbarReauthenticationSmokeTest {
         var restored = false
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                val firstInbar = PlatformStorage.getCourses(context).indexOfFirst { it.optString("platformId") == originalId }
-                assertTrue("No visible Inbar course available for this check", firstInbar >= 0)
-                if (firstInbar == 0) {
-                    compose.waitUntil(10_000) {
-                        compose.onAllNodesWithText("Load Inbar grades").fetchSemanticsNodes().isNotEmpty()
-                    }
-                    compose.onNodeWithText("Load Inbar grades").performClick()
-                } else {
-                    // Other providers may appear first; explicitly selecting Inbar requests sign-in.
-                    repeat(firstInbar) { compose.onNodeWithContentDescription("Next course").performClick() }
-                }
                 val deadline = SystemClock.elapsedRealtime() + 60_000
                 while (SystemClock.elapsedRealtime() < deadline) {
                     val current = findInbar(profiles())

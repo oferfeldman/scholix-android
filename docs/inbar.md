@@ -1,11 +1,5 @@
 # Inbar (Bar-Ilan) provider
 
-Inbar can temporarily refuse both SMS delivery and code verification. Its portal reports this in a JavaScript alert even though the code-entry form is still present. Scholix detects that response, ends sign-in immediately with a **try again later** error, and does not submit further codes against the refused challenge. The portal does not specify when the restriction expires.
-
-Opening the app displays cached Inbar grades without contacting the portal. Background refresh skips Inbar. Tap Grades or Schedule in navigation, select an Inbar course/provider, or tap **Load Inbar grades** to request fresh data. An expired session then starts one background SMS sign-in while that page is active; unrelated pages cannot start it. A valid session continues to work without another SMS. Initial provider setup and explicit account edits retain their normal sign-in flow.
-
-Once requested, the SMS listener and its HTTP verification challenge live independently of the page until completion or timeout. Changing pages or recreating the UI does not lose the arriving code. Reopening an Inbar view joins the same attempt instead of requesting another SMS or showing the local cooldown for an attempt that is still running. Successful verification saves the session even when the requesting page has closed; the five-digit code remains only in memory. This resumes attempts within the running app process, not after Android terminates the process.
-
 Choose **Inbar (Bar-Ilan)** during onboarding or in Settings → Add provider. Enter the ID/passport and mobile number registered with Bar-Ilan and submit the same login form used by the other providers. Inbar requests and verifies the SMS in the background while a Material `ContainedLoadingIndicator` is shown. There is no SMS form or Verify button. This provider is separate from the existing Bar-Ilan/Michlol math provider.
 
 ID and mobile are saved through the same `PlatformStorage` provider preferences used by other platforms, as soon as the portal accepts an SMS request. Subsequent sign-ins prefill the shared fields with those details. If a grades request finds an expired session, the Grades page signs in behind its loading indicator and retries after verification. Declined consent, invalid credentials/codes, unavailable reception, network failures, and a 90-second SMS timeout return to the existing login error display; Grades offers **Retry login**. Credentials remain editable in the common forms. Only an interactive sign-in requests an SMS, and each successful reauthentication replaces the existing provider under the same ID.
@@ -25,27 +19,6 @@ Login uses `/Live/Login.aspx`, followed by the SMS form `/Live/Authenticate.aspx
 The login ReturnUrl goes directly to grades. If verification lands on the grades endpoint, its response is reused rather than fetched again. Year switches post the latest grades form directly, removing a GET before each older-year request; refreshing the same year still fetches fresh data. Restored providers reuse HTTPS connections with separate cookie jars. This removes redundant client work; portal response and mobile SMS delivery times still depend on the services. Debug timing logs contain durations only, never account details, messages, or codes.
 
 Available years are loaded when adding the provider. Course keys include the year, so opening an older course requests its own academic year. Blank final grades remain pending. Attendance and messages are not implemented. An expired session uses hidden SMS reauthentication from Grades, Schedule, or the shared provider form. Grade and schedule GETs/postbacks stop before following login or SMS-authentication redirects, so background reads cannot create a competing challenge.
-
-Grades are matched to table headers rather than fixed column numbers, so optional
-columns can disappear or move without misassigning a grade. Recognized empty-year
-rows retain the academic-year choices and allow sign-in to continue to older
-years. Unknown or truncated populated rows still fail without replacing cached
-grades. Regression tests cover empty-year sign-in, reordered/optional columns and
-malformed rows. `SCHOLIX_INBAR_GRADES_FIXTURE` optionally points to a private saved
-grades page for local validation; it must remain outside version control.
-
-The grades grid's page-number controls are navigation, not course rows. Scholix
-follows their Web Forms postbacks with fresh state, validates forward progress,
-then combines teaching groups across the complete result. Repeated pages or failed
-later pages do not replace cached courses with a partial list. An accepted SMS
-session is preserved even when grade parsing fails, avoiding another SMS merely
-because the reader encountered an unsupported layout.
-
-The opt-in `InbarLoginSmokeTest` (`inbarLiveLogin=true`) checks the saved development
-account without deliberately expiring it. It reuses a valid session or performs
-one normal SMS sign-in, then reads all available grade years and checks that the
-provider ID and course customizations were retained. It requires the private
-direct-SMS build and its existing SMS permission.
 
 ## Period schedule
 

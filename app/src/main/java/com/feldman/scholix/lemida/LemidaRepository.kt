@@ -1,7 +1,6 @@
 package com.feldman.scholix.lemida
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.webkit.WebView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -10,18 +9,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.flowOn
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
-
-data class LemidaSnapshot(val homework: List<Homework> = emptyList(), val courses: List<LemidaCourse> = emptyList(),
-    val status: String = "", val updated: Long = 0, val enabled: Boolean = false, val needsLogin: Boolean = false,
-    val loaded: Boolean = false)
 
 class LemidaRepository internal constructor(context: Context, preferencesName: String,
     private val browserFactory: (Context, String?, WebView?) -> LemidaTransport) {
@@ -35,24 +25,6 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
     fun status() = prefs.getString("status", "Sign in to Lemida to sync homework.").orEmpty()
     fun lastSync() = prefs.getLong("last_sync", 0L)
     fun cached() = LemidaParser.decode(prefs.getString("homework", "[]") ?: "[]")
-    fun cachedCourses(): List<LemidaCourse> = prefs.getString("courses", null)?.let { LemidaCourse.decode(it) }
-        ?: cached().map { LemidaCourse(it.courseId, it.course) }.distinctBy { it.id }
-    // Preference notifications carry no data; decode the snapshot off the UI thread only when it changes.
-    val snapshots = callbackFlow {
-        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> trySend(Unit) }
-        prefs.registerOnSharedPreferenceChangeListener(listener)
-        trySend(Unit)
-        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
-    }.conflate().map {
-        // One atomic preference snapshot; never wait behind a network sync just to show saved data.
-        val values = prefs.all
-        val homework = LemidaParser.decode(values["homework"] as? String ?: "[]")
-        val courses = (values["courses"] as? String)?.let { LemidaCourse.decode(it) }
-            ?: homework.map { LemidaCourse(it.courseId, it.course) }.distinctBy { it.id }
-        LemidaSnapshot(homework, courses.sortedBy { it.name }, values["status"] as? String ?: "",
-            values["last_sync"] as? Long ?: 0L, values["enabled"] as? Boolean ?: false,
-            values["needs_login"] as? Boolean ?: false, loaded = true)
-    }.flowOn(Dispatchers.IO)
     fun setUserAgent(value: String) { prefs.edit().putString("user_agent", value).apply() }
     private fun detailKey(item: Homework) = "detail:${prefs.getString("user_id", "")}:${item.id}"
     fun cachedDetail(item: Homework): HomeworkDetail? = prefs.getString(detailKey(item), null)?.let {
@@ -149,7 +121,6 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                         val alerts = LemidaParser.pendingAlerts(items, seen, pending)
                         // Commit only after every course succeeded. Never turn an error into an empty baseline.
                         check(prefs.edit().putString("homework", LemidaParser.encode(items)).putString("user_id", user)
-                            .putString("courses", LemidaCourse.encode(courses.map { (id, name) -> LemidaCourse(id, name) }))
                             .putStringSet("seen", seen.orEmpty() + items.map { it.id })
                             .putString("pending", LemidaParser.encode(alerts))
                             .putLong("last_sync", System.currentTimeMillis()).putBoolean("needs_login", false)
