@@ -1497,6 +1497,7 @@ fun SettingsPage(
     onOpenAppearance: () -> Unit,
     onOpenNavigation: () -> Unit,
     onOpenCrashLogs: () -> Unit = {},
+    onOpenPortions: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val useDark = isMotionDarkTheme()
@@ -1522,6 +1523,14 @@ fun SettingsPage(
                 iconStyle = MotionSectionDefaults.iconStyle(containerColor = SettingsCategoryColor.NAVIGATION.container(useDark), contentColor = SettingsCategoryColor.NAVIGATION.content(useDark)),
                 onClick = onOpenNavigation,
                 paneDestination = AppDest.NavigationSettings
+            )
+            PageItem(
+                title = stringResource(R.string.attendance_portions_title),
+                description = stringResource(R.string.attendance_portions_desc),
+                icon = rememberSymbolPainter(MotionSymbols.ic_calculate),
+                iconStyle = MotionSectionDefaults.iconStyle(containerColor = SettingsCategoryColor.PORTIONS.container(useDark), contentColor = SettingsCategoryColor.PORTIONS.content(useDark)),
+                onClick = onOpenPortions,
+                paneDestination = AppDest.PortionsSettings
             )
             PageItem(
                 title = stringResource(R.string.crash_logs),

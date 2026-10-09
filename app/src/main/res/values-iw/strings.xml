@@ -36,4 +36,21 @@
     <string name="copy_log">העתק דוח</string>
     <string name="crash_detected">סקוליקס נסגרה באופן בלתי צפוי</string>
     <string name="crash_tap_details">לחץ לצפייה בפרטי הקריסה</string>
+    <string name="attendance_portions_title">שיטת המנות</string>
+    <string name="attendance_portions_desc">חישוב מנות היעדרות והשפעה על הציון</string>
+    <string name="attendance_view_events">אירועים</string>
+    <string name="attendance_view_portions">חשבון מנות</string>
+    <string name="portions_school_table">טבלת מנות</string>
+    <string name="portions_settings">הגדרות</string>
+    <string name="portions_bonus">בונוס</string>
+    <string name="portions_neutral">ללא שינוי</string>
+    <string name="portions_deduction">הפחתה</string>
+    <string name="portions_failing">ציון שלילי</string>
+    <string name="weekly_hours">שעות שבועיות</string>
+    <string name="unjustified_absences">חיסורים לא מוצדקים</string>
+    <string name="justified_absences">חיסורים מוצדקים</string>
+    <string name="latenesses">איחורים</string>
+    <string name="portions_count">מנות</string>
+    <string name="edit_weekly_hours">עריכת שעות שבועיות</string>
+    <string name="restore_defaults">שחזר הגדרות ברירת מחדל</string>
 </resources>

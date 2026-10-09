@@ -17,6 +17,7 @@ import com.feldman.motion.MotionScaffold
 import com.feldman.scholix.pages.AppearanceSettingsPage
 import com.feldman.scholix.pages.CrashLogsPage
 import com.feldman.scholix.pages.NavigationSettingsPage
+import com.feldman.scholix.pages.PortionsSettingsPage
 import com.feldman.scholix.pages.AddPlatformSheet
 import com.feldman.scholix.pages.AttendancePage
 import com.feldman.scholix.pages.EditProviderSheet
@@ -177,7 +178,7 @@ sealed class AppDest : MotionDest {
             searchQuery: String,
             onFabAction: ((() -> Unit) -> Unit) -> Unit
         ) {
-            AttendancePage(modifier = Modifier.fillMaxSize())
+            AttendancePage(modifier = Modifier.fillMaxSize(), onNavigate = onNavigate)
         }
     }
 
@@ -441,6 +442,7 @@ sealed class AppDest : MotionDest {
                 onOpenAppearance = { onNavigate(Appearance) },
                 onOpenNavigation = { onNavigate(NavigationSettings) },
                 onOpenCrashLogs = { onNavigate(CrashLogs) },
+                onOpenPortions = { onNavigate(PortionsSettings) },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -469,6 +471,19 @@ sealed class AppDest : MotionDest {
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             CrashLogsPage(onBack)
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data object PortionsSettings : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Portions"
+        @IgnoredOnParcel @Transient override val parent: MotionDest = Settings
+        @IgnoredOnParcel @Transient override val showNavigation = false
+
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            PortionsSettingsPage(onBack)
         }
     }
 
