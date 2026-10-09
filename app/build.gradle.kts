@@ -134,6 +134,7 @@ dependencies {
     implementation(libs.navigation.compose)
     implementation(libs.jsoup)
     implementation("com.google.android.gms:play-services-auth-api-phone:18.2.0")
+    implementation("com.google.android.gms:play-services-auth:22.0.0")
 
     // Tests
     testImplementation(libs.junit)

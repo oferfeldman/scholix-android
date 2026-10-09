@@ -234,8 +234,9 @@ private fun MessageCard(
 fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
     val state = LocalAppState.current
     val vm = requireNotNull(state.messagesViewModel)
-    val providers = state.platforms.filterIsInstance<WebtopPlatform>()
-    val selecting = vm.selecting
+    val providers = state.platforms.filter { it is WebtopPlatform || it is com.feldman.scholix.api.platforms.GoogleClassroomPlatform }
+    val classroom = vm.classroom()
+    val selecting = vm.selecting && classroom == null
     var providerExpanded by rememberSaveable { mutableStateOf(false) }
     var searchVisible by rememberSaveable { mutableStateOf(false) }
     var selected by rememberSaveable { mutableStateOf(listOf<String>()) }
@@ -253,7 +254,7 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
         Item { Spacer(Modifier.height(TopBarSpacing())) }
         if (providers.isEmpty()) {
             Section {
-                PageItem(title = "Connect Webtop", description = "Add a Webtop account to read and send messages.", icon = painterResource(R.drawable.ic_webtop), onClick = { onNavigate(AppDest.Platforms) })
+                PageItem(title = "Connect a provider", description = "Add Webtop for messages or Google Classroom for announcements.", icon = painterResource(R.drawable.ic_webtop), onClick = { onNavigate(AppDest.Platforms) })
             }
         } else {
             if (providers.size > 1) Item(modifier = Modifier.padding(bottom = 8.dp)) {
@@ -263,14 +264,16 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
             Item(modifier = Modifier.padding(vertical = 8.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) {
-                        ChipPicker(label = "Mailbox", options = MailboxFolder.entries.map { it.title }, selected = vm.folder.title,
+                        if (classroom != null) Text("Class announcements", style = MaterialTheme.typography.titleMedium)
+                        else ChipPicker(label = "Mailbox", options = MailboxFolder.entries.map { it.title }, selected = vm.folder.title,
                             onSelectedChange = { title -> vm.selectFolder(MailboxFolder.entries.first { it.title == title }) })
                     }
-                    MailIconAction(MotionSymbols.ic_edit, "New message", vm.permissions[vm.providerId]?.optBoolean("isAllowedToWriteMessages") == true, primary = true) {
+                    if (classroom == null) MailIconAction(MotionSymbols.ic_edit, "New message", vm.permissions[vm.providerId]?.optBoolean("isAllowedToWriteMessages") == true, primary = true) {
                         onNavigate(AppDest.ComposeMessage(vm.providerId, vm.newDraft(vm.providerId)))
                     }
                     MailIconAction(MotionSymbols.ic_search, "Search messages") { searchVisible = !searchVisible; if (!searchVisible) vm.query = "" }
-                    MailIconAction(MotionSymbols.ic_more_vert, "Mailbox options") { onNavigate(AppDest.MessageTools(vm.providerId)) }
+                    if (classroom == null) MailIconAction(MotionSymbols.ic_more_vert, "Mailbox options") { onNavigate(AppDest.MessageTools(vm.providerId)) }
+                    else MailIconAction(MotionSymbols.ic_refresh, "Refresh announcements") { vm.refresh() }
                 }
             }
             if (searchVisible || vm.query.isNotBlank()) Item(modifier = Modifier.padding(bottom = 8.dp)) {
@@ -405,6 +408,10 @@ fun MessageToolsPage(providerId: String, onNavigate: MotionNavigator, onBack: ()
 @Composable
 fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavigator, onBack: () -> Unit) {
     val vm = requireNotNull(LocalAppState.current.messagesViewModel)
+    vm.classroom(destination.providerId)?.let { provider ->
+        com.feldman.scholix.classroom.ClassroomAnnouncementPage(provider, destination.messageId, onBack)
+        return
+    }
     val context = LocalContext.current
     val folder = MailboxFolder.valueOf(destination.folder)
     val key = "${destination.providerId}:${destination.messageId}"

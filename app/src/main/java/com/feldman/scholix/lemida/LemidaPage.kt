@@ -39,12 +39,25 @@ import java.util.Date
 fun LemidaPage(searchQuery: String = "") {
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
-    LemidaPageContent(repo, searchQuery)
+    val providers = com.feldman.scholix.LocalAppState.current.platforms
+        .filterIsInstance<com.feldman.scholix.api.platforms.GoogleClassroomPlatform>()
+    var providerId by rememberSaveable { mutableStateOf(if (repo.lastSync() == 0L) providers.firstOrNull()?.id ?: "lemida" else "lemida") }
+    val selected = providers.firstOrNull { it.id == providerId }
+    val providerPicker: @Composable () -> Unit = {
+        if (providers.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            com.feldman.scholix.ui.components.ChipPicker(label = "Provider",
+                options = listOf("Lemida") + providers.map { "Classroom · ${it.getUsername()}" },
+                selected = selected?.let { "Classroom · ${it.getUsername()}" } ?: "Lemida",
+                onSelectedChange = { label -> providerId = providers.firstOrNull { "Classroom · ${it.getUsername()}" == label }?.id ?: "lemida" })
+        }
+    }
+    if (selected == null) LemidaPageContent(repo, searchQuery, providerPicker)
+    else com.feldman.scholix.classroom.ClassroomHomeworkPage(selected, searchQuery, providerPicker)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "") {
+internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "", providerPicker: (@Composable () -> Unit)? = null) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val syncing by repo.syncing.collectAsStateWithLifecycle()
@@ -109,6 +122,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "")
             }
         }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer))
     }) {
+        if (providerPicker != null) Item { providerPicker() }
         Item {
             LemidaHomeworkFilters(
                 count = visible.size, updated = updated, courses = courses,

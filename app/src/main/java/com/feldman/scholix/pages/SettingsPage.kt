@@ -355,6 +355,9 @@ fun AddPlatformSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val classroomLogin = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (it.resultCode == Activity.RESULT_OK) { onAdded(); onClose() }
+    }
     var selectedPlatform by remember { mutableStateOf<PlatformInfo?>(null) }
     var inbarLogin by remember { mutableStateOf<InbarPlatform?>(null) }
     val savedInbar = remember(selectedPlatform) {
@@ -602,6 +605,10 @@ fun AddPlatformSheet(
             ProviderPickerList(
                 providers = platformOptions,
                 onSelect = { option ->
+                    if (option.name == "Google Classroom") {
+                        classroomLogin.launch(Intent(context, com.feldman.scholix.classroom.ClassroomLoginActivity::class.java))
+                        return@ProviderPickerList
+                    }
                     selectedPlatform = option
                     val draft = option.factory()
                     loginFields = draft.getLoginFields().apply {
@@ -681,6 +688,9 @@ fun EditProviderSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val classroomLogin = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (it.resultCode == Activity.RESULT_OK) { onChanged(); onClose() }
+    }
     val saveMutex = remember { Mutex() }
     val providerInfo = remember(provider.javaClass.name) {
         platformOptions.associateBy { it.factory()::class.java.name }[provider.javaClass.name]
@@ -1010,12 +1020,13 @@ fun EditProviderSheet(
 
         val currentMethod = (provider as? WebtopPlatform)?.let { webtopLoginMethod.value }
         val savedMethod = (provider as? WebtopPlatform)?.loginMethod
-        val credsChanged = if (provider is InbarPlatform)
+        val credsChanged = if (provider is com.feldman.scholix.api.platforms.GoogleClassroomPlatform) false
+        else if (provider is InbarPlatform)
             loginFields.getValue("id").orEmpty().trim() != provider.getUsername() ||
                 loginFields.getValue("mobile").orEmpty().trim() != provider.mobile
         else user != provider.getUsername() || pass != provider.getPassword()
 
-        if (!credsChanged && provider.isLoggedIn()) {
+        if (!credsChanged && (provider.isLoggedIn() || provider is com.feldman.scholix.api.platforms.GoogleClassroomPlatform)) {
             scope.launch {
                 var dismissing = false
                 try {
@@ -1175,6 +1186,14 @@ fun EditProviderSheet(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
+                if (provider is com.feldman.scholix.api.platforms.GoogleClassroomPlatform) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(provider.getUsername())
+                    MotionButton(text = "Reconnect Google Classroom", onClick = {
+                        classroomLogin.launch(Intent(context, com.feldman.scholix.classroom.ClassroomLoginActivity::class.java)
+                            .putExtra("email", provider.getUsername()))
+                    })
+                }
             }
         }
 

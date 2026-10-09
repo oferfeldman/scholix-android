@@ -17,6 +17,7 @@ import com.feldman.motion.MotionSymbols
 import com.feldman.scholix.R
 import com.feldman.scholix.api.platforms.DemoPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.api.platforms.GoogleClassroomPlatform
 import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
@@ -38,6 +39,7 @@ data class ProviderCourseOverrides(
 )
 
 val platformOptions = listOf(
+    PlatformInfo("Google Classroom", R.drawable.ic_docs, iconSymbol = MotionSymbols.ic_school) { GoogleClassroomPlatform() },
     PlatformInfo("Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
     PlatformInfo("Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
     PlatformInfo("Inbar (Bar-Ilan)", R.drawable.ic_bar_ilan) { InbarPlatform() },
@@ -138,6 +140,7 @@ object PlatformStorage {
 
                     val method = cls.getMethod("fromJson", JSONObject::class.java)
                     val p = method.invoke(null, obj) as Platform
+                    if (p is GoogleClassroomPlatform) p.attach(context)
                     platforms.add(p)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error deserializing platform JSON at index $i", e)
@@ -156,6 +159,8 @@ object PlatformStorage {
             platforms.removeAll { existing ->
                 existing.id == np.id || (
                     existing is WebtopPlatform && np is WebtopPlatform
+                ) || (
+                    existing is GoogleClassroomPlatform && np is GoogleClassroomPlatform && existing.getUsername() == np.getUsername()
                 )
             }
             platforms.add(np)

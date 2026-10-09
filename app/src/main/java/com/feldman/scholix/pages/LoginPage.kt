@@ -51,6 +51,7 @@ import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.MashovSchool
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.classroom.ClassroomLoginView
 import com.feldman.scholix.ui.HiddenMoeLogin
 import com.feldman.scholix.ui.HiddenInbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
@@ -76,7 +77,6 @@ fun LoginPage(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-
 
     var selectedPlatform by remember { mutableStateOf<PlatformInfo?>(null) }
     var loginFields by remember { mutableStateOf<LoginFields?>(null) }
@@ -128,10 +128,12 @@ fun LoginPage(
                     providers = platformOptions,
                     onSelect = { option ->
                         selectedPlatform = option
-                        val draft = option.factory()
-                        loginFields = draft.getLoginFields().apply {
-                            if (draft is InbarPlatform) PlatformStorage.loadPlatforms(context)
-                                .filterIsInstance<InbarPlatform>().lastOrNull()?.let { loadFrom(it) }
+                        if (option.name != "Google Classroom") {
+                            val draft = option.factory()
+                            loginFields = draft.getLoginFields().apply {
+                                if (draft is InbarPlatform) PlatformStorage.loadPlatforms(context)
+                                    .filterIsInstance<InbarPlatform>().lastOrNull()?.let { loadFrom(it) }
+                            }
                         }
                         errorMessage = null
                     }
@@ -139,7 +141,7 @@ fun LoginPage(
             }
         }
 
-        // ─── Inner Login Page ──────────────────────────────
+        // ─── Inner Login Page ────────────────────────────
         AnimatedVisibility(visible = showLoginPage && inbarLogin == null, enter = fadeIn(), exit = fadeOut()) {
             selectedPlatform?.let { platform ->
                 val fields = loginFields ?: platform.factory().getLoginFields()
@@ -170,7 +172,7 @@ fun LoginPage(
                             )
                         }
 
-                        // 🔹 Centered title text
+                        // Centered title text
                         Text(
                             text = platform.name,
                             style = MaterialTheme.typography.headlineSmall,
@@ -179,144 +181,153 @@ fun LoginPage(
                         )
                     }
 
-                    // Webtop supports two ways in: username/password or the
-                    // Ministry-of-Education SSO. Offer the choice here.
-                    if (isWebtop) {
-                        WebtopLoginMethodPicker(
-                            state = loginMethod,
-                            onSelectedChange = { errorMessage = null }
+                    if (platform.name == "Google Classroom") {
+                        ClassroomLoginView(
+                            onSuccess = onLoginSuccess,
+                            onCancel = {
+                                selectedPlatform = null
+                                errorMessage = null
+                            }
                         )
-                        Spacer(Modifier.height(16.dp))
-                    }
+                    } else {
+                        // Webtop supports two ways in: username/password or the
+                        // Ministry-of-Education SSO. Offer the choice here.
+                        if (isWebtop) {
+                            WebtopLoginMethodPicker(
+                                state = loginMethod,
+                                onSelectedChange = { errorMessage = null }
+                            )
+                            Spacer(Modifier.height(16.dp))
+                        }
 
-                    if (useMoeLogin) {
-                        // MOE sign-in: same fields, but these are the Ministry of
-                        // Education credentials; the SSO uses HTTP requests.
-                        Text(
-                            text = "Enter your Ministry of Education username and " +
-                                "password. Signing in happens in the background.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(16.dp))
-                    }
-                    run {
-                    DynamicLoginFields(
-                        fields = fields,
-                        onFieldsChanged = { loginFields = it },
-                        isLoading = isLoading,
-                        errorMessage = errorMessage,
-                        onSubmit = {
-                            val missing = fields.getFields().any { it.value.isNullOrBlank() }
-                            if (missing) {
-                                errorMessage = "Please fill in all fields"
-                                return@DynamicLoginFields
-                            }
-
-                            isLoading = true
-                            errorMessage = null
-
-                            if (platform.name == "Inbar (Bar-Ilan)") {
-                                inbarLogin = (savedInbar?.forSmsLogin() ?: InbarPlatform(fields)).apply {
-                                    applyLoginFields(fields)
-                                }
-                                return@DynamicLoginFields
-                            }
-
-                            if (isPortal) {
-                                // Relayed to the MOE page off-screen; no browser UI.
-                                portalCreds = Pair(
-                                    fields.getValue("username").orEmpty(),
-                                    fields.getValue("password").orEmpty()
-                                )
-                                return@DynamicLoginFields
-                            }
-
-                            // Read the picker's state here rather than the value
-                            // captured when this lambda was built: a snapshot can go
-                            // stale and send MOE credentials down the Webtop password
-                            // path, which fails as "invalid credentials".
-                            if (isWebtop && loginMethod.value == "moe") {
-                                webtopMoeCreds = Pair(
-                                    fields.getValue("username").orEmpty(),
-                                    fields.getValue("password").orEmpty()
-                                )
-                                return@DynamicLoginFields
-                            }
-
-                            scope.launch {
-                                try {
-                                    val created = withContext(Dispatchers.IO) {
-                                        val info = selectedPlatform!!
-
-                                        // Try to call constructor(LoginFields)
-                                        val platformClass = info.factory()::class.java
-                                        val constructor = platformClass.constructors.find { ctor ->
-                                            ctor.parameterTypes.size == 1 && ctor.parameterTypes[0] == LoginFields::class.java
-                                        }
-
-                                        val instance = if (constructor != null) {
-                                            // Platform supports direct loginFields constructor (e.g., WebtopPlatform)
-                                            constructor.newInstance(fields) as Platform
-                                        } else {
-                                            // Fall back: create a blank one, then apply login fields
-                                            info.factory().apply {
-                                                applyLoginFields(fields)
-                                            }
-                                        }
-
-                                        instance
+                        if (useMoeLogin) {
+                            // MOE sign-in: same fields, but these are the Ministry of
+                            // Education credentials; the SSO uses HTTP requests.
+                            Text(
+                                text = "Enter your Ministry of Education username and " +
+                                    "password. Signing in happens in the background.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(16.dp))
+                        }
+                        run {
+                            DynamicLoginFields(
+                                fields = fields,
+                                onFieldsChanged = { loginFields = it },
+                                isLoading = isLoading,
+                                errorMessage = errorMessage,
+                                onSubmit = {
+                                    val missing = fields.getFields().any { it.value.isNullOrBlank() }
+                                    if (missing) {
+                                        errorMessage = "Please fill in all fields"
+                                        return@DynamicLoginFields
                                     }
 
-                                    val ok = withContext(Dispatchers.IO) {
-                                        created.isLoggedIn() ||
-                                            (created.refreshCookies() && created.isLoggedIn())
-                                    }
-                                    if (ok) {
-                                        withContext(Dispatchers.IO) {
-                                            PlatformStorage.addPlatforms(context, listOf(created))
-                                        }
+                                    isLoading = true
+                                    errorMessage = null
 
+                                    if (platform.name == "Inbar (Bar-Ilan)") {
+                                        inbarLogin = (savedInbar?.forSmsLogin() ?: InbarPlatform(fields)).apply {
+                                            applyLoginFields(fields)
+                                        }
+                                        return@DynamicLoginFields
+                                    }
+
+                                    if (isPortal) {
+                                        // Relayed to the MOE page off-screen; no browser UI.
+                                        portalCreds = Pair(
+                                            fields.getValue("username").orEmpty(),
+                                            fields.getValue("password").orEmpty()
+                                        )
+                                        return@DynamicLoginFields
+                                    }
+
+                                    // Read the picker's state here rather than the value
+                                    // captured when this lambda was built: a snapshot can go
+                                    // stale and send MOE credentials down the Webtop password
+                                    // path, which fails as "invalid credentials".
+                                    if (isWebtop && loginMethod.value == "moe") {
+                                        webtopMoeCreds = Pair(
+                                            fields.getValue("username").orEmpty(),
+                                            fields.getValue("password").orEmpty()
+                                        )
+                                        return@DynamicLoginFields
+                                    }
+
+                                    scope.launch {
                                         try {
-                                            val credentialManager = CredentialManager.create(context)
+                                            val created = withContext(Dispatchers.IO) {
+                                                val info = selectedPlatform!!
 
-                                            val username = fields.getValue("username") ?: ""
-                                            val password = fields.getValue("password") ?: ""
+                                                // Try to call constructor(LoginFields)
+                                                val platformClass = info.factory()::class.java
+                                                val constructor = platformClass.constructors.find { ctor ->
+                                                    ctor.parameterTypes.size == 1 && ctor.parameterTypes[0] == LoginFields::class.java
+                                                }
 
-                                            if (username.isNotBlank() && password.isNotBlank()) {
-                                                val request = CreatePasswordRequest(username, password)
-                                                scope.launch {
-                                                    try {
-                                                        credentialManager.createCredential(
-                                                            request = request,
-                                                            context = context
-                                                        )
-                                                    } catch (e: Exception) {
-                                                        e.printStackTrace()
+                                                val instance = if (constructor != null) {
+                                                    // Platform supports direct loginFields constructor (e.g., WebtopPlatform)
+                                                    constructor.newInstance(fields) as Platform
+                                                } else {
+                                                    // Fall back: create a blank one, then apply login fields
+                                                    info.factory().apply {
+                                                        applyLoginFields(fields)
                                                     }
                                                 }
+
+                                                instance
                                             }
 
-                                            onLoginSuccess()
+                                            val ok = withContext(Dispatchers.IO) {
+                                                created.isLoggedIn() ||
+                                                    (created.refreshCookies() && created.isLoggedIn())
+                                            }
+                                            if (ok) {
+                                                withContext(Dispatchers.IO) {
+                                                    PlatformStorage.addPlatforms(context, listOf(created))
+                                                }
+
+                                                try {
+                                                    val credentialManager = CredentialManager.create(context)
+
+                                                    val username = fields.getValue("username") ?: ""
+                                                    val password = fields.getValue("password") ?: ""
+
+                                                    if (username.isNotBlank() && password.isNotBlank()) {
+                                                        val request = CreatePasswordRequest(username, password)
+                                                        scope.launch {
+                                                            try {
+                                                                credentialManager.createCredential(
+                                                                    request = request,
+                                                                    context = context
+                                                                )
+                                                            } catch (e: Exception) {
+                                                                e.printStackTrace()
+                                                            }
+                                                        }
+                                                    }
+
+                                                    onLoginSuccess()
+
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                }
+
+                                                onLoginSuccess()
+                                            }
+                                            else errorMessage = "Invalid credentials"
 
                                         } catch (e: Exception) {
-                                            e.printStackTrace()
+                                            errorMessage = "Login failed: ${e.localizedMessage}"
+                                        } finally {
+                                            isLoading = false
                                         }
-
-                                        onLoginSuccess()
                                     }
-                                    else errorMessage = "Invalid credentials"
-
-                                } catch (e: Exception) {
-                                    errorMessage = "Login failed: ${e.localizedMessage}"
-                                } finally {
-                                    isLoading = false
-                                }
-                            }
-                        },
-                        buttonText = "Add",
-
-                    )
+                                },
+                                buttonText = "Add",
+                            )
+                        }
                     }
                 }
             }
@@ -490,7 +501,6 @@ fun DynamicLoginFields(
                     keyboardOptions = KeyboardOptions.Default.copy(
                         imeAction = if (field.type == Type.Password) ImeAction.Done else ImeAction.Next
                     ),
-
                 )
             }
         }

@@ -29,8 +29,10 @@ fun ChipPicker(
         labelPosition = MotionDropdownLabelPosition.Inside,
         direction = if (isMostlyRtl(selected)) MotionDropdownDirection.Rtl else MotionDropdownDirection.Ltr,
         colors = MotionDropdownDefaults.colors(
+            expandedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
             expandedTextColor = MaterialTheme.colorScheme.onTertiaryContainer,
             expandedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer,
+            expandedLeadingIconColor = MaterialTheme.colorScheme.onTertiaryContainer,
             expandedTrailingIconColor = MaterialTheme.colorScheme.onTertiaryContainer,
             menuContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
             menuItemTextColor = MaterialTheme.colorScheme.onTertiaryContainer,

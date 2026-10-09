@@ -27,7 +27,8 @@ import java.io.IOException
 import java.util.UUID
 
 class MessagesViewModel(application: Application) : AndroidViewModel(application) {
-    private var providers = emptyList<WebtopPlatform>()
+    private var providers = emptyList<Platform>()
+    fun classroom(id: String = providerId) = providers.firstOrNull { it.id == id } as? GoogleClassroomPlatform
     private val storage = application.getSharedPreferences("message_drafts", Context.MODE_PRIVATE)
     private var listJob: Job? = null
     var providerId by mutableStateOf(""); private set
@@ -51,25 +52,29 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
     val busy = mutableStateListOf<String>()
 
     fun configure(platforms: List<Platform>) {
-        providers = platforms.filterIsInstance<WebtopPlatform>()
+        providers = platforms.filter { it is WebtopPlatform || it is GoogleClassroomPlatform }
         if (providers.none { it.id == providerId }) {
             providerId = providers.firstOrNull()?.id.orEmpty()
             messages = emptyList()
         }
     }
 
-    fun mailbox(id: String = providerId): WebtopMailbox = providers.firstOrNull { it.id == id }?.mailbox
+    fun mailbox(id: String = providerId): WebtopMailbox = (providers.firstOrNull { it.id == id } as? WebtopPlatform)?.mailbox
         ?: throw IOException("Connect a Webtop provider in Settings to use messages.")
 
     fun selectProvider(id: String) {
         if (id == providerId) return
         providerId = id
         labelId = 0
+        folder = MailboxFolder.INBOX
+        unreadOnly = false
+        selecting = false
         messages = emptyList()
         initialize(id)
     }
 
     fun initialize(id: String = providerId) {
+        if (classroom(id) != null) return
         if (id.isEmpty() || (id in permissions && id in directories && id in signatures) || "init:$id" in busy) return
         action("init:$id") {
             permissions[id] = withContext(Dispatchers.IO) { mailbox(id).permissions() }
@@ -97,11 +102,16 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
             loading = true
             error = null
             try {
-                val result = withContext(Dispatchers.IO) { mailbox(id).messages(selectedFolder, next, search, selectedLabel, if (unread) false else null) }
+                val classroom = classroom(id)
+                val result = withContext(Dispatchers.IO) {
+                    if (classroom != null) classroom.getMessages(next).objects().filter {
+                        "${it.text("subject")} ${it.text("text")} ${it.text("privateName")}".contains(search, ignoreCase = true)
+                    } else mailbox(id).messages(selectedFolder, next, search, selectedLabel, if (unread) false else null)
+                }
                 messages = (if (more) messages + result else result).distinctBy { it.text("messageId") }
                 page = next
-                hasMore = result.isNotEmpty()
-                if (!more && selectedFolder in listOf(MailboxFolder.INBOX, MailboxFolder.SENT)) {
+                hasMore = classroom == null && result.isNotEmpty()
+                if (!more && classroom == null && selectedFolder in listOf(MailboxFolder.INBOX, MailboxFolder.SENT)) {
                     folders = withContext(Dispatchers.IO) { mailbox(id).folders(selectedFolder) }
                 } else if (!more) folders = emptyList()
             } catch (cancel: CancellationException) { throw cancel

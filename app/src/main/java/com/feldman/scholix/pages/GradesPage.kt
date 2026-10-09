@@ -110,7 +110,7 @@ class GradesActivity : ComponentActivity() {
 @Composable
 fun gradeColor(gradeStr: String): Color {
     val colors = MaterialTheme.colorScheme
-    val grade = gradeStr.toIntOrNull() ?: return colors.primary
+    val grade = gradeStr.toIntOrNull() ?: gradeStr.toDoubleOrNull()?.let { kotlin.math.round(it).toInt() } ?: return colors.primary
 
     // clamp the grade to 0..100
     val clamped = grade.coerceIn(0, 100)
@@ -576,7 +576,9 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                 }
             } catch (exception: Exception) {
                 Log.w("GradesPage", "Failed to load grades", exception)
-                requestError = "Cannot reach the server.\nCheck your internet connection."
+                requestError = if (requestPlatform is com.feldman.scholix.api.platforms.GoogleClassroomPlatform)
+                    exception.localizedMessage ?: "Could not load Google Classroom grades."
+                else "Cannot reach the server.\nCheck your internet connection."
             }
 
             if (currentId == requestId) {
@@ -1084,8 +1086,12 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                                 )
                                                 Spacer(Modifier.width(16.dp))
 
+                                                val finalGradeStr = finalGrade!!.optString("grade")
+                                                val displayFinalGrade = finalGradeStr.toDoubleOrNull()?.let { d ->
+                                                    if (d % 1.0 == 0.0) d.toLong().toString() else finalGradeStr
+                                                } ?: finalGradeStr
                                                 MotionAutoSizeText(
-                                                    text = finalGrade!!.optString("grade"),
+                                                    text = displayFinalGrade,
                                                     style = MaterialTheme.typography.bodyLarge.copy(
                                                         fontFamily = if (expressiveDesign) MotionFonts.feldman(weight = 900) else null,
                                                         fontWeight = FontWeight.Black,
@@ -1172,11 +1178,15 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                             val grade = indexedGrade.value
                             val rawSubject = grade.optString("subject", "Unknown")
                             val rawName = grade.optString("name", "")
-                            val isRtl = isRtlText("$rawSubject $rawName")
+
+                            val rawTitle = if (rawName.isNotBlank()) rawName else rawSubject
+                            val rawSubtitle = if (rawName.isNotBlank() && rawSubject.isNotBlank() && rawSubject != rawName) rawSubject else null
+
+                            val isRtl = isRtlText("$rawTitle ${rawSubtitle.orEmpty()}")
 
                             val bidi = BidiFormatter.getInstance()
-                            val subject = bidi.unicodeWrap(rawSubject)
-                            val name = bidi.unicodeWrap(rawName)
+                            val title = bidi.unicodeWrap(rawTitle)
+                            val subtitle = rawSubtitle?.let { bidi.unicodeWrap(it) }
 
                             CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                                 Row(
@@ -1201,38 +1211,48 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Text(
-                                            text = subject,
+                                            text = title,
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontFamily = MotionFonts.feldman(weight = 500),
                                                 fontWeight = FontWeight.Medium
                                             ),
-                                            color = MaterialTheme.colorScheme.onSurface
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
-                                        if (rawName.isNotEmpty()) {
+                                        if (!subtitle.isNullOrBlank()) {
                                             Text(
-                                                text = name,
+                                                text = subtitle,
                                                 style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }
 
+                                    Spacer(Modifier.width(8.dp))
+
                                     val gradeStr = grade.optString("grade", "-")
+                                    val displayGrade = gradeStr.toDoubleOrNull()?.let { d ->
+                                        if (d % 1.0 == 0.0) d.toLong().toString() else gradeStr
+                                    } ?: gradeStr
 
                                     Text(
-                                        text = gradeStr,
+                                        text = displayGrade,
                                         style = MaterialTheme.typography.bodyLarge.copy(
                                             fontFamily = MotionFonts.feldman(weight = 700, width = 50f),
-                                            lineHeight = 40.sp
+                                            fontWeight = FontWeight.Bold
                                         ),
                                         color = gradeColor(gradeStr),
                                         textAlign = TextAlign.Center,
-                                        maxLines = 2,
-                                        modifier = Modifier.widthIn(max = 120.dp),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.widthIn(min = 44.dp, max = 110.dp),
                                         autoSize = TextAutoSize.StepBased(
                                             minFontSize = 10.sp,
-                                            maxFontSize = 60.sp,
-                                            stepSize = 2.sp
+                                            maxFontSize = 54.sp,
+                                            stepSize = 1.sp
                                         )
                                     )
                                 }
@@ -1271,7 +1291,7 @@ fun processGrades(gradesArray: JSONArray): Triple<List<JSONObject>, Float, JSONO
         }
 
         val g = grade.optDouble("grade", Double.NaN)
-        if (!g.isNaN() && g != 0.0) {
+        if (!g.isNaN() && (g != 0.0 || grade.has("points"))) {
             sum += g.toFloat()
             count++
         }
