@@ -1,8 +1,106 @@
+import io
+import json
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import lemida
+
+
+class ExportCommit(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.output = Path(self.directory.name) / 'live.json'
+        self.previous = '{"courses": [{"name": "מתמטיקה", "grades": "previous complete snapshot"}]}'
+        self.output.write_text(self.previous, encoding='utf-8')
+        self.args = SimpleNamespace(command='sync', course_id=[1, 2], output=self.output)
+        self.client = Mock()
+        self.client.fetch.side_effect = self.page
+
+    @staticmethod
+    def page(url):
+        if '/course/view.php' in url:
+            cid = lemida.number(url)
+            return f'''<body class="course-{cid}"><h1>Course {cid}</h1>
+                <div class="activity"><div class="activityname">
+                <a href="/mod/assign/view.php?id={cid * 11}">Exercise {cid}</a>
+                </div></div></body>'''
+        return '<main id="region-main"><div id="intro">Instructions</div><table><tr><th>Grade</th><td>95</td></tr></table></main>'
+
+    def sync(self):
+        with patch('lemida.Client', return_value=self.client), redirect_stdout(io.StringIO()):
+            return lemida.live(self.args)
+
+    def test_session_expiry_after_first_course_preserves_complete_export(self):
+        def fetch(url):
+            if url == lemida.BASE + '/course/view.php?id=2':
+                raise lemida.LoginRequired('Expired fixture session')
+            return self.page(url)
+        self.client.fetch.side_effect = fetch
+        with self.assertRaises(lemida.LoginRequired):
+            self.sync()
+        self.assertEqual(self.output.read_text(encoding='utf-8'), self.previous)
+        failed = json.loads(self.output.with_name('live.failed.json').read_text(encoding='utf-8'))
+        self.assertEqual([c['id'] for c in failed['courses']], [1])
+        self.assertEqual(failed['errors'][0]['stage'], 'session')
+        self.client.close.assert_called_once()
+
+    def test_course_failure_cannot_publish_an_incomplete_course_list(self):
+        def fetch(url):
+            if url == lemida.BASE + '/course/view.php?id=2':
+                raise RuntimeError('Course temporarily unavailable')
+            return self.page(url)
+        self.client.fetch.side_effect = fetch
+        self.assertEqual(self.sync(), 2)
+        self.assertEqual(self.output.read_text(encoding='utf-8'), self.previous)
+        failed = json.loads(self.output.with_name('live.failed.json').read_text(encoding='utf-8'))
+        self.assertEqual(failed['errors'][0]['stage'], 'course')
+        self.client.close.assert_called_once()
+
+    def test_failed_grade_or_homework_read_preserves_previous_details(self):
+        for failed_url, stage in (
+            (lemida.BASE + '/grade/report/user/index.php?id=2', 'grades'),
+            (lemida.BASE + '/mod/assign/view.php?id=22', 'activity'),
+        ):
+            with self.subTest(stage=stage):
+                def fetch(url):
+                    if url == failed_url:
+                        raise RuntimeError('Detail temporarily unavailable')
+                    return self.page(url)
+                self.client.fetch.side_effect = fetch
+                self.assertEqual(self.sync(), 2)
+                self.assertEqual(self.output.read_text(encoding='utf-8'), self.previous)
+                failed = json.loads(self.output.with_name('live.failed.json').read_text(encoding='utf-8'))
+                self.assertEqual([c['id'] for c in failed['courses']], [1, 2])
+                self.assertEqual(failed['errors'][0]['stage'], stage)
+
+    def test_complete_sync_publishes_once_after_all_course_and_detail_reads(self):
+        reads_at_write = []
+        actual_write = lemida.write_json
+        def record_write(path, data):
+            reads_at_write.append(self.client.fetch.call_count)
+            actual_write(path, data)
+        with patch('lemida.write_json', side_effect=record_write):
+            self.assertIsNone(self.sync())
+        self.assertEqual(reads_at_write, [6])
+        exported = json.loads(self.output.read_text(encoding='utf-8'))
+        self.assertEqual([c['id'] for c in exported['courses']], [1, 2])
+        self.assertEqual(exported['errors'], [])
+        self.assertEqual(exported['courses'][1]['grades']['tables'][0]['rows'], [['Grade', '95']])
+        self.assertEqual(exported['courses'][1]['homework'][0]['detail']['description'], 'Instructions')
+        self.assertFalse(self.output.with_name('live.failed.json').exists())
+        self.client.close.assert_called_once()
+
+    def test_failed_file_replace_preserves_previous_bytes_and_removes_temp(self):
+        with patch('os.replace', side_effect=OSError('Interrupted fixture publish')):
+            with self.assertRaises(OSError):
+                lemida.write_json(self.output, {'courses': []})
+        self.assertEqual(self.output.read_text(encoding='utf-8'), self.previous)
+        self.assertEqual(list(self.output.parent.iterdir()), [self.output])
 
 
 class RedirectHandling(unittest.TestCase):
@@ -109,7 +207,99 @@ class RedirectHandling(unittest.TestCase):
                 raise lemida.PlaywrightError('Target page has been closed')
 
 
+class DesktopMfaGuard(unittest.TestCase):
+    def setUp(self):
+        self.client = lemida.Client.__new__(lemida.Client)
+        self.client.args = SimpleNamespace(mfa='sms', console_sms=False, login_timeout=30)
+        self.client.page = Mock(url='https://login.microsoftonline.com/fixture')
+        self.client.authenticated = Mock(side_effect=[False, False, False, True])
+        self.alternative = Mock()
+        self.sms = Mock()
+        self.otp = Mock()
+        for control in (self.alternative, self.sms, self.otp):
+            control.count.return_value = 1
+            control.is_visible.return_value = True
+        self.sms.first = self.sms
+        self.client.page.locator.side_effect = lambda selector: {
+            '#signInAnotherWay': self.alternative,
+            '[data-value="OneWaySMS"]': self.sms,
+            '#idTxtBx_SAOTCC_OTC': self.otp,
+        }[selector]
+        self.fallback = Mock()
+        self.fallback.count.return_value = 0
+        self.fallback.first = self.fallback
+        self.client.page.get_by_role.return_value = self.fallback
+
+    def login(self):
+        with redirect_stdout(io.StringIO()):
+            self.client.login()
+
+    def test_existing_otp_screen_never_requests_another_method(self):
+        self.login()
+        self.alternative.click.assert_not_called()
+        self.sms.click.assert_not_called()
+
+    def test_observed_otp_keeps_request_guard_when_the_field_disappears(self):
+        self.otp.is_visible.side_effect = [True, False]
+        self.login()
+        self.alternative.click.assert_not_called()
+        self.sms.click.assert_not_called()
+
+    def test_lost_alternative_click_navigation_does_not_repeat_the_click(self):
+        self.otp.count.return_value = 0
+        self.sms.count.return_value = 0
+        self.alternative.click.side_effect = lemida.PlaywrightError('Execution context was destroyed')
+        self.login()
+        self.alternative.click.assert_called_once()
+
+    def test_lost_sms_click_navigation_still_requests_only_once(self):
+        self.otp.count.return_value = 0
+        self.alternative.count.return_value = 0
+        self.sms.click.side_effect = lemida.PlaywrightError('Execution context was destroyed')
+        self.login()
+        self.sms.click.assert_called_once()
+
+
 class SavedPages(unittest.TestCase):
+    def test_instructions_keep_question_numbers_and_explicit_restarts(self):
+        result = lemida.parse_detail('''<main><div id="intro"><ol start="3">
+            <li>Prove</li><li value="8">Calculate</li><li>Explain</li></ol></div></main>''')
+        self.assertEqual(result['description'], '3. Prove\n8. Calculate\n9. Explain')
+
+    def test_nested_instructions_keep_descending_numbers_and_separate_bullets(self):
+        result = lemida.parse_detail('''<main><div id="intro"><ol reversed>
+            <li>הוכיחו<ul><li>Explain</li><li>Check</li></ul>Then submit</li>
+            <li>Next</li><li>Last</li></ol></div></main>''')
+        self.assertEqual(result['description'], '3. הוכיחו\n• Explain\n• Check\nThen submit\n2. Next\n1. Last')
+
+    def test_instructions_preserve_letter_and_roman_references_without_duplicate_wrappers(self):
+        result = lemida.parse_detail('''<main><div class="activity-description"><div id="intro">
+            <ol type="A" start="26"><li>Choose<ol type="i" start="4"><li>Proof</li><li>Check</li></ol></li>
+            <li>Submit</li></ol><ol type="I" start="9"><li>Review</li></ol></div></div></main>''')
+        self.assertEqual(result['description'], 'Z. Choose\niv. Proof\nv. Check\nAA. Submit\nIX. Review')
+
+    def test_invalid_and_nonpositive_counters_keep_readable_fallbacks(self):
+        result = lemida.parse_detail('''<main><div id="intro"><ol type="a" start="invalid">
+            <li value="invalid">First</li><li value="-1">Before</li><li>Zero</li><li value=" +4tail">Fourth</li>
+            </ol><ol type="I" start="4000"><li>Large</li></ol>
+            <ol start="9223372036854775807"><li>Maximum</li><li>Following</li></ol></div></main>''')
+        self.assertEqual(result['description'],
+                         'a. First\n-1. Before\n0. Zero\nd. Fourth\n4000. Large\n'
+                         '9223372036854775807. Maximum\n9223372036854775808. Following')
+
+    def test_feedback_lists_and_fallback_instructions_keep_numbering(self):
+        result = lemida.parse_detail('''<main><p>Instructions</p><ol><li>Read</li><li>Submit</li></ol>
+            <table><tr><th>Feedback</th><td><ol start="2"><li>Fix proof</li><li>Explain</li></ol>
+            </td></tr></table></main>''')
+        self.assertEqual(result['description'], '')
+        self.assertTrue(result['text'].startswith('Instructions\n1. Read\n2. Submit\nFeedback'))
+        self.assertEqual(result['tables'][0]['rows'], [['Feedback', '2. Fix proof\n3. Explain']])
+
+    def test_unordered_lists_ignore_ordered_counter_attributes(self):
+        result = lemida.parse_detail('''<main><div id="intro"><ul start="9"><li value="12">Read</li>
+            <li>Submit</li></ul></div></main>''')
+        self.assertEqual(result['description'], '• Read\n• Submit')
+
     def test_nested_grade_tables_are_not_duplicated(self):
         result = lemida.parse_detail('''<main><table><tr><th>Feedback</th><td>Teacher summary
             <table><tr><th>Grade</th><td>95 / 100</td></tr></table></td></tr></table></main>''')

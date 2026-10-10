@@ -398,6 +398,7 @@ fun MainScreen(
             AppDest.TiktekSolution(imageUrl = ""),
             AppDest.Locker,
             AppDest.Homework,
+            AppDest.Materials,
             AppDest.Settings,
             AppDest.Platforms,
             AppDest.AddPlatform,
@@ -422,7 +423,7 @@ fun MainScreen(
     val navbarPages by remember(context) { context.navbarPagesFlow() }
         .collectAsState(initial = defaultNavbarPages)
     val navigationPages = remember(destinations) {
-        destinations.filter { it in listOf(AppDest.Grades, AppDest.Schedule, AppDest.Attendance, AppDest.Tiktek, AppDest.Settings, AppDest.Messages, AppDest.Locker, AppDest.Homework) }
+        destinations.filter { it in listOf(AppDest.Grades, AppDest.Schedule, AppDest.Attendance, AppDest.Tiktek, AppDest.Settings, AppDest.Messages, AppDest.Locker, AppDest.Homework, AppDest.Materials) }
     }
     val bottomBarDestinations = navigationPages.filter { it.label in navbarPages }.ifEmpty { listOf(AppDest.Tiktek, AppDest.Settings) }
 

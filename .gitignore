@@ -33,6 +33,7 @@ google-services.json
 Thumbs.db
 
 # Kotlin/Java build outputs
+.kotlin/
 *.class
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
