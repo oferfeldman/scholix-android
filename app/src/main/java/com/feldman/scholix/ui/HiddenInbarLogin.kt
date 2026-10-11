@@ -138,12 +138,15 @@ fun HiddenInbarLogin(
                     } == true
                     if (!started) throw IOException("SMS verification is unavailable. Please allow SMS access and try again.")
                 }
-                withContext(Dispatchers.IO) { reserveInbarSmsRequest(context, account.getUsername(), account.mobile) }
                 val startedAt = SystemClock.elapsedRealtime()
                 requestedAt.set(startedAt)
                 listening.set(true) // The receiver is registered before any SMS request; early delivery is buffered.
                 phase = "SMS request"
-                withContext(Dispatchers.IO) { account.requestSms(account.getUsername(), account.mobile) }
+                withContext(Dispatchers.IO) {
+                    account.requestSms(account.getUsername(), account.mobile) {
+                        reserveInbarSmsRequest(context, account.getUsername(), account.mobile)
+                    }
+                }
                 Log.d("InbarLogin", "SMS request completed in ${SystemClock.elapsedRealtime() - startedAt} ms")
                 saveAccount(account)
                 phase = "SMS reception"

@@ -66,6 +66,7 @@ class WebtopPlatform() : Platform {
     @Volatile
     private var cachedShotefTime: Long = 0
     private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
+    internal val messageAttachments = WebtopAttachmentDownload(cookie = { _cookies.orEmpty() })
     val mailbox: WebtopMailbox = WebtopMailbox(
         cookie = { _cookies ?: "" },
         refreshSession = { refreshCookies() },

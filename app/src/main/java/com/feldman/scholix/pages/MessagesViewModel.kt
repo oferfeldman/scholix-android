@@ -25,6 +25,7 @@ import okio.source
 import org.json.JSONObject
 import java.io.IOException
 import java.util.UUID
+import java.io.File
 
 class MessagesViewModel(application: Application) : AndroidViewModel(application) {
     private var providers = emptyList<Platform>()
@@ -61,6 +62,16 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
 
     fun mailbox(id: String = providerId): WebtopMailbox = (providers.firstOrNull { it.id == id } as? WebtopPlatform)?.mailbox
         ?: throw IOException("Connect a Webtop provider in Settings to use messages.")
+
+    internal suspend fun prepareAttachment(id: String, file: JSONObject): WebtopDownloadedAttachment {
+        val provider = providers.firstOrNull { it.id == id } as? WebtopPlatform
+            ?: throw IOException("Connect a Webtop provider in Settings to open attachments.")
+        return withContext(Dispatchers.IO) {
+            provider.messageAttachments.download(
+                File(getApplication<Application>().cacheDir, "message_attachments"), id,
+                file.text("fileUrl"), file.text("fileName"))
+        }
+    }
 
     fun selectProvider(id: String) {
         if (id == providerId) return

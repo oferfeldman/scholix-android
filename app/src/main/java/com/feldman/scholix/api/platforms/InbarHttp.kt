@@ -13,6 +13,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.io.IOException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 internal class InbarSessionExpired : IOException("Inbar session expired. Sign in again with an SMS code.")
@@ -66,7 +67,10 @@ internal class InbarHttp(
             if (request.url.scheme != "https" || request.url.host != "inbar.biu.ac.il" || request.url.port != 443) {
                 throw IOException("Inbar redirected outside its portal. Use the portal's browser sign-in.")
             }
-            client.newCall(request).execute().use { response ->
+            val response = try { client.newCall(request).execute() } catch (error: UnknownHostException) {
+                throw IOException("Cannot reach In-bar. Check your connection or try another network, then retry.", error)
+            }
+            response.use { response ->
                 if (!response.isSuccessful && response.code !in listOf(301, 302, 303, 307, 308)) {
                     throw IOException("Inbar returned HTTP ${response.code}")
                 }
@@ -103,7 +107,7 @@ internal class InbarHttp(
             allowAuthenticationRedirect = !isDataPath(page.url.encodedPath))
     }
 
-    @Synchronized fun requestSms(identity: String, phone: String) {
+    @Synchronized fun requestSms(identity: String, phone: String, beforeSubmit: () -> Unit = {}) {
         require(identity.isNotBlank() && phone.isNotBlank()) { "Enter ID/passport and registered mobile" }
         val page = get(LOGIN)
         val doc = page.document()
@@ -111,6 +115,9 @@ internal class InbarHttp(
             throw IOException("Inbar login has changed")
         }
         val button = doc.selectFirst("input[name=btnLogin]") ?: throw IOException("Inbar login button missing")
+        // Reserve the SMS window only after reaching the portal, immediately before
+        // the POST that can send an SMS. A failed initial GET must allow a retry.
+        beforeSubmit()
         val next = post(page, mapOf("edtUsername" to identity, "edtMobile" to phone, "btnLogin" to button.attr("value")))
         if (next.document().selectFirst("input[name=edtCode]") == null) throw IOException("Inbar did not accept the login. Check ID and registered mobile.")
         challenge = next

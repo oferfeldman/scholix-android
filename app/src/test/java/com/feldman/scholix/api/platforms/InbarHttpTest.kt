@@ -12,9 +12,58 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
 import java.net.URLDecoder
+import java.net.UnknownHostException
 
 /** Synthetic fixtures; no student identity, cookie, OTP or real grades are committed. */
 class InbarHttpTest {
+    @Test fun dnsFailureBeforeLoginSubmissionDoesNotReserveAnSmsWindow() {
+        val requests = mutableListOf<Request>()
+        var fail = true
+        val client = OkHttpClient.Builder().addInterceptor {
+            if (fail) { fail = false; throw UnknownHostException("inbar.biu.ac.il") }
+            it.proceed(it.request())
+        }.addInterceptor(transport(requests, login, challenge()).interceptors.single()).build()
+        val http = InbarHttp(transport = client)
+        var reservations = 0
+        val error = assertThrows(IOException::class.java) {
+            http.requestSms("synthetic-id", "synthetic-phone") { reservations++ }
+        }
+        assertEquals(0, reservations)
+        assertTrue(error.message!!.contains("Check your connection"))
+        assertTrue(error.cause is UnknownHostException)
+        http.requestSms("synthetic-id", "synthetic-phone") { reservations++ }
+        assertEquals(1, reservations)
+        assertEquals(1, requests.count { it.method == "POST" })
+    }
+
+    @Test fun smsWindowIsReservedBeforeThePostAndKeptIfItsOutcomeIsUnknown() {
+        var reservations = 0
+        var posts = 0
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            if (chain.request().method == "POST") {
+                assertEquals(1, reservations)
+                posts++
+                throw IOException("Connection interrupted after submission")
+            }
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(login.toResponseBody()).build()
+        }.build()
+        assertThrows(IOException::class.java) {
+            InbarHttp(transport = client).requestSms("synthetic-id", "synthetic-phone") { reservations++ }
+        }
+        assertEquals(1, reservations)
+        assertEquals(1, posts)
+    }
+
+    @Test fun smsCooldownRejectionDoesNotSubmitAnotherLogin() {
+        val requests = mutableListOf<Request>()
+        val http = InbarHttp(transport = transport(requests, login))
+        assertThrows(IOException::class.java) {
+            http.requestSms("synthetic-id", "synthetic-phone") { throw IOException("Wait before retrying") }
+        }
+        assertEquals(listOf("GET"), requests.map { it.method })
+    }
+
     private val login = """<form id="form1" action="/Live/Login.aspx?ReturnUrl=%2fLive%2fmain.aspx">
         <input type="hidden" name="__PageDataKey" value="login-state"><input type="hidden" name="__VIEWSTATE" value="">
         <input type="hidden" name="__EVENTVALIDATION" value="login-validation">
