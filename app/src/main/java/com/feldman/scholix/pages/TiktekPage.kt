@@ -1,5 +1,8 @@
 package com.feldman.scholix.pages
 
+import androidx.compose.foundation.layout.PaddingValues
+import com.feldman.scholix.ui.components.SettingsTopBar
+import com.feldman.motion.MotionScaffold
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -196,17 +199,21 @@ fun TiktekBooksPage(onOpenBook: (String, String, String) -> Unit) {
 
     val searchIsRtl = if (query.isBlank()) subjectUsesRtl(subject.first) else isMostlyRtl(query)
 
-    Scaffold(topBar = {
-        CenterAlignedTopAppBar(title = {
-            Text(
-                "Tiktek",
-                color = MaterialTheme.colorScheme.primary,
-                fontFamily = MotionFonts.feldman(weight = 900, width = 120f),
-                fontSize = 26.sp
-            )
-        })
-    }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
+    MotionScaffold(
+        modifier = Modifier.fillMaxSize(),
+        scrollable = false,
+        topBar = {
+            CenterAlignedTopAppBar(title = {
+                Text(
+                    "Tiktek",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontFamily = MotionFonts.feldman(weight = 900, width = 120f),
+                    fontSize = 26.sp
+                )
+            })
+        }
+    ) {
+        Column(Modifier.fillMaxSize()) {
             ChipPicker(
                 label = "Subject",
                 options = tiktekSubjects.map { it.second },
@@ -278,7 +285,6 @@ fun TiktekBooksPage(onOpenBook: (String, String, String) -> Unit) {
                     }
                 }
             }
-            Spacer(Modifier.height(180.dp))
         }
     }
 }
@@ -306,10 +312,8 @@ fun TiktekBookPage(bookId: String, bookName: String, subjectId: String, onBack: 
             }
         } catch (exception: Exception) { error = "Could not load solutions" } finally { loading = false }
     }
-    Scaffold(topBar = {
-        TopAppBar(title = { Text(bookName, maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-        })
+    MotionScaffold(modifier = Modifier.fillMaxSize(), scrollable = false, topBar = {
+        SettingsTopBar(title = bookName, onBack = onBack)
     }, bottomBar = {
         val layoutDirection = if (subjectUsesRtl(subjectId)) LayoutDirection.Rtl else LayoutDirection.Ltr
         CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
@@ -342,8 +346,8 @@ fun TiktekBookPage(bookId: String, bookName: String, subjectId: String, onBack: 
                 }
             }
         }
-    }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+    }) {
+        Column(Modifier.fillMaxSize().padding(vertical = 16.dp)) {
             when {
                 loading -> GradesLoadingIndicator(Modifier.fillMaxSize())
                 error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -351,9 +355,15 @@ fun TiktekBookPage(bookId: String, bookName: String, subjectId: String, onBack: 
                 }
                 else -> LazyColumn(Modifier.fillMaxSize().padding(top = 12.dp)) {
                     itemsIndexed(solutions, key = { _, solution -> solution.id }) { index, solution ->
-                        Card(
+                        MotionCard(
+                            position = when {
+                                solutions.size == 1 -> MotionItemPosition.Alone
+                                index == 0 -> MotionItemPosition.Start
+                                index == solutions.lastIndex -> MotionItemPosition.End
+                                else -> MotionItemPosition.Middle
+                            },
                             modifier = Modifier.fillMaxWidth(),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                            contentPadding = 0.dp
                         ) {
                             val url = "https://tiktek.com/il/tt-resources/solution-images/${solution.prefix}_${solution.bookId}/${solution.image}"
                             Column(Modifier.clickable { onOpenSolution(url) }) {
@@ -376,9 +386,12 @@ fun TiktekBookPage(bookId: String, bookName: String, subjectId: String, onBack: 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TiktekSolutionPage(imageUrl: String, onBack: () -> Unit) {
-    Scaffold(topBar = { TopAppBar(title = { Text("Solution") }, navigationIcon = {
-        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-    }) }) { padding ->
+    MotionScaffold(
+        modifier = Modifier.fillMaxSize(),
+        scrollable = false,
+        contentPadding = PaddingValues(0.dp),
+        topBar = { SettingsTopBar(title = "Solution", onBack = onBack) }
+    ) {
         var scale by remember { mutableStateOf(1f) }
         var offset by remember { mutableStateOf(Offset.Zero) }
         var containerWidth by remember { mutableStateOf(1f) }
@@ -387,7 +400,7 @@ fun TiktekSolutionPage(imageUrl: String, onBack: () -> Unit) {
         AsyncImage(
             model = imageUrl,
             contentDescription = "Solution",
-            modifier = Modifier.fillMaxSize().padding(padding).onSizeChanged {
+            modifier = Modifier.fillMaxSize().onSizeChanged {
                 containerWidth = it.width.toFloat()
                 containerHeight = it.height.toFloat()
             }.pointerInput(Unit) {

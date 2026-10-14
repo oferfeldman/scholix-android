@@ -27,35 +27,20 @@ private object PrefKeys {
     val EXPRESSIVE_DESIGN = booleanPreferencesKey("expressive_design")
     val ORIENTATION_MODE = stringPreferencesKey("orientation_mode")
     val NAVBAR_PAGES = stringSetPreferencesKey("navbar_pages")
-    val NAVBAR_V2 = booleanPreferencesKey("navbar_v2_migrated")
+    val NAVIGATION_ORDER = stringPreferencesKey("navigation_order")
 }
 
-val defaultNavbarPages = setOf("Grades", "Schedule", "Attendance", "Settings")
+val defaultNavigationOrder = listOf("Grades", "Schedule", "Attendance", "Settings", "Messages", "Homework", "Materials", "Locker", "Tiktek")
 
-fun Context.navbarPagesFlow(): Flow<Set<String>> =
+fun Context.navigationOrderFlow(): Flow<List<String>> =
     appPrefsDataStore.data.map { prefs ->
-        val saved = prefs[PrefKeys.NAVBAR_PAGES]
-        if (saved == null) {
-            defaultNavbarPages
-        } else if (prefs[PrefKeys.NAVBAR_V2] != true) {
-            val withoutTiktek = saved.filter { it != "Tiktek" }.toSet()
-            if (withoutTiktek.size > 4) {
-                withoutTiktek.take(4).toSet()
-            } else {
-                withoutTiktek.ifEmpty { defaultNavbarPages }
-            }
-        } else {
-            val clamped = saved.filter { it != "Tiktek" }.toSet()
-            if (clamped.size > 4) clamped.take(4).toSet() else clamped.ifEmpty { defaultNavbarPages }
-        }
+        val saved = prefs[PrefKeys.NAVIGATION_ORDER]?.split("|")
+            ?: defaultNavigationOrder.filter { it in (prefs[PrefKeys.NAVBAR_PAGES] ?: emptySet()) }
+        (saved + defaultNavigationOrder).distinct().filter { it in defaultNavigationOrder }
     }
 
-suspend fun Context.setNavbarPages(pages: Set<String>) {
-    require(pages.size in 1..4)
-    appPrefsDataStore.edit {
-        it[PrefKeys.NAVBAR_PAGES] = pages
-        it[PrefKeys.NAVBAR_V2] = true
-    }
+suspend fun Context.setNavigationOrder(pages: List<String>) {
+    appPrefsDataStore.edit { it[PrefKeys.NAVIGATION_ORDER] = pages.distinct().joinToString("|") }
 }
 
 fun Context.expressiveDesignFlow(): Flow<Boolean> =

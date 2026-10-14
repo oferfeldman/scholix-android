@@ -62,6 +62,10 @@ class MashovPlatform() : Platform {
     private var schoolYear: String? = currentSchoolYear()
     private var username: String? = null
     private var password: String? = null
+    var loginMethod: String = "password"
+    var mobile: String = ""
+        private set
+    private var devicePass: String? = null
     private var studentGuid: String? = null
     private var studentGrade: String? = null
     private var studentClass: String? = null
@@ -102,6 +106,8 @@ class MashovPlatform() : Platform {
     override val suportsGrades: Boolean = true
     override val supportsSchedule: Boolean = true
     override val supportsAttendance: Boolean = true
+    override val canRestoreSession: Boolean
+        get() = !devicePass.isNullOrBlank() || (loginMethod == "password" && !password.isNullOrBlank())
 
     constructor(loginFields: LoginFields) : this() {
         schoolCode = loginFields.getValue("School code")?.trim()
@@ -111,17 +117,16 @@ class MashovPlatform() : Platform {
         loggedIn = authenticate() && refreshGrades()
     }
 
-    private fun authenticate(): Boolean {
-        val code = schoolCode?.takeIf { it.isNotBlank() } ?: return false
-        val year = schoolYear?.takeIf { it.isNotBlank() } ?: return false
-        val user = username?.takeIf { it.isNotBlank() } ?: return false
-        val pass = password?.takeIf { it.isNotBlank() } ?: return false
-
-        val payload = JSONObject()
+    private fun loginPayload(secret: String? = null): JSONObject? {
+        val code = schoolCode?.takeIf { it.isNotBlank() } ?: return null
+        val year = schoolYear?.takeIf { it.isNotBlank() } ?: return null
+        val user = username?.takeIf { it.isNotBlank() } ?: return null
+        return JSONObject()
             .put("semel", code)
             .put("year", year)
             .put("username", user)
-            .put("password", pass)
+            .apply { secret?.takeIf { it.isNotBlank() }?.let { put("password", it) } }
+            .put("isPrivateDevice", true)
             .put("IsBiometric", false)
             .put("appName", MASHOV_APP_ID)
             .put("apiVersion", MASHOV_API_VERSION)
@@ -132,6 +137,40 @@ class MashovPlatform() : Platform {
             .put("deviceManufacturer", Build.MANUFACTURER)
             .put("deviceModel", Build.MODEL)
             .put("deviceVersion", Build.VERSION.RELEASE)
+    }
+
+    private fun deviceLoginPayload(): JSONObject = JSONObject()
+        .put("appName", MASHOV_APP_ID)
+        .put("apiVersion", MASHOV_API_VERSION)
+        .put("appVersion", MASHOV_API_VERSION)
+        .put("appBuild", MASHOV_API_VERSION)
+        .put("deviceUuid", "scholix-$id")
+        .put("devicePlatform", "android")
+        .put("deviceManufacturer", Build.MANUFACTURER)
+        .put("deviceModel", Build.MODEL)
+        .put("deviceVersion", Build.VERSION.RELEASE)
+
+    private fun adoptLoginResponse(body: JSONObject, csrf: String?, nextDevicePass: String?): Boolean {
+        val accessToken = body.optJSONObject("accessToken") ?: return false
+        val children = accessToken.optJSONArray("children") ?: return false
+        val child = children.optJSONObject(0) ?: return false
+        studentGuid = child.optString("childGuid").takeIf { it.isNotBlank() } ?: return false
+        studentGrade = normalizeGradeCode(child.optString("classCode"))
+        studentClass = child.optInt("classNum", -1).takeIf { it > 0 }?.toString()
+        displayName = child.optString("privateName").takeIf { it.isNotBlank() }
+            ?: accessToken.optString("displayName").takeIf { it.isNotBlank() }
+            ?: username
+        csrfToken = csrf?.takeIf { it.isNotBlank() } ?: csrfToken
+        nextDevicePass?.takeIf { it.isNotBlank() }?.let { devicePass = it }
+        loggedIn = true
+        gradesLoaded = false
+        timetableLoaded = false
+        return true
+    }
+
+    private fun loginWithSecret(secret: String, method: String): Boolean {
+        if (secret.isBlank()) return false
+        val payload = loginPayload(secret) ?: return false
 
         return try {
             val request = Request.Builder()
@@ -145,24 +184,147 @@ class MashovPlatform() : Platform {
                     Log.w(TAG, "Mashov login failed with HTTP ${response.code}")
                     return false
                 }
-
-                csrfToken = response.header("X-Csrf-Token")
                 val body = JSONObject(response.body.string())
-                val accessToken = body.optJSONObject("accessToken") ?: return false
-                val children = accessToken.optJSONArray("children") ?: return false
-                val child = children.optJSONObject(0) ?: return false
-                studentGuid = child.optString("childGuid").takeIf { it.isNotBlank() } ?: return false
-                studentGrade = normalizeGradeCode(child.optString("classCode"))
-                studentClass = child.optInt("classNum", -1).takeIf { it > 0 }?.toString()
-                displayName = child.optString("privateName").takeIf { it.isNotBlank() } ?: user
-                loggedIn = true
-                true
+                val adopted = adoptLoginResponse(
+                    body = body,
+                    csrf = response.header("X-Csrf-Token"),
+                    nextDevicePass = response.header(DEVICE_PASS_HEADER),
+                )
+                if (adopted) {
+                    loginMethod = method
+                    if (method == "sms") password = null
+                }
+                adopted
             }
         } catch (exception: Exception) {
             Log.w(TAG, "Mashov login failed: ${exception.javaClass.simpleName}")
             loggedIn = false
             false
         }
+    }
+
+    private fun authenticate(): Boolean {
+        val pass = password?.takeIf { it.isNotBlank() } ?: return false
+        return loginWithSecret(pass, "password")
+    }
+
+    /** Request Mashov's official one-time password for the configured account. */
+    @Throws(IOException::class)
+    fun requestSms(phone: String = mobile, captcha: String? = null) {
+        val semel = schoolCode?.takeIf { it.isNotBlank() }
+            ?: throw IOException("Choose a Mashov school first")
+        val user = username?.takeIf { it.isNotBlank() }
+            ?: throw IOException("Enter your Mashov username")
+        val normalizedPhone = phone.filter(Char::isDigit)
+        if (normalizedPhone.length != 10 || !normalizedPhone.startsWith("05")) {
+            throw IOException("Enter the mobile number registered with Mashov")
+        }
+        mobile = normalizedPhone
+
+        val payload = JSONObject()
+            .put("semel", semel.toIntOrNull() ?: semel)
+            .put("username", user)
+            .put("cellphone", normalizedPhone)
+            .apply { captcha?.takeIf { it.isNotBlank() }?.let { put("captcha", it) } }
+        val request = Request.Builder()
+            .url("$API/user/otp/request")
+            .header("Accept", "application/json, text/plain, */*")
+            .header("Referer", WEB_APP)
+            .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (response.isSuccessful) return
+            val body = response.body.string()
+            if (response.code == 403 && body.contains("captcha", ignoreCase = true)) {
+                throw MashovCaptchaRequired()
+            }
+            throw IOException("Mashov SMS request failed (${response.code})")
+        }
+    }
+
+    /** Mashov verifies the OTP by sending it through the normal login endpoint. */
+    @Synchronized
+    fun verifySms(code: String): Boolean {
+        val normalized = code.filter(Char::isDigit)
+        if (normalized.length !in 4..8) return false
+        val ok = loginWithSecret(normalized, "sms")
+        if (ok) {
+            password = null // One-time codes are never persisted.
+            loginMethod = "sms"
+        }
+        return ok && refreshGrades()
+    }
+
+    /** Re-establish a Mashov session using the private-device token, without another SMS. */
+    @Synchronized
+    fun restoreDeviceSession(): Boolean {
+        val pass = devicePass?.takeIf { it.isNotBlank() } ?: return false
+        return try {
+            val request = Request.Builder()
+                .url("$API/loginDevice")
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Referer", WEB_APP)
+                .header(DEVICE_PASS_HEADER, pass)
+                .post(deviceLoginPayload().toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "Mashov device login failed with HTTP ${response.code}")
+                    loggedIn = false
+                    return false
+                }
+                adoptLoginResponse(
+                    JSONObject(response.body.string()),
+                    response.header("X-Csrf-Token"),
+                    response.header(DEVICE_PASS_HEADER),
+                ) && refreshGrades()
+            }
+        } catch (exception: Exception) {
+            Log.w(TAG, "Mashov device login failed: ${exception.javaClass.simpleName}")
+            loggedIn = false
+            false
+        }
+    }
+
+    fun hasSmsLoginDetails(): Boolean = schoolCode?.isNotBlank() == true &&
+        schoolYear?.isNotBlank() == true && username?.isNotBlank() == true && mobile.isNotBlank()
+
+    fun forSmsLogin(): MashovPlatform = MashovPlatform().also { next ->
+        next.id = id
+        next.platformDisplayName = platformDisplayName
+        next.schoolCode = schoolCode
+        next.schoolYear = schoolYear
+        next.username = username
+        next.mobile = mobile
+        next.loginMethod = "sms"
+        next.devicePass = devicePass
+        next.displayName = displayName
+        next.studentGuid = studentGuid
+        next.studentGrade = studentGrade
+        next.studentClass = studentClass
+        next.courses += courses.map { JSONObject(it.toString()) }
+    }
+
+    fun getSmsLoginFields(): LoginFields = LoginFields()
+        .addField("School code", Type.Custom("schoolCode"), schoolCode,
+            getter = { (it as? MashovPlatform)?.schoolCode },
+            setter = { p, v -> (p as? MashovPlatform)?.setSchoolCode(v.orEmpty()) })
+        .addField("School year", Type.Custom("schoolYear"), schoolYear,
+            getter = { (it as? MashovPlatform)?.schoolYear },
+            setter = { p, v -> (p as? MashovPlatform)?.setSchoolYear(v.orEmpty()) })
+        .addField("Username", Type.Username, username,
+            getter = { it.getUsername() }, setter = { p, v -> p.setUsername(v.orEmpty()) })
+        .addField("Mobile", Type.Custom("mobile"), mobile,
+            getter = { (it as? MashovPlatform)?.mobile },
+            setter = { p, v -> (p as? MashovPlatform)?.setMobile(v.orEmpty()) })
+
+    fun applySmsLoginFields(fields: LoginFields) {
+        setSchoolCode(fields.getValue("School code").orEmpty())
+        setSchoolYear(fields.getValue("School year").orEmpty())
+        setUsername(fields.getValueByType(Type.Username).orEmpty())
+        setMobile(fields.getValue("Mobile").orEmpty())
+        loginMethod = "sms"
+        password = null
     }
 
     private fun refreshGrades(): Boolean {
@@ -310,6 +472,8 @@ class MashovPlatform() : Platform {
         if (studentGrade == null || studentClass == null) loggedIn = false
         if (loggedIn && refreshGrades()) return true
         loggedIn = false
+        if (!devicePass.isNullOrBlank() && restoreDeviceSession()) return true
+        if (loginMethod == "sms") return false // SMS recovery is coordinated by UI so a listener exists first.
         return refreshGrades()
     }
     override fun isLoggedIn(): Boolean = loggedIn
@@ -330,6 +494,12 @@ class MashovPlatform() : Platform {
     }
     override fun setPassword(password: String) {
         this.password = password
+        loginMethod = "password"
+        loggedIn = false
+        timetableLoaded = false
+    }
+    private fun setMobile(value: String) {
+        mobile = value.filter(Char::isDigit)
         loggedIn = false
         timetableLoaded = false
     }
@@ -607,6 +777,9 @@ class MashovPlatform() : Platform {
         .put("schoolYear", schoolYear)
         .put("username", username)
         .put("password", password)
+        .put("loginMethod", loginMethod)
+        .put("mobile", mobile)
+        .put("devicePass", devicePass)
         .put("studentGuid", studentGuid)
         .put("studentGrade", studentGrade)
         .put("studentClass", studentClass)
@@ -625,6 +798,7 @@ class MashovPlatform() : Platform {
         private const val WEB_APP = "https://web.mashov.info/students/"
         private const val MASHOV_APP_ID = "info.mashov.students"
         private const val MASHOV_API_VERSION = "3.20210425"
+        private const val DEVICE_PASS_HEADER = "devicePass"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private var schoolsCache: List<MashovSchool>? = null
 
@@ -638,6 +812,9 @@ class MashovPlatform() : Platform {
             platform.schoolYear = obj.optString("schoolYear").takeIf { it.isNotBlank() } ?: currentSchoolYear()
             platform.username = obj.optString("username").takeIf { it.isNotBlank() }
             platform.password = obj.optString("password").takeIf { it.isNotBlank() }
+            platform.loginMethod = obj.optString("loginMethod", if (platform.password.isNullOrBlank()) "sms" else "password")
+            platform.mobile = obj.optString("mobile").filter(Char::isDigit)
+            platform.devicePass = obj.optString("devicePass").takeIf { it.isNotBlank() && it != "null" }
             platform.studentGuid = obj.optString("studentGuid").takeIf { it.isNotBlank() }
             platform.studentGrade = obj.optString("studentGrade").takeIf { it.isNotBlank() }
             platform.studentClass = obj.optString("studentClass").takeIf { it.isNotBlank() }

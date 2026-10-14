@@ -17,10 +17,12 @@ import com.feldman.motion.MotionSymbols
 import com.feldman.scholix.R
 import com.feldman.scholix.api.platforms.DemoPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.api.platforms.GoogleClassroomPlatform
 import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.api.platforms.ShahafPlatform
 import java.util.Locale
 
 data class PlatformInfo(
@@ -38,12 +40,14 @@ data class ProviderCourseOverrides(
 )
 
 val platformOptions = listOf(
+    PlatformInfo("Google Classroom", R.drawable.ic_docs, iconSymbol = MotionSymbols.ic_school) { GoogleClassroomPlatform() },
     PlatformInfo("Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
     PlatformInfo("Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
     PlatformInfo("Inbar (Bar-Ilan)", R.drawable.ic_bar_ilan) { InbarPlatform() },
     PlatformInfo("Open University", R.drawable.ic_open_au) { OpenAUPlatform() as Platform },
     PlatformInfo("Mashov", R.drawable.ic_mashov) { MashovPlatform() as Platform },
     PlatformInfo("Education Portal", R.drawable.ic_moe) { StudentsPortalPlatform() as Platform },
+    PlatformInfo("Shahaf", R.drawable.ic_moe, iconSymbol = MotionSymbols.ic_school) { ShahafPlatform() },
     PlatformInfo(
         "Demo",
         R.drawable.ic_account_circle,
@@ -52,6 +56,19 @@ val platformOptions = listOf(
 )
 
 
+/** The provider's name as the provider list shows it, for messages about it. */
+fun Platform.providerName(): String = when (this) {
+    is GoogleClassroomPlatform -> "Google Classroom"
+    is WebtopPlatform -> "Webtop"
+    is InbarPlatform -> "Inbar (Bar-Ilan)"
+    is BarIlanPlatform -> "Bar-Ilan"
+    is OpenAUPlatform -> "Open University"
+    is MashovPlatform -> "Mashov"
+    is StudentsPortalPlatform -> "Education Portal"
+    is ShahafPlatform -> "Shahaf"
+    is DemoPlatform -> "Demo"
+    else -> platformDisplayName
+}
 
 object PlatformStorage {
 
@@ -150,6 +167,7 @@ object PlatformStorage {
 
                     val method = cls.getMethod("fromJson", JSONObject::class.java)
                     val p = method.invoke(null, obj) as Platform
+                    if (p is GoogleClassroomPlatform) p.attach(context)
                     platforms.add(p)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error deserializing platform JSON at index $i", e)
@@ -168,6 +186,8 @@ object PlatformStorage {
             platforms.removeAll { existing ->
                 existing.id == np.id || (
                     existing is WebtopPlatform && np is WebtopPlatform
+                ) || (
+                    existing is GoogleClassroomPlatform && np is GoogleClassroomPlatform && existing.getUsername() == np.getUsername()
                 )
             }
             platforms.add(np)
@@ -299,7 +319,8 @@ object PlatformStorage {
 
                 if (!success) {
                     Log.w("PlatformStorage", "Failed to refresh cookies for ${p.javaClass.simpleName}")
-                    return@async p.javaClass.simpleName
+                    if (p is OpenAUPlatform && !p.needsRelogin()) return@async null
+                    return@async p.providerName()
                 }
                 null
             }
@@ -497,7 +518,10 @@ object PlatformStorage {
      * Retrieves all courses across all platforms.
      */
     fun getCourses(context: Context): ArrayList<JSONObject> {
-        val platforms = loadPlatforms(context)
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val (snapshot, platforms) = synchronized(this) {
+            JSONArray(prefs.getString(KEY_PLATFORMS, "[]")) to loadPlatforms(context)
+        }
         val courses = ArrayList<JSONObject>()
 
         for ((index, platform) in platforms.withIndex()) {
@@ -511,6 +535,12 @@ object PlatformStorage {
             } catch (e: Exception) {
                 Log.e(TAG, "Error retrieving courses for platform: ${platform.javaClass.simpleName}", e)
             }
+        }
+        // Course requests can renew an expired session too; keep those cookies for the next page.
+        val refreshed = JSONArray(platforms.map { it.toJson() })
+        synchronized(this) {
+            val current = JSONArray(prefs.getString(KEY_PLATFORMS, "[]"))
+            prefs.edit { putString(KEY_PLATFORMS, mergeRefreshedPlatforms(snapshot, current, refreshed).toString()) }
         }
         return courses
     }

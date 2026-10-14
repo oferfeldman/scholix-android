@@ -1,5 +1,7 @@
 package com.feldman.scholix.lemida
 
+import com.feldman.motion.MotionDropdownMenuItem
+import com.feldman.motion.MotionDropdownMenu
 import android.Manifest
 import android.content.Intent
 import androidx.activity.compose.BackHandler
@@ -34,6 +36,7 @@ import com.feldman.scholix.ui.components.SettingsTopBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
 import java.text.DateFormat
 import java.util.Date
 
@@ -41,12 +44,25 @@ import java.util.Date
 fun LemidaPage(searchQuery: String = "") {
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
-    LemidaPageContent(repo, searchQuery)
+    val providers = com.feldman.scholix.LocalAppState.current.platforms
+        .filterIsInstance<com.feldman.scholix.api.platforms.GoogleClassroomPlatform>()
+    var providerId by rememberSaveable { mutableStateOf(providers.firstOrNull()?.id ?: "lemida") }
+    val selected = providers.firstOrNull { it.id == providerId }
+    val providerPicker: @Composable () -> Unit = {
+        if (providers.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            com.feldman.scholix.ui.components.ChipPicker(label = "Provider",
+                options = listOf("Lemida") + providers.map { "Classroom · ${it.getUsername()}" },
+                selected = selected?.let { "Classroom · ${it.getUsername()}" } ?: "Lemida",
+                onSelectedChange = { label -> providerId = providers.firstOrNull { "Classroom · ${it.getUsername()}" == label }?.id ?: "lemida" })
+        }
+    }
+    if (selected == null) LemidaPageContent(repo, searchQuery, providerPicker)
+    else com.feldman.scholix.classroom.ClassroomHomeworkPage(selected, searchQuery, providerPicker)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "") {
+internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "", providerPicker: (@Composable () -> Unit)? = null) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val syncing by repo.syncing.collectAsStateWithLifecycle()
@@ -57,15 +73,18 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "")
     val updated = snapshot.updated
     val enabled = snapshot.enabled
     val needsLogin = snapshot.needsLogin
+
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var courseFilter by rememberSaveable { mutableStateOf<Int?>(null) }
     var typeFilter by rememberSaveable { mutableStateOf("all") }
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val scope = rememberCoroutineScope()
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         // A completed sign-in may change accounts. Return to the freshly loaded list.
         if (result.resultCode == android.app.Activity.RESULT_OK) selectedId = null
+
     }
     val signInScope = rememberCoroutineScope()
     fun reconnect() {
@@ -90,6 +109,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "")
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val canRecover = withContext(Dispatchers.IO) { LemidaSignInStore(context).canRecover() } && LemidaBackgroundSignIn.available(context)
             if (repo.enabled() && (!repo.needsLogin() || canRecover) && !repo.syncing.value) LemidaSyncWorker.refresh(context)
+
         }
     }
     if (!snapshot.loaded) {
@@ -107,31 +127,34 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "")
             }
             Box {
                 IconButton(onClick = { options = true }) { Icon(Icons.Default.MoreVert, "Homework settings") }
-                DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
-                    DropdownMenuItem(text = { Text(if (LemidaSignInStore(context).enabled()) "Pause automatic sign-in" else "Resume automatic sign-in") }, onClick = {
+                MotionDropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                    MotionDropdownMenuItem(text = { Text(if (LemidaSignInStore(context).enabled()) "Pause automatic sign-in" else "Resume automatic sign-in") }, onClick = {
                         LemidaSignInStore(context).apply { setEnabled(!enabled()) }
                         options = false
                     })
-                    DropdownMenuItem(text = { Text("Automatic sign-in") }, onClick = {
+                    MotionDropdownMenuItem(text = { Text("Automatic sign-in") }, onClick = {
                         options = false
                         login.launch(Intent(context, LemidaLoginActivity::class.java).putExtra("edit_sign_in_details", true))
                     })
-                    DropdownMenuItem(text = { Text("Reconnect Lemida") }, enabled = !syncing, onClick = {
+                    MotionDropdownMenuItem(text = { Text("Reconnect Lemida") }, enabled = !syncing, onClick = {
+
                         options = false
                         reconnect()
                     })
-                    DropdownMenuItem(text = { Text("Open sign-in screen") }, onClick = {
+                    MotionDropdownMenuItem(text = { Text("Open sign-in screen") }, onClick = {
                         options = false
                         login.launch(Intent(context, LemidaLoginActivity::class.java))
                     })
-                    DropdownMenuItem(text = { Text(if (enabled) "Pause automatic updates" else "Resume automatic updates") }, onClick = {
+                    MotionDropdownMenuItem(text = { Text(if (enabled) "Pause automatic updates" else "Resume automatic updates") }, onClick = {
                         val next = !enabled; repo.setEnabled(next); options = false
                         if (next) { permission.launch(Manifest.permission.POST_NOTIFICATIONS); LemidaSyncWorker.schedule(context); LemidaSyncWorker.refresh(context, manual = true) }
+
                     })
                 }
             }
         }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer))
     }) {
+        if (providerPicker != null) Item { providerPicker() }
         Item {
             LemidaHomeworkFilters(
                 count = visible.size, updated = updated, courses = courses,

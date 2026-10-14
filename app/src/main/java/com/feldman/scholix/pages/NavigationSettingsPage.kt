@@ -1,19 +1,28 @@
 package com.feldman.scholix.pages
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import com.feldman.motion.MotionSectionDefaults
+import androidx.compose.ui.unit.dp
 import com.feldman.motion.MotionScaffold
+import com.feldman.motion.MotionSymbols
 import com.feldman.motion.isMotionDarkTheme
+import com.feldman.motion.rememberSymbolPainter
+import com.feldman.scholix.AppDest
 import com.feldman.scholix.LocalAppState
-import com.feldman.scholix.storage.defaultNavbarPages
-import com.feldman.scholix.storage.navbarPagesFlow
-import com.feldman.scholix.storage.setNavbarPages
+import com.feldman.scholix.storage.defaultNavigationOrder
+import com.feldman.scholix.storage.navigationOrderFlow
+import com.feldman.scholix.storage.setNavigationOrder
 import com.feldman.scholix.ui.components.SettingsTopBar
 import com.feldman.scholix.ui.components.SettingsCategoryColor
 import kotlinx.coroutines.launch
@@ -22,49 +31,60 @@ import kotlinx.coroutines.launch
 fun NavigationSettingsPage(onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val saved by remember(context) { context.navbarPagesFlow() }.collectAsState(initial = defaultNavbarPages)
+    val saved by remember(context) { context.navigationOrderFlow() }.collectAsState(initial = defaultNavigationOrder)
     val pages = LocalAppState.current.navigationPages
-    val selected = saved.intersect(pages.map { it.label }.toSet())
+    var order by remember(saved) { mutableStateOf(saved) }
+    val orderedPages = pages.filterNot { it == AppDest.Settings }.sortedBy { order.indexOf(it.label) } + pages.filter { it == AppDest.Settings }
     val isDark = isMotionDarkTheme()
     val categoryColor = SettingsCategoryColor.NAVIGATION.container(isDark)
     val categoryContentColor = SettingsCategoryColor.NAVIGATION.content(isDark)
+
+    fun move(label: String, adjacentLabel: String) {
+        val updated = order.toMutableList()
+        val from = updated.indexOf(label)
+        val to = updated.indexOf(adjacentLabel)
+        updated[from] = adjacentLabel
+        updated[to] = label
+        order = updated
+        scope.launch { context.setNavigationOrder(updated) }
+    }
 
     MotionScaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
             SettingsTopBar(
-                title = "Navigation",
-                onBack = onBack,
-                chromeColor = categoryColor,
-                chromeContentColor = categoryContentColor
+                title = "Navigation", onBack = onBack,
+                chromeColor = categoryColor, chromeContentColor = categoryContentColor,
             )
         }
     ) {
-        Item { Text("Choose up to four pages for the navbar. Other pages stay in More.") }
+        Item { Text("Set the page order. The selected page stays visible. Settings stays at the end; when the bar is full, an overflow page temporarily takes its slot. The rest remain in More.") }
         Section {
-            pages.forEach { page ->
-                val checked = page.label in selected
-                val isMaxSelected = selected.size >= 4 && !checked
-                val itemEnabled = if (checked) selected.size > 1 else !isMaxSelected
-                SwitchItem(
-                    key = page.label,
-                    title = page.label,
-                    icon = painterResource(page.filledIcon),
-                    checked = checked,
-                    enabled = itemEnabled,
-                    containerColor = if (isMaxSelected) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f) else null,
-                    iconStyle = MotionSectionDefaults.iconStyle(containerColor = if (isMaxSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primary, contentColor = if (isMaxSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f) else MaterialTheme.colorScheme.onPrimary),
-                    onCheckedChange = { enabled ->
-                        scope.launch {
-                            context.setNavbarPages(if (enabled) selected + page.label else selected - page.label)
+            orderedPages.forEachIndexed { index, page ->
+                Item(key = page.label) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(painterResource(page.filledIcon), null, Modifier.size(24.dp))
+                        Text(page.label, Modifier.weight(1f))
+                        IconButton(
+                            enabled = index > 0 && page != AppDest.Settings,
+                            onClick = { move(page.label, orderedPages[index - 1].label) },
+                        ) {
+                            Icon(rememberSymbolPainter(MotionSymbols.ic_arrow_upward), "Move ${page.label} up")
+                        }
+                        IconButton(
+                            enabled = index < orderedPages.lastIndex - 1,
+                            onClick = { move(page.label, orderedPages[index + 1].label) },
+                        ) {
+                            Icon(rememberSymbolPainter(MotionSymbols.ic_arrow_downward), "Move ${page.label} down")
                         }
                     }
-                )
+                }
             }
         }
         Section {
             PageItem(title = "Restore defaults", onClick = {
-                scope.launch { context.setNavbarPages(defaultNavbarPages) }
+                order = defaultNavigationOrder
+                scope.launch { context.setNavigationOrder(defaultNavigationOrder) }
             })
         }
     }

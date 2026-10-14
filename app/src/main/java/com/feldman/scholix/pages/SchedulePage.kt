@@ -5,7 +5,7 @@ import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import com.feldman.motion.MotionLazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -26,11 +27,11 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.LayoutDirection
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import com.feldman.scholix.R
 import androidx.compose.ui.text.intl.LocaleList
-import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
@@ -102,6 +103,8 @@ fun SchedulePage(
     val navigationRequested by rememberUpdatedState(inbarAccessRequested)
     fun inbarAllowed() = active && (navigationRequested || inbarRequestedByUser)
     val canAccessInbar = inbarAllowed()
+    val context = LocalContext.current
+
     val schedulePlatforms = platforms.filter { it.supportsSchedule }
     var selectedPlatformIndex by remember(schedulePlatforms.size) { mutableIntStateOf(0) }
     var platformPickerExpanded by remember { mutableStateOf(false) }
@@ -109,6 +112,23 @@ fun SchedulePage(
     val storedPlatform = schedulePlatforms.getOrNull(selectedPlatformIndex)
     val platform = storedPlatform?.let { recoveredProviders[it.id] ?: it }
     val scheduleInfo = platform?.getInfo()
+    if (platform is com.feldman.scholix.api.platforms.ShahafPlatform) {
+        Column(modifier.fillMaxSize()) {
+            Spacer(Modifier.height(TopBarSpacing()))
+            if (schedulePlatforms.size > 1) ProviderPickerBar(
+                providers = schedulePlatforms, selectedIndex = selectedPlatformIndex,
+                onSelected = {
+                    platformPickerExpanded = false
+                    selectedPlatformIndex = it
+                }, expanded = platformPickerExpanded,
+                onExpandedChange = { platformPickerExpanded = it },
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            if (schedulePlatforms.size > 1) Spacer(Modifier.height(8.dp))
+            ShahafPage(platform, Modifier.weight(1f))
+        }
+        return
+    }
     val includesSaturday = scheduleInfo?.optBoolean("supportsSaturdaySchedule", false) == true
     val dayNames = listOf(
         stringResource(R.string.sunday),
@@ -166,7 +186,50 @@ fun SchedulePage(
         }
     }
 
-    val context = LocalContext.current
+    var webtopView by remember(platform?.id) { mutableStateOf("Schedule") }
+    var webtopCalendarMode by remember(platform?.id) { mutableStateOf(SchoolCalendarMode.Month) }
+    var webtopCalendarItems by remember(platform?.id) { mutableStateOf(emptyList<SchoolCalendarItem>()) }
+    var webtopCalendarLoading by remember(platform?.id) { mutableStateOf(false) }
+    var webtopCalendarError by remember(platform?.id) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(platform?.id, webtopView, scheduleReloadTrigger) {
+        val webtop = platform as? WebtopPlatform ?: return@LaunchedEffect
+        if (webtopView != "Calendar") return@LaunchedEffect
+        webtopCalendarLoading = true
+        webtopCalendarError = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val today = java.time.LocalDate.now()
+                val schoolYearStart = if (today.monthValue >= 9) today.year else today.year - 1
+                val months = (0L..11L).map {
+                    java.time.YearMonth.of(schoolYearStart, 9).plusMonths(it)
+                }
+                months.flatMap { month ->
+                    val board = webtop.getEventsTestsBoard(
+                        selectedDate = month.atDay(15),
+                        selectedView = 3,
+                        loadFilters = true,
+                        studyYear = schoolYearStart + 1,
+                    )
+                    if (board.has("error")) throw IllegalStateException(board.optString("error"))
+                    if (!board.optBoolean("status", true)) throw IllegalStateException("calendar_unavailable")
+                    parseWebtopCalendarBoard(board, webtop.studentClass)
+                }.distinctBy { it.id }
+            }
+        }
+        result.onSuccess { items ->
+            webtopCalendarItems = items
+            webtopCalendarLoading = false
+        }.onFailure { throwable ->
+            webtopCalendarLoading = false
+            if (throwable.message == "login_failed" && !reloginAttempted && webtop.needsInteractiveRelogin()) {
+                reloginAttempted = true
+                webtopRelogin = webtop
+            } else {
+                webtopCalendarError = "Could not load Webtop tests and events."
+            }
+        }
+    }
     // Every provider that can supply a schedule, so the page can switch between
     // them the same way Grades switches between courses.
     // Subjects the user marked as free periods for this provider.
@@ -493,6 +556,8 @@ fun SchedulePage(
                 selectedIndex = selectedPlatformIndex,
                 onSelected = {
                     if (schedulePlatforms.getOrNull(it) is InbarPlatform) inbarRequestedByUser = true
+                    platformPickerExpanded = false
+
                     selectedPlatformIndex = it
                 },
                 expanded = platformPickerExpanded,
@@ -502,7 +567,53 @@ fun SchedulePage(
             Spacer(Modifier.height(8.dp))
         }
 
-        if (supportsAcademicSelection) Row(
+        val isWebtopCalendar = platform is WebtopPlatform && webtopView == "Calendar"
+        if (platform is WebtopPlatform) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            ) {
+                val scheduleLabel = stringResource(R.string.schedule)
+                val calendarLabel = stringResource(R.string.calendar)
+                Box(Modifier.weight(1f)) {
+                    ChipPicker(
+                        label = stringResource(R.string.view_mode),
+                        options = listOf(scheduleLabel, calendarLabel),
+                        selected = if (webtopView == "Calendar") calendarLabel else scheduleLabel,
+                        onSelectedChange = { webtopView = if (it == calendarLabel) "Calendar" else "Schedule" },
+                    )
+                }
+                if (isWebtopCalendar) {
+                    val month = stringResource(R.string.month)
+                    val week = stringResource(R.string.week)
+                    val list = stringResource(R.string.list)
+                    val modeOptions = listOf(month, week, list)
+                    val selectedMode = when (webtopCalendarMode) {
+                        SchoolCalendarMode.Month -> month
+                        SchoolCalendarMode.Week -> week
+                        SchoolCalendarMode.List -> list
+                    }
+                    Box(Modifier.weight(1f)) {
+                        ChipPicker(
+                            label = stringResource(R.string.display),
+                            options = modeOptions,
+                            selected = selectedMode,
+                            onSelectedChange = { label ->
+                                webtopCalendarMode = when (label) {
+                                    month -> SchoolCalendarMode.Month
+                                    week -> SchoolCalendarMode.Week
+                                    list -> SchoolCalendarMode.List
+                                    else -> webtopCalendarMode
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
+        if (!isWebtopCalendar && supportsAcademicSelection) Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
         ) {
@@ -520,7 +631,7 @@ fun SchedulePage(
                     })
             }
         }
-        if (supportsOriginal || supportsSelection) Row(
+        if (!isWebtopCalendar && (supportsOriginal || supportsSelection)) Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
@@ -530,7 +641,7 @@ fun SchedulePage(
                 val original = stringResource(R.string.original)
                 val updated = stringResource(R.string.updated)
                 ChipPicker(
-                    label = "Version",
+                    label = stringResource(R.string.version),
                     options = listOf(
                         original,
                         updated
@@ -569,136 +680,162 @@ fun SchedulePage(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        PrimaryTabRow(
-            selectedTabIndex = pagerState.currentPage,
-            modifier = Modifier
-                .padding(horizontal = 16.dp)
-                .fillMaxWidth(),
-            containerColor = MaterialTheme.colorScheme.background
-        ) {
-            dayNames.forEachIndexed { index, day ->
-                Tab(
-                    selected = pagerState.currentPage == index,
-                    onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
-                    selectedContentColor = MaterialTheme.colorScheme.primary,
-                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ) {
-                    Text(
-                        text = day,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Clip,
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 16.dp)
+        if (isWebtopCalendar) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+            ) {
+                when {
+                    webtopCalendarLoading && webtopCalendarItems.isEmpty() ->
+                        GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
+                    webtopCalendarError != null ->
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                webtopCalendarError.orEmpty(),
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    else -> SchoolCalendarView(
+                        items = webtopCalendarItems,
+                        mode = webtopCalendarMode,
+                        emptyMessage = "No Webtop tests or events published for this school year.",
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
             }
-        }
+        } else {
+            PrimaryTabRow(
+                selectedTabIndex = pagerState.currentPage,
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .fillMaxWidth(),
+                containerColor = MaterialTheme.colorScheme.background
+            ) {
+                dayNames.forEachIndexed { index, day ->
+                    Tab(
+                        selected = pagerState.currentPage == index,
+                        onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
+                        selectedContentColor = MaterialTheme.colorScheme.primary,
+                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        HorizontalPager(state = pagerState) { page ->
-            val rawItems = when (scheduleMode.value) {
-                ScheduleMode.Updated -> allSchedulesUpdated[page] ?: emptyList()
-                ScheduleMode.Original -> allSchedulesOriginal[page] ?: emptyList()
-            }
-            val scheduleItems = remember(rawItems, windowSubjects, weekTimesByHour, numberedPeriods) {
-                withFreePeriods(rawItems, windowSubjects, weekTimesByHour, synthesizeGaps = numberedPeriods)
-            }
-
-            val errMessage = errorMessages[page]
-            val pageFetched = allSchedulesUpdated.containsKey(page)
-
-            when {
-                errMessage == null && (!pageFetched || (isLoading && scheduleItems.isEmpty())) -> {
-                    GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
-                }
-                errMessage != null -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = errMessage,
-                            color = Color.Red,
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontWeight = FontWeight.Medium,
-                                fontSize = 18.sp
-                            )
-                        )
-                        val inbar = platform as? InbarPlatform
-                        if (inbar != null && inbar.hasSavedLoginDetails()) {
-                            TextButton(onClick = {
-                                inbarRequestedByUser = true
-                                errorMessages[page] = null
-                                isLoading = true
-                                if (canAccessInbar) inbarRelogin = inbar.forSmsLogin()
-                                else scheduleReloadTrigger++
-                            }) { Text(if (canAccessInbar) "Retry login" else "Load Inbar schedule") }
-                        }
-                        }
-                    }
-                }
-                scheduleItems.isEmpty() -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        NoScheduleState(
-                            dayName = fullDayNames[page],
-                            isToday = page == todayPage
-                        )
-                    }
-                }
-                else -> {
-                    LazyColumn(
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp)
-                            .fillMaxSize(),
                     ) {
-                        itemsIndexed(
-                            scheduleItems,
-                            key = { hourIndex, lessonsInHour ->
-                                val first = lessonsInHour.firstOrNull()
-                                "hour_${hourIndex}_${first?.let { hourOf(it) }}_${first?.optString("subject")}_${lessonsInHour.size}"
-                            }
-                        ) { hourIndex, lessonsInHour ->
-                            val firstLesson = lessonsInHour.first()
-                            val hourNum = hourOf(firstLesson)
-                            val time = lessonsInHour.firstOrNull { it.optString("time").isNotBlank() }?.optString("time").orEmpty()
+                        Text(
+                            text = day,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip,
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.padding(horizontal = 3.dp, vertical = 16.dp)
+                        )
+                    }
+                }
+            }
 
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    lessonsInHour.forEachIndexed { subIndex, item ->
-                                        key(item.optString("subject") + "_" + item.optInt("hour", subIndex) + "_" + subIndex) {
-                                            ScheduleCardConnected(
-                                                item = item,
-                                                position = if (lessonsInHour.size == 1) {
-                                                    MotionItemPosition.Alone
-                                                } else {
-                                                    when (subIndex) {
-                                                        0 -> MotionItemPosition.Start
-                                                        lessonsInHour.lastIndex -> MotionItemPosition.End
-                                                        else -> MotionItemPosition.Middle
-                                                    }
-                                                },
-                                                color = scheduleColor(item.optString("subject")),
-                                                index = hourIndex * 10 + subIndex
-                                            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            HorizontalPager(state = pagerState) { page ->
+                val rawItems = when (scheduleMode.value) {
+                    ScheduleMode.Updated -> allSchedulesUpdated[page] ?: emptyList()
+                    ScheduleMode.Original -> allSchedulesOriginal[page] ?: emptyList()
+                }
+                val scheduleItems = remember(rawItems, windowSubjects, weekTimesByHour, numberedPeriods) {
+                    withFreePeriods(rawItems, windowSubjects, weekTimesByHour, synthesizeGaps = numberedPeriods)
+                }
+
+                val errMessage = errorMessages[page]
+                val pageFetched = allSchedulesUpdated.containsKey(page)
+
+                when {
+                    errMessage == null && (!pageFetched || (isLoading && scheduleItems.isEmpty())) -> {
+                        GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
+                    }
+                    errMessage != null -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = errMessage,
+                                color = Color.Red,
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 18.sp
+                                )
+                            )
+                            val inbar = platform as? InbarPlatform
+                            if (inbar != null && inbar.hasSavedLoginDetails()) {
+                                TextButton(onClick = {
+                                    errorMessages[page] = null
+                                    isLoading = true
+                                    inbarRelogin = inbar.forSmsLogin()
+                                }) { Text("Retry login") }
+                            }
+                            }
+                        }
+                    }
+                    scheduleItems.isEmpty() -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            NoScheduleState(
+                                dayName = fullDayNames[page],
+                                isToday = page == todayPage
+                            )
+                        }
+                    }
+                    else -> {
+                        MotionLazyColumn(
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp)
+                                .fillMaxSize(),
+                        ) {
+                            itemsIndexed(
+                                scheduleItems,
+                                key = { hourIndex, lessonsInHour ->
+                                    val first = lessonsInHour.firstOrNull()
+                                    "hour_${hourIndex}_${first?.let { hourOf(it) }}_${first?.optString("subject")}_${lessonsInHour.size}"
+                                }
+                            ) { hourIndex, lessonsInHour ->
+                                val firstLesson = lessonsInHour.first()
+                                val hourNum = hourOf(firstLesson)
+                                val time = lessonsInHour.firstOrNull { it.optString("time").isNotBlank() }?.optString("time").orEmpty()
+
+                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            lessonsInHour.forEachIndexed { subIndex, item ->
+                                                key(item.optString("subject") + "_" + item.optInt("hour", subIndex) + "_" + subIndex) {
+                                                    ScheduleCardConnected(
+                                                        item = item,
+                                                        position = if (lessonsInHour.size == 1) {
+                                                            MotionItemPosition.Alone
+                                                        } else {
+                                                            when (subIndex) {
+                                                                0 -> MotionItemPosition.Start
+                                                                lessonsInHour.lastIndex -> MotionItemPosition.End
+                                                                else -> MotionItemPosition.Middle
+                                                            }
+                                                        },
+                                                        color = scheduleColor(item.optString("subject")),
+                                                        index = hourIndex * 10 + subIndex
+                                                    )
+                                                }
+                                            }
                                         }
+
+                                        HourLabel(hour = if (numberedPeriods) hourNum else -1, time = time)
                                     }
                                 }
 
-                                HourLabel(hour = if (numberedPeriods) hourNum else -1, time = time)
+                                Spacer(Modifier.height(2.dp))
                             }
 
-                            Spacer(Modifier.height(2.dp))
-                        }
-
-                        item {
-                            Spacer(Modifier.height(180.dp))
                         }
                     }
                 }
@@ -715,6 +852,7 @@ fun ScheduleCardConnected(
     color: MotionIconBackground,
     index: Int
 ) {
+    val contentDirection = LocalLayoutDirection.current
     // A free period is drawn in the plain surface colour so it reads as a gap
     // between lessons rather than a lesson of its own.
     if (item.optBoolean(WINDOW_FLAG, false)) {
@@ -737,12 +875,14 @@ fun ScheduleCardConnected(
         containerColor = actualColor.color,
         contentPadding = 12.dp
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
 
-            val subjectRaw = item.optString("subject")
+            val sourceSubject = item.optString("subject")
+            val subjectRaw = sourceSubject
             val subjectLevel = item.optString("subjectLevel")
             val subjectFormatted = remember(subjectRaw, subjectLevel) {
                 val locale = java.util.Locale.forLanguageTag("he")
@@ -773,63 +913,66 @@ fun ScheduleCardConnected(
                 } else ""
             }
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = subjectFormatted,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Start,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        textDirection = TextDirection.ContentOrRtl,
-                        localeList = LocaleList(Locale("he"), Locale("en"))
-                    ),
-                    color = actualColor.onColor
-                )
-                if (details.isNotBlank()) {
+            CompositionLocalProvider(LocalLayoutDirection provides contentDirection) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = details,
+                        text = subjectFormatted,
                         modifier = Modifier.fillMaxWidth(),
                         textAlign = TextAlign.Start,
-                        fontSize = 14.sp,
-                        style = MaterialTheme.typography.bodyMedium.copy(
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
                             textDirection = TextDirection.ContentOrRtl,
                             localeList = LocaleList(Locale("he"), Locale("en"))
                         ),
                         color = actualColor.onColor
                     )
-                }
+                    if (details.isNotBlank()) {
+                        Text(
+                            text = details,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                            fontSize = 14.sp,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                textDirection = TextDirection.ContentOrRtl,
+                                localeList = LocaleList(Locale("he"), Locale("en"))
+                            ),
+                            color = actualColor.onColor
+                        )
+                    }
 
-                val extraText = when {
-                    changes.isNotEmpty() -> changes
-                    exams.isNotEmpty() -> exams
-                    else -> null
-                }
-                if (extraText != null) {
-                    Text(
-                        text = extraText,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Start,
-                        fontSize = 14.sp,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            textDirection = TextDirection.ContentOrRtl,
-                            localeList = LocaleList(Locale("he"), Locale("en"))
-                        ),
-                        color = actualColor.onColor
-                    )
+                    val extraText = when {
+                        changes.isNotEmpty() -> changes
+                        exams.isNotEmpty() -> exams
+                        else -> null
+                    }
+                    if (extraText != null) {
+                        Text(
+                            text = extraText,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start,
+                            fontSize = 14.sp,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                textDirection = TextDirection.ContentOrRtl,
+                                localeList = LocaleList(Locale("he"), Locale("en"))
+                            ),
+                            color = actualColor.onColor
+                        )
+                    }
                 }
             }
             Spacer(Modifier.width(12.dp))
-            SubjectIcon(
-                subject = subjectRaw,
-                assignment = if (exams.isNotEmpty()) "exam" else "",
-                containerColor = Color.White.copy(alpha = 0.36f),
-                iconColor = actualColor.onColor,
-                size = 52.dp,
-                iconSize = 30.dp,
-                polygon = scheduleIconShapes[index % scheduleIconShapes.size],
-                morphPolygon = scheduleIconShapes[(index + 3) % scheduleIconShapes.size]
-            )
+                SubjectIcon(
+                    subject = subjectRaw,
+                    assignment = if (exams.isNotEmpty() || item.optString("calendarType") == "exam") "exam" else "",
+                    containerColor = Color.White.copy(alpha = 0.36f),
+                    iconColor = actualColor.onColor,
+                    size = 52.dp,
+                    iconSize = 30.dp,
+                    polygon = scheduleIconShapes[index % scheduleIconShapes.size],
+                    morphPolygon = scheduleIconShapes[(index + 3) % scheduleIconShapes.size]
+                )
+            }
         }
     }
 }
@@ -844,7 +987,7 @@ private val scheduleIconShapes = listOf(
     MaterialShapes.Cookie12Sided
 )
 
-private fun scheduleColor(subject: String): MotionIconBackground {
+internal fun scheduleColor(subject: String): MotionIconBackground {
     val normalized = subject.trim().lowercase().filter(Char::isLetterOrDigit)
     val index = Math.floorMod(normalized.hashCode(), MotionThemeDefaults.VibrantIconBackgrounds.size)
     return MotionThemeDefaults.VibrantIconBackgrounds[index]
@@ -854,12 +997,13 @@ private fun scheduleColor(subject: String): MotionIconBackground {
 fun ScheduleCard(item: JSONObject) {
     val colors = getColorFromClass(item.optString("colorClass"))
 
-    Card(
+    MotionCard(
+        position = MotionItemPosition.Alone,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.background)
-
+        containerColor = colors.background,
+        contentPadding = 0.dp
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             val onSurface = MaterialTheme.colorScheme.onSurface
@@ -1198,6 +1342,7 @@ fun HourLabel(hour: Int, time: String = "") {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun FreePeriodCard(position: MotionItemPosition, replacedSubject: String = "") {
+    val contentDirection = LocalLayoutDirection.current
     val container = MaterialTheme.colorScheme.surfaceVariant
     val onContainer = MaterialTheme.colorScheme.onSurfaceVariant
     MotionCard(
@@ -1205,46 +1350,49 @@ fun FreePeriodCard(position: MotionItemPosition, replacedSubject: String = "") {
         containerColor = container,
         contentPadding = 12.dp
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = stringResource(R.string.free_period),
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Start,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        textDirection = TextDirection.ContentOrRtl,
-                        localeList = LocaleList(Locale("he"), Locale("en"))
-                    ),
-                    color = onContainer
-                )
-                // Second line keeps the card the same height as a lesson card.
-                Text(
-                    text = replacedSubject,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Start,
-                    fontSize = 14.sp,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        textDirection = TextDirection.ContentOrRtl,
-                        localeList = LocaleList(Locale("he"), Locale("en"))
-                    ),
-                    color = onContainer.copy(alpha = 0.7f)
-                )
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+            CompositionLocalProvider(LocalLayoutDirection provides contentDirection) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.free_period),
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Start,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            textDirection = TextDirection.ContentOrRtl,
+                            localeList = LocaleList(Locale("he"), Locale("en"))
+                        ),
+                        color = onContainer
+                    )
+                    Text(
+                        text = replacedSubject,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Start,
+                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            textDirection = TextDirection.ContentOrRtl,
+                            localeList = LocaleList(Locale("he"), Locale("en"))
+                        ),
+                        color = onContainer.copy(alpha = 0.7f)
+                    )
+                }
             }
             Spacer(Modifier.width(12.dp))
-            SubjectIcon(
-                subject = "",
-                assignment = "free",
-                painter = rememberSymbolPainter(MotionSymbols.ic_weekend, fill = 1f),
-                containerColor = onContainer.copy(alpha = 0.14f),
-                iconColor = onContainer,
-                size = 52.dp,
-                iconSize = 30.dp,
-            )
+                SubjectIcon(
+                    subject = "",
+                    assignment = "free",
+                    painter = rememberSymbolPainter(MotionSymbols.ic_weekend, fill = 1f),
+                    containerColor = onContainer.copy(alpha = 0.14f),
+                    iconColor = onContainer,
+                    size = 52.dp,
+                    iconSize = 30.dp,
+                )
+            }
         }
     }
 }

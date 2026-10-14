@@ -53,7 +53,7 @@ fun AppearanceSettingsPage(onBack: () -> Unit) {
     val dynamicColor by themeRepository.dynamicColor.collectAsState(initial = true)
     val paletteStyle by themeRepository.paletteStyle.collectAsState(initial = PaletteStyle.Vibrant)
     val motionLevel by themeRepository.motionLevel.collectAsState(initial = MotionLevel.MEDIUM)
-    val orientationMode by context.orientationModeFlow().collectAsState(initial = OrientationMode.AUTO)
+    val orientationMode by remember(context) { context.orientationModeFlow() }.collectAsState(initial = OrientationMode.AUTO)
     val expressiveDesign by themeRepository.expressiveDesign.collectAsState(initial = true)
     val useDark = isMotionDarkTheme()
     val dynamicColorSeed =

@@ -8,10 +8,11 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.onSizeChanged
@@ -51,14 +53,14 @@ import com.feldman.motion.MotionButtonState
 import com.feldman.motion.MotionDropdown
 import com.feldman.motion.MotionDropdownDefaults
 import com.feldman.motion.MotionDropdownDirection
+import com.feldman.motion.MotionDropdownFolder
 import com.feldman.motion.MotionDropdownMenuAlignment
 import com.feldman.motion.MotionDropdownTextFit
 import com.feldman.motion.MotionLazyColumn
 import com.feldman.motion.MotionSymbols
 import com.feldman.motion.MotionFonts
 import com.feldman.motion.rememberSymbolPainter
-import com.feldman.lockerapp.ui.theme.AppTheme
-import com.feldman.scholix.BottomBarSpacing
+import com.feldman.motion.MotionTheme
 import com.feldman.scholix.R
 import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.api.Platform
@@ -100,7 +102,7 @@ class GradesActivity : ComponentActivity() {
         Log.d("NAV_DEBUG", "GradesActivity started")
 
         setContent {
-            AppTheme {
+            MotionTheme {
                 GradesScreen(Modifier, emptyList())
             }
         }
@@ -110,7 +112,7 @@ class GradesActivity : ComponentActivity() {
 @Composable
 fun gradeColor(gradeStr: String): Color {
     val colors = MaterialTheme.colorScheme
-    val grade = gradeStr.toIntOrNull() ?: return colors.primary
+    val grade = gradeStr.toIntOrNull() ?: gradeStr.toDoubleOrNull()?.let { kotlin.math.round(it).toInt() } ?: return colors.primary
 
     // clamp the grade to 0..100
     val clamped = grade.coerceIn(0, 100)
@@ -180,6 +182,94 @@ private fun courseSupportingText(course: JSONObject): String =
         }
     }
 
+private sealed interface CourseDropdownEntry {
+    data class Course(val courseIndex: Int) : CourseDropdownEntry
+    data class Folder(val platformId: String, val courseIndices: List<Int>) : CourseDropdownEntry
+}
+
+private fun buildCourseDropdownEntries(courses: List<JSONObject>): List<CourseDropdownEntry> {
+    val byProvider = courses.indices.groupBy { index -> courses[index].optString("platformId") }
+    val emittedFolders = mutableSetOf<String>()
+    return buildList {
+        courses.indices.forEach { index ->
+            val platformId = courses[index].optString("platformId")
+            val providerCourses = byProvider[platformId].orEmpty()
+            if (platformId.isNotBlank() && providerCourses.size >= 3) {
+                if (emittedFolders.add(platformId)) {
+                    add(CourseDropdownEntry.Folder(platformId, providerCourses))
+                }
+            } else {
+                add(CourseDropdownEntry.Course(index))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CourseDropdownMenuRow(
+    title: String,
+    description: String,
+    selected: Boolean,
+    leadingContent: @Composable () -> Unit,
+    trailingSymbol: String? = null,
+    onClick: () -> Unit,
+) {
+    val contentColor = if (selected) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+    CompositionLocalProvider(
+        LocalLayoutDirection provides if (isRtlText(title)) LayoutDirection.Rtl else LayoutDirection.Ltr
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                )
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            leadingContent()
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    color = contentColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (description.isNotBlank()) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor.copy(alpha = 0.74f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            when {
+                selected && trailingSymbol == null -> Icon(
+                    painter = rememberSymbolPainter(MotionSymbols.ic_check),
+                    contentDescription = "Selected",
+                    tint = contentColor,
+                )
+                trailingSymbol != null -> Icon(
+                    painter = rememberSymbolPainter(trailingSymbol),
+                    contentDescription = null,
+                    tint = contentColor,
+                )
+            }
+        }
+    }
+}
+
 /**
  * The icon for a course: its own subject icon when the subject is recognisable,
  * otherwise the logo of the provider it came from -- more informative than the
@@ -206,19 +296,47 @@ private fun CoursePickerBar(
     modifier: Modifier = Modifier
 ) {
     val courseLabel = stringResource(R.string.course)
+    val menuEntries = remember(courses) { buildCourseDropdownEntries(courses) }
+    val hasFolders = remember(menuEntries) { menuEntries.any { it is CourseDropdownEntry.Folder } }
+    var openFolderPlatformId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(expanded) {
+        if (!expanded) openFolderPlatformId = null
+    }
+
+    val courseDisplayLabel: (JSONObject) -> String = { course ->
+        val name = course.optString("name").ifBlank { courseLabel }
+        val year = course.optInt("year")
+        val multipleYears = courses.filter { it.optString("name") == course.optString("name") }
+            .map { it.optInt("year") }.distinct().size > 1
+        if (year > 0 && multipleYears) "$name · $year" else name
+    }
+
+    val visibleMenuEntries = if (openFolderPlatformId == null) menuEntries else {
+        menuEntries.filterIsInstance<CourseDropdownEntry.Folder>()
+            .firstOrNull { it.platformId == openFolderPlatformId }?.courseIndices
+            .orEmpty().map { CourseDropdownEntry.Course(it) }
+    }
+    val visibleMenuLabels = if (!hasFolders) courses.map(courseDisplayLabel) else visibleMenuEntries.map { entry ->
+        when (entry) {
+            is CourseDropdownEntry.Course -> courseDisplayLabel(courses[entry.courseIndex])
+            is CourseDropdownEntry.Folder -> providersById[entry.platformId]?.getName().orEmpty()
+        }
+    } + listOfNotNull(openFolderPlatformId?.let { providersById[it]?.getName() })
+    val visibleMenuDescriptions = if (!hasFolders) courses.map(::courseSupportingText) else visibleMenuEntries.map { entry ->
+        when (entry) {
+            is CourseDropdownEntry.Course -> courseSupportingText(courses[entry.courseIndex])
+            is CourseDropdownEntry.Folder -> "${entry.courseIndices.size} courses"
+        }
+    }
+
     PickerBar(
         options = courses,
         selectedIndex = selectedIndex,
         onSelected = onSelected,
         expanded = expanded,
         onExpandedChange = onExpandedChange,
-        optionLabel = { course ->
-            val name = course.optString("name").ifBlank { courseLabel }
-            val year = course.optInt("year")
-            val multipleYears = courses.filter { it.optString("name") == course.optString("name") }
-                .map { it.optInt("year") }.distinct().size > 1
-            if (year > 0 && multipleYears) "$name · $year" else name
-        },
+        optionLabel = courseDisplayLabel,
         optionDescription = { course -> courseSupportingText(course) },
         optionKey = { course ->
             "${course.optString("platformId")}|${course.optString("courseKey")}|${course.optString("name")}"
@@ -236,6 +354,125 @@ private fun CoursePickerBar(
         previousDescription = "Previous course",
         nextDescription = "Next course",
         menuContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+        showOptionsInMenu = !hasFolders,
+        menuLabels = visibleMenuLabels,
+        menuDescriptions = visibleMenuDescriptions,
+        menuHeader = if (!hasFolders) null else {
+            {
+                MotionDropdownFolder(
+                    inFolder = openFolderPlatformId != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { inFolder ->
+                    val activeFolderId = openFolderPlatformId
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (inFolder && activeFolderId != null) {
+                            val folder = menuEntries.filterIsInstance<CourseDropdownEntry.Folder>()
+                                .firstOrNull { it.platformId == activeFolderId }
+                            val provider = providersById[activeFolderId]
+                            val providerName = provider?.getName()?.takeIf { it.isNotBlank() }
+                                ?: "Courses"
+
+                            CourseDropdownMenuRow(
+                                title = providerName,
+                                description = folder?.courseIndices?.size?.let { "$it courses" }.orEmpty(),
+                                selected = false,
+                                leadingContent = {
+                                    SubjectIcon(
+                                        subject = providerName,
+                                        assignment = "folder",
+                                        painter = provider?.let { providerPainter(it) }
+                                            ?: rememberSymbolPainter(MotionSymbols.ic_folder_open),
+                                        size = 40.dp,
+                                        iconSize = 22.dp,
+                                    )
+                                },
+                                trailingSymbol = MotionSymbols.ic_chevron_left,
+                                onClick = { openFolderPlatformId = null },
+                            )
+
+                            folder?.courseIndices.orEmpty().forEach { courseIndex ->
+                                val course = courses[courseIndex]
+                                CourseDropdownMenuRow(
+                                    title = courseDisplayLabel(course),
+                                    description = courseSupportingText(course),
+                                    selected = courseIndex == selectedIndex,
+                                    leadingContent = {
+                                        SubjectIcon(
+                                            subject = course.optString("name").ifBlank { courseLabel },
+                                            assignment = "course",
+                                            painter = courseIconPainter(course, providersById),
+                                            size = 40.dp,
+                                            iconSize = 22.dp,
+                                        )
+                                    },
+                                    onClick = {
+                                        onSelected(courseIndex)
+                                        onExpandedChange(false)
+                                    },
+                                )
+                            }
+                        } else {
+                            menuEntries.forEach { entry ->
+                                when (entry) {
+                                    is CourseDropdownEntry.Course -> {
+                                        val course = courses[entry.courseIndex]
+                                        CourseDropdownMenuRow(
+                                            title = courseDisplayLabel(course),
+                                            description = courseSupportingText(course),
+                                            selected = entry.courseIndex == selectedIndex,
+                                            leadingContent = {
+                                                SubjectIcon(
+                                                    subject = course.optString("name").ifBlank { courseLabel },
+                                                    assignment = "course",
+                                                    painter = courseIconPainter(course, providersById),
+                                                    size = 40.dp,
+                                                    iconSize = 22.dp,
+                                                )
+                                            },
+                                            onClick = {
+                                                onSelected(entry.courseIndex)
+                                                onExpandedChange(false)
+                                            },
+                                        )
+                                    }
+
+                                    is CourseDropdownEntry.Folder -> {
+                                        val provider = providersById[entry.platformId]
+                                        val providerName = provider?.getName()?.takeIf { it.isNotBlank() }
+                                            ?: "Courses"
+                                        val selectedIsInside = courses.getOrNull(selectedIndex)
+                                            ?.optString("platformId") == entry.platformId
+                                        CourseDropdownMenuRow(
+                                            title = providerName,
+                                            description = "${entry.courseIndices.size} courses",
+                                            selected = selectedIsInside,
+                                            leadingContent = {
+                                                SubjectIcon(
+                                                    subject = providerName,
+                                                    assignment = "folder",
+                                                    painter = provider?.let { providerPainter(it) }
+                                                        ?: rememberSymbolPainter(MotionSymbols.ic_folder),
+                                                    size = 40.dp,
+                                                    iconSize = 22.dp,
+                                                )
+                                            },
+                                            trailingSymbol = MotionSymbols.ic_chevron_right,
+                                            onClick = { openFolderPlatformId = entry.platformId },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         modifier = modifier
     )
 }
@@ -340,7 +577,7 @@ private fun CoursePickerPane(
                 )
             }
         } else {
-            LazyColumn(
+            MotionLazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -451,7 +688,8 @@ fun GradesScreen(
     val navigationRequested by rememberUpdatedState(inbarAccessRequested)
     fun inbarAllowed() = active && (navigationRequested || inbarRequestedByUser)
     val canAccessInbar = inbarAllowed()
-    val expressiveDesign by context.expressiveDesignFlow().collectAsState(initial = true)
+    val expressiveDesign by remember(context) { context.expressiveDesignFlow() }.collectAsState(initial = true)
+
 
 
     val currentYear = java.time.Year.now().value
@@ -620,7 +858,9 @@ fun GradesScreen(
                 }
             } catch (exception: Exception) {
                 Log.w("GradesPage", "Failed to load grades", exception)
-                requestError = "Cannot reach the server.\nCheck your internet connection."
+                requestError = if (requestPlatform is com.feldman.scholix.api.platforms.GoogleClassroomPlatform)
+                    exception.localizedMessage ?: "Could not load Google Classroom grades."
+                else "Cannot reach the server.\nCheck your internet connection."
             }
 
             if (currentId == requestId) {
@@ -1144,8 +1384,12 @@ fun GradesScreen(
                                                 )
                                                 Spacer(Modifier.width(16.dp))
 
+                                                val finalGradeStr = finalGrade!!.optString("grade")
+                                                val displayFinalGrade = finalGradeStr.toDoubleOrNull()?.let { d ->
+                                                    if (d % 1.0 == 0.0) d.toLong().toString() else finalGradeStr
+                                                } ?: finalGradeStr
                                                 MotionAutoSizeText(
-                                                    text = finalGrade!!.optString("grade"),
+                                                    text = displayFinalGrade,
                                                     style = MaterialTheme.typography.bodyLarge.copy(
                                                         fontFamily = if (expressiveDesign) MotionFonts.feldman(weight = 900) else null,
                                                         fontWeight = FontWeight.Black,
@@ -1233,11 +1477,15 @@ fun GradesScreen(
                             val grade = indexedGrade.value
                             val rawSubject = grade.optString("subject", "Unknown")
                             val rawName = grade.optString("name", "")
-                            val isRtl = isRtlText("$rawSubject $rawName")
+
+                            val rawTitle = if (rawName.isNotBlank()) rawName else rawSubject
+                            val rawSubtitle = if (rawName.isNotBlank() && rawSubject.isNotBlank() && rawSubject != rawName) rawSubject else null
+
+                            val isRtl = isRtlText("$rawTitle ${rawSubtitle.orEmpty()}")
 
                             val bidi = BidiFormatter.getInstance()
-                            val subject = bidi.unicodeWrap(rawSubject)
-                            val name = bidi.unicodeWrap(rawName)
+                            val title = bidi.unicodeWrap(rawTitle)
+                            val subtitle = rawSubtitle?.let { bidi.unicodeWrap(it) }
 
                             CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                                 Row(
@@ -1262,46 +1510,53 @@ fun GradesScreen(
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Text(
-                                            text = subject,
+                                            text = title,
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontFamily = MotionFonts.feldman(weight = 500),
                                                 fontWeight = FontWeight.Medium
                                             ),
-                                            color = MaterialTheme.colorScheme.onSurface
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
-                                        if (rawName.isNotEmpty()) {
+                                        if (!subtitle.isNullOrBlank()) {
                                             Text(
-                                                text = name,
+                                                text = subtitle,
                                                 style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }
 
+                                    Spacer(Modifier.width(8.dp))
+
                                     val gradeStr = grade.optString("grade", "-")
+                                    val displayGrade = gradeStr.toDoubleOrNull()?.let { d ->
+                                        if (d % 1.0 == 0.0) d.toLong().toString() else gradeStr
+                                    } ?: gradeStr
 
                                     Text(
-                                        text = gradeStr,
+                                        text = displayGrade,
                                         style = MaterialTheme.typography.bodyLarge.copy(
                                             fontFamily = MotionFonts.feldman(weight = 700, width = 50f),
-                                            lineHeight = 40.sp
+                                            fontWeight = FontWeight.Bold
                                         ),
                                         color = gradeColor(gradeStr),
                                         textAlign = TextAlign.Center,
-                                        maxLines = 2,
-                                        modifier = Modifier.widthIn(max = 120.dp),
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.widthIn(min = 44.dp, max = 110.dp),
                                         autoSize = TextAutoSize.StepBased(
                                             minFontSize = 10.sp,
-                                            maxFontSize = 60.sp,
-                                            stepSize = 2.sp
+                                            maxFontSize = 54.sp,
+                                            stepSize = 1.sp
                                         )
                                     )
                                 }
                             }
                         }
-                    }
-                    item {
-                        Spacer(Modifier.height(180.dp))
                     }
                 }
             }
@@ -1332,7 +1587,7 @@ fun processGrades(gradesArray: JSONArray): Triple<List<JSONObject>, Float, JSONO
         }
 
         val g = grade.optDouble("grade", Double.NaN)
-        if (!g.isNaN() && g != 0.0) {
+        if (!g.isNaN() && (g != 0.0 || grade.has("points"))) {
             sum += g.toFloat()
             count++
         }

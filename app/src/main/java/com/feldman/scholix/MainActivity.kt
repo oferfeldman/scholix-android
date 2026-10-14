@@ -1,7 +1,6 @@
 package com.feldman.scholix
 
 import androidx.compose.ui.res.stringResource
-
 import android.Manifest
 import android.content.Intent
 import android.content.res.Configuration
@@ -90,7 +89,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.Room
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.ui.draw.alpha
 import com.feldman.motion.MotionFloatingToolbarDefaults
 import com.feldman.motion.MotionSymbols
@@ -109,7 +107,6 @@ import com.feldman.motion.MotionNavigationBarDefaults
 import com.feldman.motion.MotionNavigationAxis
 import com.feldman.motion.MotionNavHost
 import com.feldman.motion.MotionThemeRepository
-import com.feldman.lockerapp.ui.theme.AppTheme
 import com.feldman.motion.rememberMotionDestBackStack
 import com.feldman.motion.rememberMotionNavigationState
 import com.feldman.motion.rememberMotionBlurState
@@ -137,6 +134,27 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import com.feldman.scholix.ui.HiddenMoeLogin
+import com.feldman.scholix.ui.HiddenMashovSmsLogin
+import com.feldman.scholix.api.providerName
+import com.feldman.scholix.api.platforms.StudentsPortalPlatform
+import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.api.platforms.MashovPlatform
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.sp
+import com.feldman.motion.MotionButtonDefaults
+import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionSnackbar
+import com.feldman.motion.MotionSnackbarHost
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.ui.layout.onSizeChanged
+import com.feldman.motion.MotionNavFlow
+import com.feldman.motion.MotionTheme
+import com.feldman.motion.LocalMotionBottomBarGeometry
+import com.feldman.scholix.storage.defaultNavigationOrder
+import com.feldman.scholix.storage.navigationOrderFlow
+
+
 
 @Composable
 fun TopBarSpacing(): Dp {
@@ -155,6 +173,8 @@ fun BottomBarSpacing(): Dp {
 
 class MainActivity : ComponentActivity() {
     private var homeworkOpenRequest by mutableIntStateOf(0)
+    // Bumped by the refresh-failure snackbar's action; MainScreen opens the providers page.
+    private var providersOpenRequest by mutableIntStateOf(0)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -238,7 +258,7 @@ class MainActivity : ComponentActivity() {
         )
 
         setContent {
-            AppTheme {
+            MotionTheme {
                 var isLoggedIn by remember { mutableStateOf<Boolean?>(null) }
                 val context = LocalContext.current
                 val scope = rememberCoroutineScope()
@@ -270,29 +290,141 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // The failures last reported, so a resume that fails the same way stays quiet.
+                var reportedFailures by remember { mutableStateOf<Set<String>>(emptySet()) }
+                // Failures waiting on the off-screen portal sign-in before they are reported.
+                var pendingFailures by remember { mutableStateOf<List<String>>(emptyList()) }
+                var portalRelogin by remember { mutableStateOf<StudentsPortalPlatform?>(null) }
+                var mashovRelogin by remember { mutableStateOf<MashovPlatform?>(null) }
+                var preloadRefreshRunning by remember { mutableStateOf(false) }
+
+                fun reportFailures(failedPlatforms: List<String>) {
+                    val failures = failedPlatforms.toSet()
+                    if (failures.isNotEmpty() && failures != reportedFailures) {
+                        scope.launch {
+                            // These are expired sign-ins: retrying fails the same way,
+                            // signing in again is what fixes them.
+                            val result = snackbarHostState.showSnackbar(
+                                message = getString(R.string.providers_refresh_failed, failedPlatforms.joinToString(", ")),
+                                actionLabel = getString(R.string.providers_sign_in_again),
+                                duration = SnackbarDuration.Long
+                            )
+                            if (result == SnackbarResult.ActionPerformed) providersOpenRequest++
+                        }
+                    }
+                    reportedFailures = failures
+                }
+
                 fun reloadPreloads(snackbarHostState: SnackbarHostState) {
+                    if (preloadRefreshRunning || portalRelogin != null || mashovRelogin != null) return
+                    preloadRefreshRunning = true
                     Log.d("MainActivity", "Reloading platforms")
                     scope.launch(Dispatchers.IO) {
-                        val failedPlatforms = PlatformStorage.refreshCookies(this@MainActivity)
-                        val courses = PlatformStorage.getCourses(this@MainActivity)
+                        try {
+                            var failedPlatforms = PlatformStorage.refreshCookies(this@MainActivity)
+                            val courses = PlatformStorage.getCourses(this@MainActivity)
+                            val refreshedPlatforms = PlatformStorage.loadPlatforms(this@MainActivity)
+                            // The subsequent course request may already have recovered OpenU.
+                            refreshedPlatforms.filterIsInstance<OpenAUPlatform>().filter { it.isLoggedIn() }
+                                .forEach { failedPlatforms = failedPlatforms - it.providerName() }
+                            // Mashov SMS accounts first try their saved private-device token inside
+                            // refreshCookies(). If Mashov has revoked it, recover with a fresh OTP
+                            // while an SMS listener is already armed, rather than leaving the app in
+                            // a permanent signed-out state.
+                            val mashovSmsRecovery = refreshedPlatforms
+                                .filterIsInstance<MashovPlatform>()
+                                .firstOrNull {
+                                    !it.isLoggedIn() && it.loginMethod == "sms" && it.hasSmsLoginDetails()
+                                }
+                            // The portal's sign-in page blocks headless requests, so its lapsed
+                            // session is restored by signing in again off-screen with the saved
+                            // credentials -- the same recovery the grades page runs.
+                            val relogin = if (portalRelogin == null) {
+                                refreshedPlatforms
+                                    .filterIsInstance<StudentsPortalPlatform>()
+                                    .firstOrNull { it.needsInteractiveRelogin() }
+                            } else null
 
-                        withContext(Dispatchers.Main) {
-                            preloadedCourses = courses
-                            isLoading = false
-
-                            if (failedPlatforms.isNotEmpty()) {
-                                scope.launch {
-                                    val message = "Failed to reload: ${failedPlatforms.joinToString(", ")}"
-                                    val result = snackbarHostState.showSnackbar(
-                                        message = message,
-                                        actionLabel = "Retry"
-                                    )
-                                    if (result == SnackbarResult.ActionPerformed) {
-                                        isLoading = true
-                                        reloadPreloads(snackbarHostState)
-                                    }
+                            withContext(Dispatchers.Main) {
+                                preloadedCourses = courses
+                                isLoading = false
+                                if (mashovSmsRecovery != null) {
+                                    pendingFailures = failedPlatforms
+                                    mashovRelogin = mashovSmsRecovery.forSmsLogin()
+                                } else if (relogin != null) {
+                                    pendingFailures = failedPlatforms
+                                    portalRelogin = relogin
+                                } else {
+                                    reportFailures(failedPlatforms)
                                 }
                             }
+                        } finally {
+                            withContext(Dispatchers.Main) { preloadRefreshRunning = false }
+                        }
+                    }
+                }
+
+                mashovRelogin?.let { mashov ->
+                    HiddenMashovSmsLogin(
+                        account = mashov,
+                        onSmsRequested = { account ->
+                            withContext(Dispatchers.IO) {
+                                PlatformStorage.addPlatforms(context, listOf(account))
+                            }
+                        },
+                        onResult = { account, error ->
+                            scope.launch {
+                                val restored = account != null
+                                if (account != null) withContext(Dispatchers.IO) {
+                                    PlatformStorage.addPlatforms(context, listOf(account))
+                                }
+                                Log.i(
+                                    "MainActivity",
+                                    "Mashov SMS recovery " + if (restored) "restored the session"
+                                    else "failed: ${error ?: "OTP was not verified"}",
+                                )
+                                val remaining = if (restored) pendingFailures - mashov.providerName()
+                                else pendingFailures
+                                mashovRelogin = null
+                                pendingFailures = emptyList()
+                                if (restored) {
+                                    preloadedCourses = withContext(Dispatchers.IO) {
+                                        PlatformStorage.getCourses(context)
+                                    }
+                                    // A different provider (for example the Education Portal) may
+                                    // still need its own recovery after Mashov finishes.
+                                    reloadPreloads(snackbarHostState)
+                                } else {
+                                    reportFailures(remaining)
+                                }
+                            }
+                        },
+                    )
+                }
+
+                portalRelogin?.let { portal ->
+                    HiddenMoeLogin(
+                        username = portal.getUsername(),
+                        password = portal.getPassword()
+                    ) { cookies, csrt, error ->
+                        scope.launch {
+                            val restored = cookies != null && withContext(Dispatchers.IO) {
+                                portal.adoptSession(cookies, csrt).also { ok ->
+                                    if (!ok) return@also
+                                    val platforms = PlatformStorage.loadPlatforms(context).toMutableList()
+                                    val index = platforms.indexOfFirst { it.id == portal.id }
+                                    if (index >= 0) platforms[index] = portal else platforms += portal
+                                    PlatformStorage.savePlatforms(context, platforms)
+                                }
+                            }
+                            Log.i("MainActivity", "Portal re-login " + if (restored) "restored the session" else "failed: ${error ?: "session not adopted"}")
+                            val remaining = if (restored) pendingFailures - portal.providerName() else pendingFailures
+                            portalRelogin = null
+                            pendingFailures = emptyList()
+                            if (restored) {
+                                preloadedCourses = withContext(Dispatchers.IO) { PlatformStorage.getCourses(context) }
+                            }
+                            reportFailures(remaining)
                         }
                     }
                 }
@@ -327,43 +459,73 @@ class MainActivity : ComponentActivity() {
                     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
 
-                when {
-                    isLoading || isLoggedIn == null -> {
-                        GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
-                    }
-
-                    isLoggedIn == false -> {
-                        LoginPage(
-                            onLoginSuccess = {
-                                isLoading = true
-                                reloadPlatforms()
-                                isLoggedIn = true
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    else -> {
-                        MainScreen(
-                            homeworkOpenRequest = homeworkOpenRequest,
-                            preloadedCourses = preloadedCourses,
-                            repository = repository,
-                            onPlatformsChanged = {
-                                reloadPlatforms()
-                                reloadPreloads(snackbarHostState)
-                            },
-                            platforms = platforms,
-                            onLoginSuccess = {
-                                isLoading = true
-                                reloadPlatforms()
-                                reloadPreloads(snackbarHostState)
-                                isLoggedIn = true
-                            },
-                            onLogout = {
-                                PlatformStorage.clearPlatforms(context)
-                                isLoggedIn = false
+                val snackbarHost: @Composable () -> Unit = {
+                    MotionSnackbarHost(
+                        hostState = snackbarHostState,
+                        modifier = Modifier
+                            .padding(bottom = BottomBarSpacing())
+                    ) { data ->
+                        // The action is the point of the message, so it is a filled button
+                        // rather than Material's text action.
+                        MotionSnackbar(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            action = data.visuals.actionLabel?.let { label ->
+                                {
+                                    MotionButton(
+                                        onClick = { data.performAction() },
+                                        text = label,
+                                        sizes = MotionButtonDefaults.sizes(height = 40.dp, fontSize = 14.sp),
+                                        contentPadding = PaddingValues(horizontal = 16.dp),
+                                    )
+                                }
                             }
-                        )
+                        ) { Text(data.visuals.message) }
+                    }
+                }
+                Box(Modifier.fillMaxSize()) {
+                    when {
+                        isLoading || isLoggedIn == null -> {
+                            GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
+                        }
+
+                        isLoggedIn == false -> {
+                            LoginPage(
+                                onLoginSuccess = {
+                                    isLoading = true
+                                    reloadPlatforms()
+                                    isLoggedIn = true
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+
+                        else -> {
+                            MainScreen(
+                                snackbarHost = snackbarHost,
+                                homeworkOpenRequest = homeworkOpenRequest,
+                                providersOpenRequest = providersOpenRequest,
+                                preloadedCourses = preloadedCourses,
+                                repository = repository,
+                                onPlatformsChanged = {
+                                    reloadPlatforms()
+                                    reloadPreloads(snackbarHostState)
+                                },
+                                platforms = platforms,
+                                onLoginSuccess = {
+                                    isLoading = true
+                                    reloadPlatforms()
+                                    reloadPreloads(snackbarHostState)
+                                    isLoggedIn = true
+                                },
+                                onLogout = {
+                                    PlatformStorage.clearPlatforms(context)
+                                    isLoggedIn = false
+                                }
+                            )
+                        }
+                    }
+                    if (isLoggedIn != true || isLoading) {
+                        Box(Modifier.align(Alignment.BottomCenter)) { snackbarHost() }
                     }
                 }
             }
@@ -381,6 +543,8 @@ fun MainScreen(
     onLoginSuccess: () -> Unit,
     onLogout: () -> Unit,
     homeworkOpenRequest: Int = 0,
+    providersOpenRequest: Int = 0,
+    snackbarHost: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
 
@@ -415,17 +579,21 @@ fun MainScreen(
             AppDest.More,
             AppDest.NavigationSettings,
             AppDest.CrashLogs,
+            AppDest.PortionsSettings,
+            AppDest.SchoolPortionsTable(),
             AppDest.Login,
             AppDest.Appearance
         )
     }
 
-    val navbarPages by remember(context) { context.navbarPagesFlow() }
-        .collectAsState(initial = defaultNavbarPages)
-    val navigationPages = remember(destinations) {
-        destinations.filter { it in listOf(AppDest.Grades, AppDest.Schedule, AppDest.Attendance, AppDest.Tiktek, AppDest.Settings, AppDest.Messages, AppDest.Locker, AppDest.Homework, AppDest.Materials) }
+    val navigationOrder by remember(context) { context.navigationOrderFlow() }
+        .collectAsState(initial = defaultNavigationOrder)
+    val navigationPages = remember(destinations, navigationOrder) {
+        destinations.filter { it.label in navigationOrder }.sortedBy { navigationOrder.indexOf(it.label) }
+
     }
-    val bottomBarDestinations = navigationPages.filter { it.label in navbarPages }.ifEmpty { listOf(AppDest.Tiktek, AppDest.Settings) }
+
+    val bottomBarDestinations = navigationPages.take(4)
 
     val startDestination = rememberSaveable {
         val activity = context as? android.app.Activity
@@ -445,6 +613,13 @@ fun MainScreen(
         if (topLevel) backStack.navigateTop(destination) else backStack.navigateTo(destination)
     }
     var handledHomeworkOpenRequest by rememberSaveable { mutableIntStateOf(0) }
+    var handledProvidersOpenRequest by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(providersOpenRequest) {
+        if (providersOpenRequest > handledProvidersOpenRequest) {
+            backStack.navigateTo(AppDest.Platforms)
+            handledProvidersOpenRequest = providersOpenRequest
+        }
+    }
     LaunchedEffect(homeworkOpenRequest) {
         if (homeworkOpenRequest > handledHomeworkOpenRequest) {
             backStack.navigateTop(AppDest.Homework)
@@ -462,6 +637,7 @@ fun MainScreen(
     val motionThemeRepository = remember(context) { MotionThemeRepository(context) }
     val motionLevel by motionThemeRepository.motionLevel
         .collectAsState(initial = MotionLevel.MEDIUM)
+
     val expressiveDesign by motionThemeRepository.expressiveDesign.collectAsState(initial = true)
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -494,6 +670,7 @@ fun MainScreen(
         )
     }
     val navigationBackdrop = rememberMotionBlurState()
+
     val navigationBlurred = rememberMotionBlur()
     var bottomBarHeight by remember { mutableStateOf(0.dp) }
     var overflowFabSlot by remember { mutableStateOf<Rect?>(null) }
@@ -506,7 +683,8 @@ fun MainScreen(
     val messagesViewModel: MessagesViewModel = viewModel()
     LaunchedEffect(platforms) { messagesViewModel.configure(platforms) }
 
-    val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, navbarPages, visibleNavbarDestinations, overflowPagesList, homeworkOpenRequest, userOpenedPages, currentScreen) {
+    val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, overflowPagesList, homeworkOpenRequest, userOpenedPages, currentScreen) {
+
         AppState(
             preloadedCourses = preloadedCourses,
             repository = repository,

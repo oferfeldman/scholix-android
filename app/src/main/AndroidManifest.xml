@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Optional: enables fully silent OTP capture after the user grants SMS access.
+         Without it Scholix falls back to Android's one-message SMS User Consent UI. -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
     <application
         android:name=".ScholixApp"
@@ -20,7 +23,7 @@
         android:theme="@style/Theme.Scholix">
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|uiMode"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -30,6 +33,12 @@
             </intent-filter>
         </activity>
         <activity android:name=".pages.GradesActivity" />
+        <activity android:name=".classroom.ClassroomLoginActivity" android:exported="false" />
+        <activity
+            android:name=".ui.MoeSmsLoginActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lemida.LemidaLoginActivity"
             android:exported="false"

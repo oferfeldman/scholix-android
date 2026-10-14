@@ -8,6 +8,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import com.feldman.motion.MotionIcons
 import com.feldman.motion.MotionDest
 import com.feldman.motion.MotionNavigator
 import com.feldman.motion.MotionBottomSheetBackdropScope
@@ -17,6 +18,7 @@ import com.feldman.motion.MotionScaffold
 import com.feldman.scholix.pages.AppearanceSettingsPage
 import com.feldman.scholix.pages.CrashLogsPage
 import com.feldman.scholix.pages.NavigationSettingsPage
+import com.feldman.scholix.pages.PortionsSettingsPage
 import com.feldman.scholix.pages.AddPlatformSheet
 import com.feldman.scholix.pages.AttendancePage
 import com.feldman.scholix.pages.EditProviderSheet
@@ -64,6 +66,7 @@ sealed class AppDest : MotionDest {
     @Parcelize
     data object Homework : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Homework"
+        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Description
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
         @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_docs_outline
         @Composable
@@ -121,6 +124,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Grades"
+        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Description
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_docs
@@ -151,6 +155,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Schedule"
+        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.ViewAgenda
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_schedule
@@ -180,6 +185,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Attendance"
+        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Alarm
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_alarm
@@ -194,7 +200,7 @@ sealed class AppDest : MotionDest {
             searchQuery: String,
             onFabAction: ((() -> Unit) -> Unit) -> Unit
         ) {
-            AttendancePage(modifier = Modifier.fillMaxSize())
+            AttendancePage(modifier = Modifier.fillMaxSize(), onNavigate = onNavigate)
         }
     }
 
@@ -205,6 +211,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Messages"
+        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Chat
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_message
@@ -232,6 +239,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel @Transient override val label = "Message"
         @IgnoredOnParcel @Transient override val parent: MotionDest = Messages
         @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+        @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             MessageDetailPage(this, onNavigate, onBack)
@@ -244,6 +252,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel @Transient override val label = "Compose message"
         @IgnoredOnParcel @Transient override val parent: MotionDest = source ?: Messages
         @IgnoredOnParcel @Transient override val pane = if (source == null) MotionPaneType.DETAIL else MotionPaneType.EXTRA
+        @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             MessageComposePage(this, onNavigate, onBack)
@@ -295,6 +304,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel @Transient override val label = "Message folders"
         @IgnoredOnParcel @Transient override val parent: MotionDest = Messages
         @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+        @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             MessageFoldersPage(this, onBack)
@@ -307,6 +317,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel @Transient override val label = "Personal signature"
         @IgnoredOnParcel @Transient override val parent: MotionDest = Messages
         @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+        @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             MessageSignaturePage(providerId, onBack)
@@ -319,6 +330,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel @Transient override val label = "Notifications"
         @IgnoredOnParcel @Transient override val parent: MotionDest = Messages
         @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+        @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             NotificationsPage(providerId, onNavigate, onBack)
@@ -331,6 +343,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Locker"
+        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Lock
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_lock
@@ -366,6 +379,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Tiktek"
+        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.LiveHelp
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_live_help
@@ -439,6 +453,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Settings"
+        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Settings
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_settings
@@ -458,6 +473,7 @@ sealed class AppDest : MotionDest {
                 onOpenAppearance = { onNavigate(Appearance) },
                 onOpenNavigation = { onNavigate(NavigationSettings) },
                 onOpenCrashLogs = { onNavigate(CrashLogs) },
+                onOpenPortions = { onNavigate(PortionsSettings) },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -486,6 +502,19 @@ sealed class AppDest : MotionDest {
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             CrashLogsPage(onBack)
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data object PortionsSettings : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Portions"
+        @IgnoredOnParcel @Transient override val parent: MotionDest = Settings
+        @IgnoredOnParcel @Transient override val showNavigation = false
+
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            PortionsSettingsPage(onNavigate, onBack)
         }
     }
 
@@ -638,6 +667,44 @@ sealed class AppDest : MotionDest {
             } else {
                 LaunchedEffect(providerId) { onBack() }
             }
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data class SchoolPortionsTable(val initialWeeklyHours: Int? = null) : AppDest() {
+        @IgnoredOnParcel
+        @Transient
+        override val label = "School portions table"
+        @IgnoredOnParcel
+        @Transient
+        override val parent: MotionDest = Attendance
+        @IgnoredOnParcel
+        @Transient
+        override val pane = MotionPaneType.BOTTOM_SHEET
+        @IgnoredOnParcel
+        @Transient
+        override val bottomSheetEffects = MotionBottomSheetEffects(
+            blurBackground = true,
+            blurSheet = false,
+            darkenBackground = true,
+            backdropScope = MotionBottomSheetBackdropScope.FULL_SCREEN
+        )
+        @IgnoredOnParcel
+        @Transient
+        override val showNavigation = false
+
+        @Composable
+        override fun Content(
+            onNavigate: MotionNavigator,
+            onBack: () -> Unit,
+            searchQuery: String,
+            onFabAction: ((() -> Unit) -> Unit) -> Unit
+        ) {
+            com.feldman.scholix.attendance.SchoolPortionsTableSheet(
+                onClose = onBack,
+                currentWeeklyHours = initialWeeklyHours
+            )
         }
     }
 

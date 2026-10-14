@@ -1,0 +1,72 @@
+package com.feldman.scholix.api.platforms
+
+import android.content.Context
+import android.os.SystemClock
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.feldman.scholix.MainActivity
+import com.feldman.scholix.api.PlatformStorage
+import com.feldman.scholix.api.Type
+import org.json.JSONArray
+import org.json.JSONObject
+import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class ProviderSessionRecoveryTest {
+    @Test fun mashovEditReadsFilledCredentialsByType() {
+        val fields = MashovPlatform().getLoginFields().apply {
+            setValue("School code", "123456")
+            setValue("School year", "2027")
+            setValue("Username", "student")
+            setValue("Password", "fixture")
+        }
+        assertEquals("student", fields.getValueByType(Type.Username))
+        assertEquals("fixture", fields.getValueByType(Type.Password))
+    }
+
+    /** Opt-in: uses saved accounts without printing credentials or changing remote data. */
+    @Test fun savedAccountsRecoverExpiredSessionsWithoutSettingsSave() {
+        assumeTrue(InstrumentationRegistry.getArguments().getString("providerLiveRecovery") == "true")
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = context.getSharedPreferences("platform_prefs", Context.MODE_PRIVATE)
+        val original = prefs.getString(PlatformStorage.KEY_PLATFORMS, "[]")!!
+        val profiles = JSONArray(original)
+        val targets = (0 until profiles.length()).map { profiles.getJSONObject(it) }.filter {
+            it.optString("class") in listOf(OpenAUPlatform::class.java.name, StudentsPortalPlatform::class.java.name)
+        }
+        assumeTrue(targets.size == 2)
+        try {
+            for (profile in targets) {
+                profile.put("cookies", "expired=fixture").put("loggedIn", false).remove("cookieJar")
+            }
+            assertTrue(prefs.edit().putString(PlatformStorage.KEY_PLATFORMS, profiles.toString()).commit())
+            ActivityScenario.launch(MainActivity::class.java).use {
+                val deadline = SystemClock.elapsedRealtime() + 150_000
+                var recovered = false
+                while (SystemClock.elapsedRealtime() < deadline) {
+                    val current = PlatformStorage.loadPlatforms(context).associateBy { it.id }
+                    if (targets.all { current[it.getString("id")]?.isLoggedIn() == true }) {
+                        recovered = true
+                        break
+                    }
+                    SystemClock.sleep(250)
+                }
+                assertTrue("Saved providers did not recover their expired sessions", recovered)
+                val restored = PlatformStorage.loadPlatforms(context)
+                val openU = restored.filterIsInstance<OpenAUPlatform>().single()
+                assertTrue(openU.getCourses().isNotEmpty())
+                val serialized = openU.toJson()
+                assertTrue(serialized.getJSONArray("cookieJar").length() > 0)
+                val reloaded = OpenAUPlatform.fromJson(JSONObject(serialized.toString()))
+                assertTrue("OpenU session must work after serialization", reloaded.refreshCookies())
+                assertTrue(restored.filterIsInstance<StudentsPortalPlatform>().single().refreshCookies())
+            }
+        } finally {
+            prefs.edit().putString(PlatformStorage.KEY_PLATFORMS, original).commit()
+        }
+    }
+}

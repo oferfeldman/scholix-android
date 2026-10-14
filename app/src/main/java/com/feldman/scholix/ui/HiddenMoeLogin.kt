@@ -8,6 +8,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -17,6 +21,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -51,6 +57,9 @@ import kotlin.coroutines.resume
  *
  * @param onResult (cookies, csrt, error) — exactly one of cookies/error is non-null.
  */
+// Both portal and Webtop SSO use the process-wide WebView cookie store.
+internal val moeBrowserLoginMutex = Mutex()
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun HiddenMoeLogin(
@@ -59,9 +68,33 @@ fun HiddenMoeLogin(
     timeoutMs: Long = 90_000,
     onResult: (cookies: String?, csrt: String?, error: String?) -> Unit,
 ) {
+    var ownsBrowser by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        moeBrowserLoginMutex.lock()
+        try {
+            ownsBrowser = true
+            awaitCancellation()
+        } finally {
+            ownsBrowser = false
+            moeBrowserLoginMutex.unlock()
+        }
+    }
+    if (ownsBrowser) HiddenMoeLoginBrowser(username, password, timeoutMs, onResult)
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun HiddenMoeLoginBrowser(
+    username: String,
+    password: String,
+    timeoutMs: Long,
+    onResult: (cookies: String?, csrt: String?, error: String?) -> Unit,
+) {
     val context = LocalContext.current
     val done = remember { AtomicBoolean(false) }
     val filled = remember { AtomicBoolean(false) }
+    // SMS accounts retain their session without storing a reusable password.
+    val smsLogin = password.isBlank()
 
     fun finish(cookies: String?, csrt: String?, error: String?) {
         if (done.compareAndSet(false, true)) onResult(cookies, csrt, error)
@@ -74,24 +107,29 @@ fun HiddenMoeLogin(
         // EduLogin bounce straight back to the portal ANONYMOUSLY, which used to
         // look like instant success (the portal sets a Dynatrace cookie even for
         // anonymous visitors) and produced no csrt and TZehut=-1.
-        cm.removeAllCookies(null)
-        cm.flush()
         WebStorage.getInstance().deleteAllData()
 
-        WebView(context).apply {
+        WebView(android.content.MutableContextWrapper(context)).apply {
             cm.setAcceptThirdPartyCookies(this, true)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            // Same zoom fix as the Shahaf SMS dialog: wide viewport + overview
+            // mode before first load, viewport meta injected per page.
+            applyMoeContentScale()
 
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    view?.injectMoeViewport()
                     if (done.get()) return
                     val host = runCatching { url?.toUri()?.host }.getOrNull().orEmpty()
                     Log.d(TAG, "page: $host (submitted=${filled.get()})")
                 }
             }
-            loadUrl(StudentsPortalPlatform.EDULOGIN_URL)
+            cm.removeAllCookies {
+                cm.flush()
+                if (!done.get()) loadUrl(StudentsPortalPlatform.EDULOGIN_URL)
+            }
         }
     }
 
@@ -99,11 +137,12 @@ fun HiddenMoeLogin(
     // lgn.edu.gov.il before the real form, and Angular renders it async, so both
     // "fill the form" and "we're done" are polled rather than fired once.
     LaunchedEffect(username, password) {
-        val completed = withTimeoutOrNull(timeoutMs) {
+        val completed = withTimeoutOrNull(if (smsLogin) 600_000 else timeoutMs) {
             while (!done.get()) {
                 val host = runCatching { web.url?.toUri()?.host }.getOrNull().orEmpty()
 
-                if (!filled.get() && host.endsWith("lgn.edu.gov.il", true)) {
+                if (smsLogin && host == "lgn.edu.gov.il") filled.set(true)
+                if (!smsLogin && !filled.get() && host.endsWith("lgn.edu.gov.il", true)) {
                     web.evaluateJavascript(loginJs(username, password)) { r ->
                         when (val res = r?.trim('"', ' ')) {
                             "filled" -> {
@@ -138,7 +177,9 @@ fun HiddenMoeLogin(
         }
         if (completed == null) {
             finish(null, null,
-                if (filled.get())
+                if (smsLogin)
+                    "SMS sign-in timed out. Please try again."
+                else if (filled.get())
                     "Signed in, but the Ministry of Education portal did not " +
                         "finish loading. Please try again."
                 else
@@ -147,7 +188,16 @@ fun HiddenMoeLogin(
         }
     }
 
-    AndroidView(
+    DisposableEffect(web) {
+        onDispose {
+            done.set(true)
+            web.stopLoading()
+            web.destroy()
+        }
+    }
+
+    if (smsLogin) MoeSmsLoginScreen(web, username) { finish(null, null, "SMS sign-in cancelled") }
+    else AndroidView(
         modifier = Modifier.size(1.dp).alpha(0f),
         factory = { web },
     )

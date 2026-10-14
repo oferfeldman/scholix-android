@@ -3,7 +3,7 @@ package com.feldman.scholix.api.platforms
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.feldman.lockerapp.ui.theme.AppTheme
+import com.feldman.motion.MotionTheme
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.pages.SchedulePage
 import com.feldman.scholix.ui.HiddenInbarLogin
@@ -75,7 +75,7 @@ class InbarScheduleUiTest {
     }
 
     @Test fun universityTimetableUsesAcademicFiltersAndActualTimes() {
-        compose.setContent { AppTheme { SchedulePage(listOf(provider(false))) } }
+        compose.setContent { MotionTheme { SchedulePage(listOf(provider(false))) } }
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("Sample course A", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
@@ -95,7 +95,7 @@ class InbarScheduleUiTest {
     }
 
     @Test fun emptyTimetableShowsNormalEmptyStateWithAcademicFilters() {
-        compose.setContent { AppTheme { SchedulePage(listOf(provider(true))) } }
+        compose.setContent { MotionTheme { SchedulePage(listOf(provider(true))) } }
         compose.waitUntil(10_000) {
             compose.onAllNodesWithText("No schedule", substring = true).fetchSemanticsNodes().isNotEmpty()
         }

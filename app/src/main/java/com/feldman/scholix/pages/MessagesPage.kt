@@ -1,5 +1,8 @@
 package com.feldman.scholix.pages
 
+import com.feldman.motion.MotionDropdownMenuItem
+import com.feldman.motion.MotionDropdownMenu
+import com.feldman.motion.MotionDialog
 import android.app.DownloadManager
 import android.content.Context
 import android.os.Environment
@@ -13,11 +16,12 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.clickable
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
@@ -28,9 +32,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import com.feldman.motion.*
 import com.feldman.scholix.AppDest
-import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.LocalAppState
 import com.feldman.scholix.R
@@ -79,8 +85,128 @@ internal fun recipientKey(person: JSONObject) = "${person.text("mailType").ifEmp
 private fun messageSender(message: JSONObject, folder: MailboxFolder): String = if (folder == MailboxFolder.SENT) {
     message.text("recipientsList").ifBlank { "${message.text("firstRecipientFirstName")} ${message.text("firstRecipientLastName")}".trim() }
 } else "${message.text("student_F_name")} ${message.text("student_L_name")}".trim()
-internal fun mailDate(value: String) = value.replace('T', ' ').take(16)
 
+internal fun mailDate(value: String): String {
+    if (value.isBlank()) return ""
+    return runCatching {
+        val clean = value.trim()
+        val dt = when {
+            clean.contains('T') -> java.time.LocalDateTime.parse(clean.substringBefore('.'))
+            clean.contains(' ') -> {
+                val parts = clean.split(' ')
+                val d = java.time.LocalDate.parse(parts[0])
+                val t = if (parts.size > 1) {
+                    val timeStr = parts[1].take(5)
+                    if (timeStr.length == 5) java.time.LocalTime.parse(timeStr)
+                    else java.time.LocalTime.MIDNIGHT
+                } else java.time.LocalTime.MIDNIGHT
+                java.time.LocalDateTime.of(d, t)
+            }
+            else -> java.time.LocalDate.parse(clean).atStartOfDay()
+        }
+        val today = java.time.LocalDate.now()
+        val msgDate = dt.toLocalDate()
+        val isHebrew = java.util.Locale.getDefault().language in listOf("iw", "he")
+        val timeFmt = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+
+        when {
+            msgDate.isEqual(today) -> dt.format(timeFmt)
+            msgDate.isEqual(today.minusDays(1)) -> if (isHebrew) "אתמול" else "Yesterday"
+            msgDate.isAfter(today.minusDays(7)) -> {
+                dt.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())
+            }
+            msgDate.year == today.year -> {
+                dt.format(java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.getDefault()))
+            }
+            else -> {
+                dt.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yy", java.util.Locale.getDefault()))
+            }
+        }
+    }.getOrElse {
+        value.replace('T', ' ').take(16)
+    }
+}
+
+private fun avatarColor(key: String): Color {
+    val hues = listOf(
+        Color(0xFFE57373), Color(0xFFF06292), Color(0xFFBA68C8), Color(0xFF9575CD),
+        Color(0xFF7986CB), Color(0xFF64B5F6), Color(0xFF4FC3F7), Color(0xFF4DD0E1),
+        Color(0xFF4DB6AC), Color(0xFF81C784), Color(0xFFAED581), Color(0xFFFFB74D),
+        Color(0xFFFF8A65), Color(0xFFA1887F)
+    )
+    val hash = key.fold(0) { acc, c -> (acc * 31 + c.code) and 0x7FFFFFFF }
+    return hues[hash % hues.size]
+}
+
+@Composable
+private fun AvatarFallback(sender: String, unread: Boolean, isSystem: Boolean) {
+    val cleanSender = sender.replace(Regex("[\u200e\u200f\u202a-\u202e\u2066-\u2069]"), "").trim()
+    val initial = cleanSender.take(1).uppercase()
+    val bg = remember(cleanSender, unread) {
+        if (cleanSender.isBlank()) Color.Unspecified
+        else avatarColor(cleanSender)
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                if (bg != Color.Unspecified) bg
+                else if (unread) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceContainerHigh
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isSystem) {
+            Icon(
+                painter = rememberCachedSymbolPainter(name = MotionSymbols.ic_info),
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(22.dp)
+            )
+        } else if (initial.isNotBlank()) {
+            Text(
+                text = initial,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = MotionFonts.feldman(weight = 600),
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = Color.White
+            )
+        } else {
+            Icon(
+                painter = rememberCachedSymbolPainter(
+                    name = if (unread) MotionSymbols.ic_mark_email_unread else MotionSymbols.ic_mark_email_read
+                ),
+                contentDescription = null,
+                tint = if (unread) MaterialTheme.colorScheme.onPrimaryContainer
+                       else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+private fun messageAvatarUrl(message: JSONObject, instiCode: String): String? {
+    val token = message.optString("userImageToken")
+        .ifBlank { message.optString("avatarToken") }
+        .ifBlank { message.optString("imageToken") }
+        .ifBlank { message.optString("user_image_token") }
+        .ifBlank { message.optString("token") }
+    val senderId = message.optString("senderId")
+        .ifBlank { message.optString("sender_id") }
+        .ifBlank { message.optString("studentId") }
+        .ifBlank { message.optString("student_id") }
+        .ifBlank { message.optString("userId") }
+        .ifBlank { message.optString("user_id") }
+        .ifBlank { message.optString("itemId") }
+        .ifBlank { message.optString("id") }
+    if (token.isBlank() || senderId.isBlank() || instiCode.isBlank()) return null
+    val userType = if (message.has("userType")) message.optInt("userType")
+        else if (message.has("senderUserType")) message.optInt("senderUserType")
+        else if (message.has("usertype")) message.optInt("usertype")
+        else 0
+    return "https://webtopserver.smartschool.co.il/serverImages/api/stream/GetImage?id=$senderId&instiCode=$instiCode&token=$token&usertype=$userType"
+}
 
 @Composable
 private fun MessageCard(
@@ -94,6 +220,9 @@ private fun MessageCard(
     onSelectedChange: (Boolean) -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    avatarUrl: String? = null,
+    isSystem: Boolean = false,
+    cookies: String? = null
 ) {
     Row(
         modifier = modifier
@@ -112,32 +241,22 @@ private fun MessageCard(
             Box(
                 modifier = Modifier
                     .size(44.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (unread) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceContainerHigh
-                    ),
+                    .clip(CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                if (sender.isNotBlank()) {
-                    Text(
-                        text = sender.trim().take(1).uppercase(),
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontFamily = MotionFonts.feldman(weight = 600),
-                            fontWeight = FontWeight.SemiBold
-                        ),
-                        color = if (unread) MaterialTheme.colorScheme.onPrimaryContainer
-                               else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                } else {
-                    Icon(
-                        painter = rememberSymbolPainter(
-                            if (unread) MotionSymbols.ic_mark_email_unread else MotionSymbols.ic_mark_email_read
-                        ),
-                        contentDescription = null,
-                        tint = if (unread) MaterialTheme.colorScheme.onPrimaryContainer
-                               else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp)
+                AvatarFallback(sender = sender, unread = unread, isSystem = isSystem)
+                if (!avatarUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(avatarUrl)
+                            .crossfade(true)
+                            .apply { if (!cookies.isNullOrBlank()) addHeader("Cookie", cookies) }
+                            .build(),
+                        contentDescription = sender,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
                     )
                 }
             }
@@ -212,13 +331,13 @@ private fun MessageCard(
                         ) {
                             Icon(
                                 painter = rememberSymbolPainter(MotionSymbols.ic_attach_file),
-                                contentDescription = "Attachment",
-                                modifier = Modifier.size(12.dp),
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "Attachment",
-                                style = MaterialTheme.typography.labelSmall,
+                                text = "File",
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -234,12 +353,18 @@ private fun MessageCard(
 fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
     val state = LocalAppState.current
     val vm = requireNotNull(state.messagesViewModel)
-    val providers = state.platforms.filterIsInstance<WebtopPlatform>()
-    val selecting = vm.selecting
+    val providers = state.platforms.filter { it is WebtopPlatform || it is com.feldman.scholix.api.platforms.GoogleClassroomPlatform }
+    val classroom = vm.classroom()
+    val selecting = vm.selecting && classroom == null
+    val platform = state.platforms.firstOrNull { it.id == vm.providerId } as? WebtopPlatform
+    val instiCode = platform?.studentInstitution.orEmpty()
+    val cookies = platform?.cookies
+
     var providerExpanded by rememberSaveable { mutableStateOf(false) }
     var searchVisible by rememberSaveable { mutableStateOf(false) }
-    var selected by rememberSaveable { mutableStateOf(listOf<String>()) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var selected by rememberSaveable { mutableStateOf(listOf<String>()) }
+
     LaunchedEffect(vm.providerId, vm.folder, vm.labelId, vm.query, vm.unreadOnly) {
         if (vm.query.isNotEmpty()) delay(350)
         selected = emptyList()
@@ -247,13 +372,14 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
         vm.refresh()
     }
     LaunchedEffect(selecting) { selected = emptyList() }
+
     MotionScaffold(
         contentWindowInsets = WindowInsets(0)
     ) {
         Item { Spacer(Modifier.height(TopBarSpacing())) }
         if (providers.isEmpty()) {
             Section {
-                PageItem(title = "Connect Webtop", description = "Add a Webtop account to read and send messages.", icon = painterResource(R.drawable.ic_webtop), onClick = { onNavigate(AppDest.Platforms) })
+                PageItem(title = "Connect a provider", description = "Add Webtop for messages or Google Classroom for announcements.", icon = painterResource(R.drawable.ic_webtop), onClick = { onNavigate(AppDest.Platforms) })
             }
         } else {
             if (providers.size > 1) Item(modifier = Modifier.padding(bottom = 8.dp)) {
@@ -263,14 +389,100 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
             Item(modifier = Modifier.padding(vertical = 8.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.weight(1f)) {
-                        ChipPicker(label = "Mailbox", options = MailboxFolder.entries.map { it.title }, selected = vm.folder.title,
+                        if (classroom != null) Text("Class announcements", style = MaterialTheme.typography.titleMedium)
+                        else ChipPicker(label = "Mailbox", options = MailboxFolder.entries.map { it.title }, selected = vm.folder.title,
                             onSelectedChange = { title -> vm.selectFolder(MailboxFolder.entries.first { it.title == title }) })
                     }
-                    MailIconAction(MotionSymbols.ic_edit, "New message", vm.permissions[vm.providerId]?.optBoolean("isAllowedToWriteMessages") == true, primary = true) {
+                    if (classroom == null) MailIconAction(MotionSymbols.ic_edit, "New message", vm.permissions[vm.providerId]?.optBoolean("isAllowedToWriteMessages") == true, primary = true) {
                         onNavigate(AppDest.ComposeMessage(vm.providerId, vm.newDraft(vm.providerId)))
                     }
                     MailIconAction(MotionSymbols.ic_search, "Search messages") { searchVisible = !searchVisible; if (!searchVisible) vm.query = "" }
-                    MailIconAction(MotionSymbols.ic_more_vert, "Mailbox options") { onNavigate(AppDest.MessageTools(vm.providerId)) }
+                    if (classroom == null) {
+                        var optionsMenuExpanded by remember { mutableStateOf(false) }
+                        Box {
+                            MailIconAction(MotionSymbols.ic_more_vert, "Mailbox options") {
+                                optionsMenuExpanded = true
+                            }
+                            MotionDropdownMenu(
+                                expanded = optionsMenuExpanded,
+                                onDismissRequest = { optionsMenuExpanded = false }
+                            ) {
+                                MotionDropdownMenuItem(
+                                    text = { Text("Refresh") },
+                                    leadingIcon = {
+                                        Icon(rememberCachedSymbolPainter(name = MotionSymbols.ic_refresh), contentDescription = null, modifier = Modifier.size(20.dp))
+                                    },
+                                    onClick = {
+                                        optionsMenuExpanded = false
+                                        vm.refresh()
+                                        vm.initialize()
+                                    }
+                                )
+                                if (vm.messages.isNotEmpty()) {
+                                    MotionDropdownMenuItem(
+                                        text = { Text("Select messages") },
+                                        leadingIcon = {
+                                            Icon(rememberCachedSymbolPainter(name = MotionSymbols.ic_checklist), contentDescription = null, modifier = Modifier.size(20.dp))
+                                        },
+                                        onClick = {
+                                            optionsMenuExpanded = false
+                                            vm.selecting = true
+                                        }
+                                    )
+                                }
+                                if (vm.folder == MailboxFolder.INBOX) {
+                                    MotionDropdownMenuItem(
+                                        text = { Text(if (vm.unreadOnly) "Show all" else "Unread only") },
+                                        leadingIcon = {
+                                            Icon(
+                                                rememberCachedSymbolPainter(name = if (vm.unreadOnly) MotionSymbols.ic_mark_email_read else MotionSymbols.ic_mark_email_unread),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        },
+                                        onClick = {
+                                            optionsMenuExpanded = false
+                                            vm.unreadOnly = !vm.unreadOnly
+                                        }
+                                    )
+                                }
+                                if (vm.folder in listOf(MailboxFolder.INBOX, MailboxFolder.SENT)) {
+                                    MotionDropdownMenuItem(
+                                        text = { Text("Folders") },
+                                        leadingIcon = {
+                                            Icon(rememberCachedSymbolPainter(name = MotionSymbols.ic_folder), contentDescription = null, modifier = Modifier.size(20.dp))
+                                        },
+                                        onClick = {
+                                            optionsMenuExpanded = false
+                                            onNavigate(AppDest.MessageFolders(vm.providerId, vm.folder.name))
+                                        }
+                                    )
+                                }
+                                MotionDropdownMenuItem(
+                                    text = { Text("Notifications") },
+                                    leadingIcon = {
+                                        Icon(rememberCachedSymbolPainter(name = MotionSymbols.ic_notifications), contentDescription = null, modifier = Modifier.size(20.dp))
+                                    },
+                                    onClick = {
+                                        optionsMenuExpanded = false
+                                        onNavigate(AppDest.Notifications(vm.providerId))
+                                    }
+                                )
+                                MotionDropdownMenuItem(
+                                    text = { Text("Signature") },
+                                    leadingIcon = {
+                                        Icon(rememberCachedSymbolPainter(name = MotionSymbols.ic_edit), contentDescription = null, modifier = Modifier.size(20.dp))
+                                    },
+                                    onClick = {
+                                        optionsMenuExpanded = false
+                                        onNavigate(AppDest.MessageSignature(vm.providerId))
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        MailIconAction(MotionSymbols.ic_refresh, "Refresh announcements") { vm.refresh() }
+                    }
                 }
             }
             if (searchVisible || vm.query.isNotBlank()) Item(modifier = Modifier.padding(bottom = 8.dp)) {
@@ -335,13 +547,15 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                         val date = mailDate(message.text("sendingDate").ifBlank { message.text("createdOn") })
                         val hasAttachments = message.optInt("filesWereAttached") > 0
                         val isSelected = id in selected
+                        val avatarUrl = messageAvatarUrl(message, instiCode)
+                        val isSystem = message.optBoolean("isSystemMessage", false) || message.optInt("userType") == 4
                         val containerColor = when {
                             selecting && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
                             unread -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.18f)
                             else -> null
                         }
 
-                        Item(key = id, containerColor = containerColor) {
+                        Item(key = id, containerColor = containerColor, padding = 0.dp) {
                             CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                                 MessageCard(
                                     sender = sender,
@@ -351,6 +565,9 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                                     hasAttachments = hasAttachments,
                                     selecting = selecting,
                                     selected = isSelected,
+                                    avatarUrl = avatarUrl,
+                                    isSystem = isSystem,
+                                    cookies = cookies,
                                     onSelectedChange = { checked ->
                                         selected = if (checked) selected + id else selected - id
                                     },
@@ -370,14 +587,33 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                 }
             } else if (!vm.loading && vm.error == null) Item { Text("No messages in this view.") }
             if (vm.loading) Item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            if (vm.hasMore && !vm.loading) Item { MailAction("Load more") { vm.refresh(more = true) } }
+            if (vm.hasMore && !vm.loading) Item(modifier = Modifier.padding(top = MotionSectionDefaults.ItemSpacing)) {
+                MotionButton(
+                    text = "Load more",
+                    icon = MotionSymbols.ic_expand_more,
+                    modifier = Modifier.fillMaxWidth(),
+                    sizes = MotionButtonDefaults.sizes(fontSize = 24.sp, iconSize = 32.dp),
+                    states = MotionButtonDefaults.states(default = MotionButtonState(backgroundColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer)),
+                    onClick = { vm.refresh(more = true) }
+                )
+            }
         }
-        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
-    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete messages?") },
-        text = { Text(if (vm.folder == MailboxFolder.TRASH) "These messages will be permanently deleted." else "Move the selected messages to Trash?") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.action("delete") { withContext(Dispatchers.IO) { vm.mailbox().delete(selected, vm.folder) }; selected = emptyList(); vm.refresh() } }) { Text("Delete") } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
+    if (confirmDelete) MotionDialog(
+        onDismissRequest = { confirmDelete = false },
+        icon = "delete",
+        title = "Delete messages?",
+        text = if (vm.folder == MailboxFolder.TRASH) "These messages will be permanently deleted." else "Move the selected messages to Trash?",
+        confirmText = "Delete",
+        confirmIcon = "delete",
+        onConfirm = {
+            vm.action("delete") {
+                withContext(Dispatchers.IO) { vm.mailbox().delete(selected, vm.folder) }
+                selected = emptyList(); vm.refresh()
+            }
+        },
+        dismissText = "Cancel",
+    )
 }
 
 @Composable
@@ -405,6 +641,10 @@ fun MessageToolsPage(providerId: String, onNavigate: MotionNavigator, onBack: ()
 @Composable
 fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavigator, onBack: () -> Unit) {
     val vm = requireNotNull(LocalAppState.current.messagesViewModel)
+    vm.classroom(destination.providerId)?.let { provider ->
+        com.feldman.scholix.classroom.ClassroomAnnouncementPage(provider, destination.messageId, onBack)
+        return
+    }
     val context = LocalContext.current
     val folder = MailboxFolder.valueOf(destination.folder)
     val key = "${destination.providerId}:${destination.messageId}"
@@ -434,12 +674,52 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
                 val bidi = BidiFormatter.getInstance()
                 val subject = bidi.unicodeWrap(rawSubject)
                 val sender = bidi.unicodeWrap(rawSender)
+                val platform = LocalAppState.current.platforms.firstOrNull { it.id == destination.providerId } as? WebtopPlatform
+                val instiCode = platform?.studentInstitution.orEmpty()
+                val cookies = platform?.cookies
+                val avatarUrl = messageAvatarUrl(message, instiCode)
+                val isSystem = message.optBoolean("isSystemMessage", false) || message.optInt("userType") == 4
+                val date = mailDate(message.text("sendingDate"))
+
                 CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        Text(subject, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(sender, style = MaterialTheme.typography.titleMedium)
-                        Text(mailDate(message.text("sendingDate")), style = MaterialTheme.typography.bodySmall)
-                        Text(recipients ?: message.text("recipientsName"), style = MaterialTheme.typography.bodyMedium)
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        Text(subject, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AvatarFallback(sender = sender, unread = false, isSystem = isSystem)
+                                if (!avatarUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(avatarUrl)
+                                            .crossfade(true)
+                                            .apply { if (!cookies.isNullOrBlank()) addHeader("Cookie", cookies) }
+                                            .build(),
+                                        contentDescription = sender,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(sender, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                if (date.isNotBlank()) {
+                                    Text(date, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                        val rec = recipients ?: message.text("recipientsName")
+                        if (rec.isNotBlank()) {
+                            Text(rec, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         if (message.optInt("totalRecipientsCount") > 3) MailAction("All recipients") {
                             vm.action("recipients:$key") { recipients = withContext(Dispatchers.IO) { vm.mailbox(destination.providerId).recipients(destination.messageId, vm.labelId).toString() } }
                         }
@@ -465,7 +745,7 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
                     MailIconAction(MotionSymbols.ic_delete, "Delete") { confirmDelete = true }
                 }
             }
-            Item { RichMessageBody(message.text("messageContent"), Modifier.fillMaxWidth().height(460.dp), onView = { reader = it }) }
+            Item { RichMessageBody(message.text("messageContent"), Modifier.fillMaxWidth(), onView = { reader = it }) }
             val attachments = message.optJSONArray("filesList")?.objects().orEmpty()
             if (attachments.isNotEmpty()) {
                 Title("Attachments")
@@ -485,11 +765,20 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
             }
             if (message.optBoolean("replyDisabled")) Item { Text("The sender disabled replies to this message.") }
         }
-        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
-    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete message?") },
-        text = { Text(if (folder == MailboxFolder.TRASH) "This will permanently delete the message." else "The message will move to Trash.") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.action("delete:$key") {
-            withContext(Dispatchers.IO) { vm.mailbox(destination.providerId).delete(listOf(destination.messageId), folder) }; vm.details.remove(key); vm.refresh(); onBack()
-        } }) { Text("Delete") } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
+    if (confirmDelete) MotionDialog(
+        onDismissRequest = { confirmDelete = false },
+        icon = "delete",
+        title = "Delete message?",
+        text = if (folder == MailboxFolder.TRASH) "This will permanently delete the message." else "The message will move to Trash.",
+        confirmText = "Delete",
+        confirmIcon = "delete",
+        onConfirm = {
+            vm.action("delete:$key") {
+                withContext(Dispatchers.IO) { vm.mailbox(destination.providerId).delete(listOf(destination.messageId), folder) }
+                vm.details.remove(key); vm.refresh(); onBack()
+            }
+        },
+        dismissText = "Cancel",
+    )
 }

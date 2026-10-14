@@ -29,7 +29,10 @@ import io.ktor.http.Parameters
 import io.ktor.http.Url
 import io.ktor.http.isSuccess
 import io.ktor.http.parseClientCookiesHeader
+import io.ktor.http.parseServerSetCookieHeader
 import io.ktor.http.renderCookieHeader
+import io.ktor.http.renderSetCookieHeader
+import io.ktor.util.date.GMTDate
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -48,7 +51,6 @@ private const val OPEN_U_COURSES_API = "https://sheilta.apps.openu.ac.il/Main/ap
 private const val OPEN_U_AUTH_API = "https://sheilta.apps.openu.ac.il/Main/api/homeApi/isAuthenticated"
 private const val OPEN_U_MESSAGES_SEARCH = "https://sheilta.apps.openu.ac.il/Main/Messages/MessagesSearchResult"
 private const val OPEN_U_MESSAGE_CONTENT = "https://sheilta.apps.openu.ac.il/Main/Messages/MessageContent"
-private const val OPEN_U_SSO_TARGET = "https://sheilta.apps.openu.ac.il/pls/dmyopt2/sheilta.main"
 private const val OPEN_U_SSO_PROCESS = "https://sso.apps.openu.ac.il/process"
 private const val OPEN_U_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 " +
@@ -86,6 +88,7 @@ class OpenAUPlatform() : Platform {
 
     // Kept for backwards-compatible persistence. Requests use only Ktor's cookie jar.
     private var _cookies: String? = null
+    private var persistedCookieJar: JSONArray? = null
     private var persistedCookiesRestored = false
     private val cookieStorage = AcceptAllCookiesStorage()
     private val sessionMutex = Mutex()
@@ -151,6 +154,13 @@ class OpenAUPlatform() : Platform {
 
         return try {
             restorePersistedCookiesLocked()
+            // Legacy persisted cookies have no domain metadata and can shadow fresh SSO cookies.
+            for (url in listOf(OPEN_U_COURSES_PAGE, OPEN_U_SSO_PROCESS)) {
+                val requestUrl = Url(url)
+                cookieStorage.get(requestUrl).forEach { cookie ->
+                    cookieStorage.addCookie(requestUrl, cookie.copy(maxAge = null, expires = GMTDate(0)))
+                }
+            }
 
             val initialResponse = client.get(OPEN_U_COURSES_PAGE)
             if (!initialResponse.status.isSuccess()) return false
@@ -161,16 +171,17 @@ class OpenAUPlatform() : Platform {
                     append("p_user", username)
                     append("p_sisma", password)
                     append("p_mis_student", studentId)
-                    append("T_PLACE", OPEN_U_SSO_TARGET)
+                    append("T_PLACE", OPEN_U_COURSES_PAGE)
                 },
                 encodeInQuery = false
             )
             if (!loginResponse.status.isSuccess()) return false
 
-            val ssoTargetResponse = client.get(OPEN_U_SSO_TARGET)
+            val ssoTargetResponse = client.get(OPEN_U_COURSES_PAGE)
             val ssoTargetBody = ssoTargetResponse.bodyAsText()
             val authenticated = ssoTargetResponse.status.isSuccess() &&
-                !looksLikeLoginResponse(ssoTargetResponse, ssoTargetBody)
+                !looksLikeLoginResponse(ssoTargetResponse, ssoTargetBody) &&
+                authenticationStateLocked() == true
 
             loggedIn = authenticated
             if (authenticated) {
@@ -178,13 +189,14 @@ class OpenAUPlatform() : Platform {
                 snapshotCookiesLocked()
                 lastRefreshError = null
             } else {
+                Log.w(TAG, "Open University SSO did not establish an authenticated course session")
                 lastRefreshError = ERROR_LOGIN_FAILED
             }
             authenticated
         } catch (exception: Exception) {
             Log.w(TAG, "Open University authentication failed: ${exception.javaClass.simpleName}")
             loggedIn = false
-            lastRefreshError = ERROR_LOGIN_FAILED
+            lastRefreshError = ERROR_SERVER_UNREACHABLE
             false
         }
     }
@@ -214,7 +226,7 @@ class OpenAUPlatform() : Platform {
         } catch (_: OpenUSessionExpiredException) {
             if (!retryAuthentication || !authenticateLocked()) {
                 loggedIn = false
-                lastRefreshError = ERROR_LOGIN_FAILED
+                if (lastRefreshError == null) lastRefreshError = ERROR_LOGIN_FAILED
                 false
             } else {
                 try {
@@ -619,6 +631,12 @@ class OpenAUPlatform() : Platform {
         if (persistedCookiesRestored) return
         persistedCookiesRestored = true
 
+        persistedCookieJar?.let { jar ->
+            for (index in 0 until jar.length()) {
+                cookieStorage.addCookie(Url(OPEN_U_COURSES_PAGE), parseServerSetCookieHeader(jar.getString(index)))
+            }
+            return
+        }
         val persisted = _cookies?.takeIf { it.isNotBlank() } ?: return
         val requestUrl = Url(OPEN_U_COURSES_PAGE)
         parseClientCookiesHeader(persisted).forEach { (name, value) ->
@@ -637,7 +655,9 @@ class OpenAUPlatform() : Platform {
     }
 
     private suspend fun snapshotCookiesLocked() {
-        _cookies = cookieStorage.get(Url(OPEN_U_COURSES_PAGE))
+        val cookies = cookieStorage.get(Url(OPEN_U_COURSES_PAGE))
+        persistedCookieJar = JSONArray(cookies.map { renderSetCookieHeader(it.copy(maxAge = null)) })
+        _cookies = cookies
             .joinToString("; ") { renderCookieHeader(it) }
             .ifBlank { null }
     }
@@ -656,6 +676,7 @@ class OpenAUPlatform() : Platform {
     override fun getLoginFields(): LoginFields = loginFields
 
     override fun isLoggedIn(): Boolean = loggedIn
+    fun needsRelogin(): Boolean = lastRefreshError == ERROR_LOGIN_FAILED
     override fun refreshCookies(): Boolean = runBlocking {
         sessionMutex.withLock {
             refreshCoursesLocked(retryAuthentication = true)
@@ -715,6 +736,7 @@ class OpenAUPlatform() : Platform {
         .put("password", _password)
         .put("studentId", _studentId)
         .put("cookies", _cookies)
+        .put("cookieJar", persistedCookieJar)
         .put("lastCourseRefresh", lastSuccessfulRefreshMillis)
         .put("loggedIn", loggedIn)
         .put("editing", editing)
@@ -749,6 +771,7 @@ class OpenAUPlatform() : Platform {
             platform._password = obj.optString("password").takeIf { it.isNotBlank() }
             platform._studentId = obj.optString("studentId").takeIf { it.isNotBlank() }
             platform._cookies = obj.optString("cookies").takeIf { it.isNotBlank() }
+            platform.persistedCookieJar = obj.optJSONArray("cookieJar")
             platform.lastSuccessfulRefreshMillis = obj.optLong("lastCourseRefresh", 0)
             platform.loggedIn = obj.optBoolean("loggedIn", false)
             platform.editing = obj.optBoolean("editing", false)
