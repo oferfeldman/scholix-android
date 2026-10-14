@@ -508,7 +508,7 @@ fun DynamicLoginFields(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         fields.getFields().forEach { field ->
-            var value by remember(field.id, field.value) { mutableStateOf(field.value ?: "") }
+            var value by remember(fields, field.id, field.value) { mutableStateOf(field.value ?: "") }
             var passwordVisible by remember { mutableStateOf(false) }
 
             val autofillContentType = when (field.type) {

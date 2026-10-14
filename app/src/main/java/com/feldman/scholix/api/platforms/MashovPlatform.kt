@@ -234,6 +234,7 @@ class MashovPlatform() : Platform {
             .build()
         client.newCall(request).execute().use { response ->
             if (response.isSuccessful) return
+            if (response.code == 429) throw MashovSmsRateLimited()
             val body = response.body.string()
             if (response.code == 403 && body.contains("captcha", ignoreCase = true)) {
                 throw MashovCaptchaRequired()

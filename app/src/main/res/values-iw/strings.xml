@@ -158,6 +158,7 @@
     <string name="waiting_sms">ממתין לקוד ה-SMS…</string>
     <string name="mashov_sms_title">משוב · SMS</string>
     <string name="mashov_sms_timeout">הזמן לאימות ה-SMS הסתיים. נסה להתחבר שוב.</string>
+    <string name="mashov_sms_rate_limited">משוב מגביל בקשות SMS. הזינו קוד שכבר קיבלתם, או בטלו ונסו שוב מאוחר יותר.</string>
     <string name="sign_in">התחברות</string>
     <string name="fill_all_fields">יש למלא את כל השדות</string>
     <string name="shahaf_no_school">לא נמצא בית ספר בשחף עבור %1$s.</string>

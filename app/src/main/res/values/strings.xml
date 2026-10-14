@@ -156,6 +156,7 @@
     <string name="waiting_sms">Waiting for the SMS code…</string>
     <string name="mashov_sms_title">Mashov · SMS</string>
     <string name="mashov_sms_timeout">SMS verification timed out. Try signing in again.</string>
+    <string name="mashov_sms_rate_limited">Mashov is limiting SMS requests. Enter a code you already received, or cancel and try again later.</string>
     <string name="sign_in">Sign in</string>
     <string name="fill_all_fields">Please fill in all fields</string>
     <string name="shahaf_no_school">No Shahaf school is linked to %1$s.</string>

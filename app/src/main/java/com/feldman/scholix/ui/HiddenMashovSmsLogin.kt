@@ -30,6 +30,7 @@ import com.feldman.scholix.R
 import androidx.core.content.ContextCompat
 import com.feldman.scholix.api.platforms.MashovCaptchaRequired
 import com.feldman.scholix.api.platforms.MashovPlatform
+import com.feldman.scholix.api.platforms.MashovSmsRateLimited
 import com.feldman.scholix.api.platforms.mashovSmsCode
 import com.google.android.gms.auth.api.phone.SmsRetriever
 import com.google.android.gms.common.api.CommonStatusCodes
@@ -211,7 +212,12 @@ fun HiddenMashovSmsLogin(
                 listening.set(true)
                 requestedAt.set(SystemClock.elapsedRealtime())
                 updateStatus(requestingCode)
-                withContext(Dispatchers.IO) { account.requestSms() }
+                try {
+                    withContext(Dispatchers.IO) { account.requestSms() }
+                } catch (_: MashovSmsRateLimited) {
+                    codeError = context.getString(R.string.mashov_sms_rate_limited)
+                    manualCode = true
+                }
                 saveAccount(account)
                 updateStatus(waitingCode)
                 waitingForCode = true
