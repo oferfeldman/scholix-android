@@ -350,6 +350,7 @@ class MainActivity : ComponentActivity() {
                 mashovRelogin?.let { mashov ->
                     HiddenMashovSmsLogin(
                         account = mashov,
+                        requestSmsPermission = false,
                         onSmsRequested = { account ->
                             withContext(Dispatchers.IO) {
                                 PlatformStorage.addPlatforms(context, listOf(account))

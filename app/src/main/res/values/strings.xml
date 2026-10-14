@@ -149,4 +149,23 @@
     </plurals>
     <string name="providers_refresh_failed">Couldn\'t refresh %1$s. Sign in again to update.</string>
     <string name="providers_sign_in_again">Sign in</string>
+    <string name="mashov_rejected_code">Mashov did not accept the code. Try again.</string>
+    <string name="sms_login_cancelled">SMS sign-in cancelled</string>
+    <string name="verifying_sms">Verifying the SMS code…</string>
+    <string name="restoring_mashov">Restoring Mashov session…</string>
+    <string name="waiting_sms">Waiting for the SMS code…</string>
+    <string name="mashov_sms_title">Mashov · SMS</string>
+    <string name="mashov_sms_timeout">SMS verification timed out. Try signing in again.</string>
+    <string name="sign_in">Sign in</string>
+    <string name="fill_all_fields">Please fill in all fields</string>
+    <string name="shahaf_no_school">No Shahaf school is linked to %1$s.</string>
+    <string name="shahaf_no_timetable">No timetable published for %1$s.</string>
+    <string name="no_calendar_items">No tests or events published.</string>
+    <string name="no_calendar_items_class">No tests or events published for %1$s.</string>
+    <string name="no_calendar_items_week">No tests or events this week.</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="email">Email</string>
+    <string name="school_code">School code</string>
+    <string name="school_year">School year</string>
 </resources>

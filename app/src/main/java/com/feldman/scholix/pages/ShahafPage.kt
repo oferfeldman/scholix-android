@@ -67,6 +67,10 @@ fun ShahafPage(account: ShahafPlatform, modifier: Modifier = Modifier) {
     var signIn by remember { mutableStateOf(!account.isLoggedIn()) }
     var current by remember(account.id) { mutableStateOf(account) }
 
+    LaunchedEffect(account.getViewParameters()) {
+        if (current.getViewParameters() != account.getViewParameters()) current = account
+    }
+
     if (signIn) {
         ShahafLoginView(current, onSuccess = { signedIn ->
             current = signedIn
@@ -359,16 +363,16 @@ fun ShahafPage(account: ShahafPlatform, modifier: Modifier = Modifier) {
             error != null -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 ShahafMessageState(
                     message = error.orEmpty(),
-                    action = if (!current.isLoggedIn()) "Sign in again" to { signIn = true } else null,
+                    action = if (!current.isLoggedIn()) stringResource(R.string.sign_in) to { signIn = true } else null,
                 )
             }
             schools.isEmpty() -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                ShahafMessageState("No Shahaf school is linked to ${current.getName()}.")
+                ShahafMessageState(stringResource(R.string.shahaf_no_school, current.getName()))
             }
             data != null && dataBlocks.isEmpty() && tabOptions.isEmpty() && !isCalendarView ->
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     val className = classes.firstOrNull { it.optString("Id") == classId }?.optString("Name")
-                    ShahafMessageState("No timetable published for ${school.optString("name")}${className?.let { " · $it" }.orEmpty()}.")
+                    ShahafMessageState(stringResource(R.string.shahaf_no_timetable, school.optString("name") + className?.let { " · $it" }.orEmpty()))
             }
             isCalendarView -> ShahafExamCalendar(
                 examBlocks = examView?.optJSONArray("d").objects(),
@@ -636,10 +640,11 @@ private data class ShahafScheduleChange(
         .apply { if (details.isNotBlank()) put("changes", details) }
 }
 
-private fun JSONObject.toShahafScheduleItem(): JSONObject? {
+internal fun JSONObject.toShahafScheduleItem(): JSONObject? {
+    val headings = optJSONArray("h").objects().map { it.optString("t").trim() }
     val elements = optJSONArray("i").objects().filter { element ->
         val text = element.optString("t").trim()
-        text.isNotBlank() && !isShahafPeriodLabel(text)
+        text.isNotBlank() && text !in headings && !isShahafPeriodLabel(text)
     }
     if (elements.isEmpty()) return null
 
@@ -701,8 +706,8 @@ private fun JSONObject.toShahafScheduleItem(): JSONObject? {
 private fun isShahafPeriodLabel(text: String): Boolean {
     val normalized = text.trim().replace(Regex("\\s+"), " ")
     val hebrewOrdinal = "(?:ראשונה|ראשון|שניה|שנייה|שני|שלישית|שלישי|רביעית|רביעי|חמישית|חמישי|שישית|שישי|שביעית|שביעי|שמינית|שמיני|תשיעית|תשיעי|עשירית|עשירי|אחת עשרה|אחד עשר|שתים עשרה|שנים עשר|\\d+)"
-    return Regex("^(?:שעה|שיעור)\\s+$hebrewOrdinal$").matches(normalized) ||
-        Regex("^(?:Hour|Period)\\s+\\d+$", RegexOption.IGNORE_CASE).matches(normalized)
+    return Regex("^(?:שעה|שיעור)\\s+$hebrewOrdinal(?:\\s*[-–—]\\s*$hebrewOrdinal)?$").matches(normalized) ||
+        Regex("^(?:Hour|Period)\\s+\\d+(?:\\s*[-–—]\\s*\\d+)?$", RegexOption.IGNORE_CASE).matches(normalized)
 }
 
 private fun isShahafChangesView(view: JSONObject): Boolean {
@@ -772,8 +777,8 @@ private fun ShahafExamCalendar(
     if (exams.isEmpty()) {
         Box(modifier, contentAlignment = Alignment.Center) {
             ShahafMessageState(
-                if (className.isBlank()) "No tests or events published."
-                else "No tests or events published for $className.",
+                if (className.isBlank()) stringResource(R.string.no_calendar_items)
+                else stringResource(R.string.no_calendar_items_class, className),
             )
         }
         return
@@ -861,7 +866,7 @@ private fun ShahafExamCalendar(
                 } else {
                     item(key = "exam-week-empty-$weekStart") {
                         Text(
-                            text = "No tests or events this week.",
+                            text = stringResource(R.string.no_calendar_items_week),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 20.dp),
@@ -950,7 +955,7 @@ private fun ShahafExamMonth(
             )
             Box(Modifier.weight(1f)) {
                 ChipPicker(
-                    label = "Month",
+                    label = stringResource(R.string.month),
                     options = monthLabels,
                     selected = selectedMonthLabel,
                     onSelectedChange = { label ->

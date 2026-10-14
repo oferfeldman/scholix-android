@@ -13,6 +13,20 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionDialog
+import com.feldman.scholix.R
 import androidx.core.content.ContextCompat
 import com.feldman.scholix.api.platforms.MashovCaptchaRequired
 import com.feldman.scholix.api.platforms.MashovPlatform
@@ -29,6 +43,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.delay
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -51,6 +66,7 @@ fun HiddenMashovSmsLogin(
     onStatus: (String) -> Unit = {},
     onResult: suspend (MashovPlatform?, String?) -> Unit,
     timeoutMs: Long = 90_000L,
+    requestSmsPermission: Boolean = true,
 ) {
     val context = LocalContext.current
     val saveAccount by rememberUpdatedState(onSmsRequested)
@@ -60,6 +76,46 @@ fun HiddenMashovSmsLogin(
     val permission = remember(account.id) { CompletableDeferred<Boolean>() }
     val listening = remember(account.id) { AtomicBoolean(false) }
     val requestedAt = remember(account.id) { AtomicLong(0L) }
+    var waitingForCode by remember(account.id) { mutableStateOf(false) }
+    var manualCode by remember(account.id) { mutableStateOf(false) }
+    var code by remember(account.id) { mutableStateOf("") }
+    var codeError by remember(account.id) { mutableStateOf<String?>(null) }
+    val rejectedCode = stringResource(R.string.mashov_rejected_code)
+    val cancelledLogin = stringResource(R.string.sms_login_cancelled)
+    val requestingCode = stringResource(R.string.requesting_sms)
+    val verifyingCode = stringResource(R.string.verifying_sms)
+    val restoringSession = stringResource(R.string.restoring_mashov)
+    val waitingCode = stringResource(R.string.waiting_sms)
+
+    LaunchedEffect(waitingForCode) {
+        if (waitingForCode) {
+            delay(5_000)
+            manualCode = true
+        }
+    }
+    if (waitingForCode && manualCode) MotionDialog(
+        onDismissRequest = { codes.close(IOException(cancelledLogin)) },
+        title = stringResource(R.string.mashov_sms_title),
+        text = stringResource(R.string.enter_code_mobile),
+        dismissText = stringResource(R.string.cancel),
+        onDismiss = { codes.close(IOException(cancelledLogin)) },
+    ) {
+        OutlinedTextField(
+            value = code,
+            onValueChange = { code = it.filter(Char::isDigit).take(8) },
+            label = { Text(stringResource(R.string.sms_code)) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.SmsOtpCode },
+        )
+        codeError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        MotionButton(
+            text = stringResource(R.string.connect),
+            enabled = code.length in 4..8,
+            onClick = { codes.trySend(code); code = "" },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!permission.isCompleted) permission.complete(granted)
@@ -91,7 +147,7 @@ fun HiddenMashovSmsLogin(
                 if (started == 0L || SystemClock.elapsedRealtime() - started > timeoutMs) return
                 val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
                 val body = messages.joinToString(separator = "") { it.messageBody.orEmpty() }
-                mashovSmsCode(body)?.let(codes::trySend)
+                mashovSmsCode(body, messages.firstOrNull()?.displayOriginatingAddress.orEmpty())?.let(codes::trySend)
             }
         }
         ContextCompat.registerReceiver(
@@ -121,7 +177,7 @@ fun HiddenMashovSmsLogin(
     LaunchedEffect(account.id, account.getUsername(), account.mobile) {
         try {
             mashovSmsLoginMutex.withLock {
-                updateStatus("Restoring Mashov session")
+                updateStatus(restoringSession)
                 val restored = withContext(Dispatchers.IO) { account.restoreDeviceSession() }
                 if (restored) {
                     finish(account, null)
@@ -137,11 +193,10 @@ fun HiddenMashovSmsLogin(
                     context,
                     Manifest.permission.RECEIVE_SMS,
                 ) == PackageManager.PERMISSION_GRANTED
-                val useDirect = if (hasDirectPermission) true else {
-                    updateStatus("Preparing SMS verification")
+                val useDirect = if (hasDirectPermission) true else if (requestSmsPermission) {
                     permissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
                     withTimeoutOrNull(15_000L) { permission.await() } == true
-                }
+                } else false
                 if (!useDirect) {
                     val consentStarted = withTimeoutOrNull(5_000L) {
                         suspendCancellableCoroutine<Boolean> { continuation ->
@@ -150,21 +205,31 @@ fun HiddenMashovSmsLogin(
                                 .addOnFailureListener { if (continuation.isActive) continuation.resume(false) }
                         }
                     } == true
-                    if (!consentStarted) throw IOException("Android SMS verification is unavailable")
+                    if (!consentStarted) manualCode = true
                 }
 
                 listening.set(true)
                 requestedAt.set(SystemClock.elapsedRealtime())
-                updateStatus("Requesting Mashov SMS code")
+                updateStatus(requestingCode)
                 withContext(Dispatchers.IO) { account.requestSms() }
                 saveAccount(account)
-                updateStatus("Waiting for Mashov SMS code")
-
-                val code = withTimeoutOrNull(timeoutMs) { codes.receive() }
-                    ?: throw IOException("Mashov SMS verification timed out")
-                updateStatus("Verifying Mashov code")
-                val verified = withContext(Dispatchers.IO) { account.verifySms(code) }
-                if (!verified) throw IOException("Mashov did not accept the SMS code")
+                updateStatus(waitingCode)
+                waitingForCode = true
+                val verified = withTimeoutOrNull(timeoutMs) {
+                    while (true) {
+                        val candidate = codes.receive()
+                        waitingForCode = false
+                        updateStatus(verifyingCode)
+                        if (withContext(Dispatchers.IO) { account.verifySms(candidate) }) return@withTimeoutOrNull true
+                        codeError = rejectedCode
+                        manualCode = true
+                        waitingForCode = true
+                        updateStatus(waitingCode)
+                    }
+                    @Suppress("UNREACHABLE_CODE")
+                    false
+                } == true
+                if (!verified) throw IOException(context.getString(R.string.mashov_sms_timeout))
                 listening.set(false)
                 saveAccount(account)
                 finish(account, null)
@@ -177,6 +242,8 @@ fun HiddenMashovSmsLogin(
         } catch (error: Exception) {
             listening.set(false)
             finish(null, error.localizedMessage ?: "Mashov SMS login failed")
+        } finally {
+            waitingForCode = false
         }
     }
 }

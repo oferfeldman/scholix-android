@@ -1,5 +1,8 @@
 package com.feldman.scholix.pages
 
+import androidx.compose.ui.res.stringResource
+import com.feldman.scholix.R
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -524,7 +527,21 @@ fun DynamicLoginFields(
                         mutableFields.setValue(field.id, it)
                         onFieldsChanged(mutableFields)
                     },
-                    label = { Text(field.id.replaceFirstChar { c -> c.uppercase() }) },
+                    label = {
+                        Text(when (field.type) {
+                            Type.Username -> stringResource(R.string.username)
+                            Type.Id -> stringResource(R.string.id_number)
+                            Type.Password -> stringResource(R.string.password)
+                            Type.Email -> stringResource(R.string.email)
+                            is Type.Custom -> when (field.type.name) {
+                                "mobile" -> stringResource(R.string.mobile_number)
+                                "schoolCode" -> stringResource(R.string.school_code)
+                                "schoolYear" -> stringResource(R.string.school_year)
+                                else -> field.id.replaceFirstChar { c -> c.uppercase() }
+                            }
+                            else -> field.id.replaceFirstChar { c -> c.uppercase() }
+                        })
+                    },
                     leadingIcon = {
                         when (field.type) {
                             Type.Username, Type.Id -> Icon(Icons.Default.Person, null)
@@ -609,7 +626,7 @@ fun DynamicLoginFields(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(16.dp)
                         ) {
-                            Text("Cancel")
+                            Text(stringResource(R.string.cancel))
                         }
                     }
 

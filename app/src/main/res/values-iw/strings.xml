@@ -151,4 +151,23 @@
     </plurals>
     <string name="providers_refresh_failed">לא ניתן לרענן את %1$s. יש להתחבר מחדש כדי לעדכן.</string>
     <string name="providers_sign_in_again">התחברות</string>
+    <string name="mashov_rejected_code">משוב לא קיבל את הקוד. נסה שוב.</string>
+    <string name="sms_login_cancelled">ההתחברות ב-SMS בוטלה</string>
+    <string name="verifying_sms">מאמת את קוד ה-SMS…</string>
+    <string name="restoring_mashov">משחזר את ההתחברות למשוב…</string>
+    <string name="waiting_sms">ממתין לקוד ה-SMS…</string>
+    <string name="mashov_sms_title">משוב · SMS</string>
+    <string name="mashov_sms_timeout">הזמן לאימות ה-SMS הסתיים. נסה להתחבר שוב.</string>
+    <string name="sign_in">התחברות</string>
+    <string name="fill_all_fields">יש למלא את כל השדות</string>
+    <string name="shahaf_no_school">לא נמצא בית ספר בשחף עבור %1$s.</string>
+    <string name="shahaf_no_timetable">לא פורסמה מערכת עבור %1$s.</string>
+    <string name="no_calendar_items">לא פורסמו מבחנים או אירועים.</string>
+    <string name="no_calendar_items_class">לא פורסמו מבחנים או אירועים עבור %1$s.</string>
+    <string name="no_calendar_items_week">אין מבחנים או אירועים השבוע.</string>
+    <string name="username">שם משתמש</string>
+    <string name="password">סיסמה</string>
+    <string name="email">דואר אלקטרוני</string>
+    <string name="school_code">סמל מוסד</string>
+    <string name="school_year">שנת לימודים</string>
 </resources>
