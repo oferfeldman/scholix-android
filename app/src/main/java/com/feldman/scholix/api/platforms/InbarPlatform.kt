@@ -60,7 +60,12 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
     }
     fun resendSms() = http.resendSms()
     @Synchronized fun verifySms(code: String) {
-        val current = http.verifySms(code)
+        val current = try { http.verifySms(code) } catch (e: InbarGradeLayoutChanged) {
+            loggedIn = true
+            verifiedAccount = true
+            scheduleYears = e.years
+            throw e
+        }
         update(current)
         loggedIn = true
         verifiedAccount = true

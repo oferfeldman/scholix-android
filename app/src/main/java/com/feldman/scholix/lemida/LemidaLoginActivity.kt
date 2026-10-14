@@ -22,6 +22,10 @@ import android.webkit.WebResourceResponse
 import android.widget.LinearLayout
 import android.widget.Button
 import android.widget.TextView
+import android.widget.EditText
+import android.app.AlertDialog
+import android.text.InputType
+import android.view.View
 import androidx.core.content.ContextCompat
 import org.json.JSONTokener
 import kotlinx.coroutines.*
@@ -39,6 +43,37 @@ class LemidaLoginActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private val mfa = LemidaMfaState()
     private val smsConsent = LemidaSmsConsentState()
+    private var credentials: LemidaCredentials? = null
+    private var preferredEmail: String? = null
+    private var credentialsLoading = true
+    private var detailsRequested = false
+    private var detailsDialog: AlertDialog? = null
+    private val credentialPolling = LemidaCredentialPoll(
+        credentials = { credentials?.let { it.email to it.password } },
+        alive = { !isFinishing && !isDestroyed && !syncing && !credentialsLoading && detailsDialog == null && retry.visibility != View.VISIBLE },
+        url = { browser.url },
+        evaluate = { script, callback -> browser.evaluateJavascript(script) { callback(it) } },
+        scheduleTimeout = { callback -> handler.postDelayed({ callback() }, 5_000) },
+        missing = { if (!detailsRequested) { detailsRequested = true; editSignInDetails() } },
+        status = { status.text = it },
+        continueMfa = {
+            if (directSmsGranted() || smsConsent.ready(SystemClock.elapsedRealtime())) mfaPolling.poll()
+        },
+        preferredAccount = { preferredEmail ?: credentials?.email },
+        rememberAccount = { email ->
+            preferredEmail = email
+            loginScope.launch(Dispatchers.IO) { LemidaSignInStore(this@LemidaLoginActivity).remember(email) }
+        },
+    )
+    private val mfaPolling = LemidaMfaPoll(mfa,
+        now = { SystemClock.elapsedRealtime() },
+        alive = { !isFinishing && !isDestroyed && !syncing && retry.visibility != android.view.View.VISIBLE },
+        url = { browser.url }, prepareReception = { prepareSmsReception() },
+        evaluate = { script, callback -> browser.evaluateJavascript(script) { callback(it) } },
+        scheduleTimeout = { callback -> handler.postDelayed({ callback() }, 5_000) },
+        status = { status.text = it },
+        requestSms = { LemidaSignInStore(this).reserveSms() },
+    )
     private lateinit var status: TextView
     private lateinit var retry: Button
     private var receiverRegistered = false
@@ -48,6 +83,8 @@ class LemidaLoginActivity : ComponentActivity() {
     private fun showPageFailure(message: String) {
         if (isFinishing || isDestroyed || syncing) return
         signInProbe.invalidate()
+        mfaPolling.invalidate()
+        credentialPolling.invalidate()
         status.text = message
         retry.visibility = android.view.View.VISIBLE
     }
@@ -103,47 +140,80 @@ class LemidaLoginActivity : ComponentActivity() {
     private val poll = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
-            if (!directSmsGranted() && !smsConsent.ready(SystemClock.elapsedRealtime())) {
-                handler.postDelayed(this, 250); return
-            }
-            browser.evaluateJavascript(LemidaSms.selectScript(mfa.alternativeClicked, mfa.smsSelected)) { raw ->
-                if (isFinishing || isDestroyed) return@evaluateJavascript
-                when (runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()) {
-                    "alternative" -> {
-                        if (mfa.prepareAlternative()) browser.evaluateJavascript(LemidaSms.chooseScript("alternative"), null)
+            // Schedule independently: navigation can lose the current JavaScript callback.
+            handler.postDelayed(this, 750)
+            if (retry.visibility == android.view.View.VISIBLE || syncing) return
+            credentialPolling.poll()
+        }
+    }
+
+    private fun editSignInDetails() {
+        if (detailsDialog != null || isFinishing || isDestroyed) return
+        credentialPolling.invalidate()
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 12, 24, 12)
+        }
+        form.addView(TextView(this).apply {
+            text = "Your email identifies the remembered Microsoft account to tap automatically. A password is optional, for when Microsoft asks for it again. Details stay encrypted on this phone."
+        })
+        val email = EditText(this).apply {
+            hint = "University Microsoft email"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setAutofillHints(View.AUTOFILL_HINT_USERNAME, View.AUTOFILL_HINT_EMAIL_ADDRESS)
+            setText(preferredEmail ?: credentials?.email.orEmpty())
+            isSingleLine = true
+        }
+        val password = EditText(this).apply {
+            hint = "University password (optional)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setAutofillHints(View.AUTOFILL_HINT_PASSWORD)
+            isSingleLine = true
+        }
+        form.addView(email)
+        form.addView(password)
+        val dialog = AlertDialog.Builder(this).setTitle("Automatic Lemida sign-in")
+            .setView(form).setNegativeButton("Cancel", null).setPositiveButton("Save and sign in", null).create()
+        var savedDetails = false
+        detailsDialog = dialog
+        dialog.setOnDismissListener {
+            password.text?.clear(); detailsDialog = null
+            if (browser.url.isNullOrBlank() && !savedDetails) finish()
+        }
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selectedEmail = email.text.toString().trim()
+                if (!Regex("[^\\s@]+@[^\\s@]+\\.[^\\s@]+").matches(selectedEmail)) {
+                    email.error = "Enter your full university Microsoft email"
+                    return@setOnClickListener
+                }
+                val entered = password.text.toString().takeIf { it.isNotEmpty() }?.let { LemidaCredentials(selectedEmail, it) }
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                loginScope.launch {
+                    val saved = withContext(Dispatchers.IO) {
+                        runCatching {
+                            LemidaSignInStore(this@LemidaLoginActivity).apply { remember(selectedEmail); setEnabled(true) }
+                            if (entered != null) LemidaCredentialStore(this@LemidaLoginActivity).save(entered)
+                        }.isSuccess
                     }
-                    "sms" -> {
-                        if (prepareSmsReception() && mfa.prepareSms(SystemClock.elapsedRealtime())) {
-                            status.text = "SMS requested. Waiting for the Microsoft verification code…"
-                            browser.evaluateJavascript(LemidaSms.chooseScript("sms")) { result ->
-                                if (result == "false" && !isFinishing && !isDestroyed)
-                                    status.text = "The verification page changed. Select SMS in the browser to continue."
-                            }
-                        }
-                    }
-                    "otp", "otp-waiting" -> {
-                        mfa.observeOtp(SystemClock.elapsedRealtime())
-                        prepareSmsReception() // Manual selection can also follow a long password/CAPTCHA step.
-                        val code = mfa.pendingCode(SystemClock.elapsedRealtime())
-                        if (code != null) {
-                            // Filling may enable Verify asynchronously. Keep the code until it can be submitted.
-                            browser.evaluateJavascript(LemidaSms.prepareCodeScript(code)) ready@{ ready ->
-                                if (isFinishing || isDestroyed) return@ready
-                                if (ready != "true") return@ready
-                                if (mfa.pendingCode(SystemClock.elapsedRealtime()) != code) return@ready
-                                val toSubmit = mfa.consumeCode(SystemClock.elapsedRealtime()) ?: return@ready
-                                browser.evaluateJavascript(LemidaSms.submitScript(toSubmit)) submitted@{ result ->
-                                    if (isFinishing || isDestroyed) return@submitted
-                                    if (result == "true") status.text = "Microsoft SMS code submitted. Completing sign-in…"
-                                    else if (result == "false") status.text = "The verification page changed. Enter the code in the browser to continue."
-                                }
-                            }
-                        }
+                    if (saved) {
+                        savedDetails = true
+                        preferredEmail = selectedEmail
+                        credentials = entered ?: credentials?.takeIf { it.email.equals(selectedEmail, true) }
+                        credentialPolling.detailsChanged()
+                        status.text = "Sign-in details saved on this phone. Continuing automatically…"
+                        if (browser.url.isNullOrBlank()) browser.loadUrl("${LemidaParser.BASE}/my/")
+                        dialog.dismiss()
+                    } else {
+                        status.text = "Sign-in details could not be saved. Try again or continue in the browser."
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
                     }
                 }
-                handler.postDelayed(this, 750)
             }
         }
+        dialog.show()
+        dialog.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        email.requestFocus()
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -161,11 +231,17 @@ class LemidaLoginActivity : ComponentActivity() {
         layout.addView(status)
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         actions.addView(Button(this).apply { text = "Cancel"; setOnClickListener { finish() } })
+        actions.addView(Button(this).apply { text = "Sign-in details"; setOnClickListener { editSignInDetails() } })
         retry = Button(this).apply {
             text = "Retry"
             visibility = android.view.View.GONE
             setOnClickListener {
                 visibility = android.view.View.GONE
+                signInProbe.invalidate()
+                mfaPolling.invalidate()
+                credentialPolling.invalidate()
+                reconnectPaths.clear() // A deliberate Retry gets a new bounded portal/provider attempt.
+                status.text = "Retrying Lemida sign-in…"
                 browser.loadUrl("${LemidaParser.BASE}/my/")
             }
         }
@@ -180,6 +256,12 @@ class LemidaLoginActivity : ComponentActivity() {
         browser.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 signInProbe.invalidate()
+                mfaPolling.invalidate()
+                credentialPolling.invalidate()
+                if (!isFinishing && !isDestroyed && !syncing && retry.visibility == android.view.View.VISIBLE) {
+                    retry.visibility = android.view.View.GONE
+                    status.text = "Loading Lemida sign-in…"
+                }
             }
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (request.isForMainFrame)
@@ -197,7 +279,8 @@ class LemidaLoginActivity : ComponentActivity() {
                     if (view.url != url || syncing) return@evaluateJavascript
                     if (value != "true" && reconnectPaths.size < 2) {
                         view.evaluateJavascript(LemidaRequestScript.document(url)) entry@{ raw ->
-                            if (isFinishing || isDestroyed || syncing || reconnectPaths.size >= 2 || view.url != url ||
+                            if (isFinishing || isDestroyed || syncing || !signInProbe.isCurrent(request) ||
+                                reconnectPaths.size >= 2 || view.url != url ||
                                 view.webViewClient !== this) return@entry
                             val html = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull() ?: return@entry
                             val entry = LemidaParser.reconnectUrl(html) ?: return@entry
@@ -238,6 +321,14 @@ class LemidaLoginActivity : ComponentActivity() {
         }
         layout.addView(browser, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(layout)
+        loginScope.launch {
+            withContext(Dispatchers.IO) {
+                preferredEmail = LemidaSignInStore(this@LemidaLoginActivity).email()
+                credentials = LemidaCredentialStore(this@LemidaLoginActivity).load()?.takeIf { preferredEmail == null || it.email.equals(preferredEmail, true) }
+            }
+            credentialsLoading = false
+            if (intent.getBooleanExtra("edit_sign_in_details", false)) editSignInDetails()
+        }
         ContextCompat.registerReceiver(this, consentReceiver, IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION),
             SmsRetriever.SEND_PERMISSION, null, ContextCompat.RECEIVER_EXPORTED)
         consentRegistered = true
@@ -257,10 +348,12 @@ class LemidaLoginActivity : ComponentActivity() {
             // Start listening before the picker can request an SMS; failure keeps manual entry available.
             startSmsConsent()
         }
-        browser.loadUrl("${LemidaParser.BASE}/my/")
+        if (!intent.getBooleanExtra("edit_sign_in_details", false)) browser.loadUrl("${LemidaParser.BASE}/my/")
         handler.postDelayed(poll, 750)
     }
     override fun onDestroy() {
+        detailsDialog?.dismiss()
+        credentials = null
         handler.removeCallbacksAndMessages(null)
         loginScope.cancel()
         if (receiverRegistered) unregisterReceiver(smsReceiver)

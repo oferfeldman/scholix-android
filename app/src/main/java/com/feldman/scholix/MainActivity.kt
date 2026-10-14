@@ -545,6 +545,7 @@ fun MainScreen(
             AppDest.TiktekSolution(imageUrl = ""),
             AppDest.Locker,
             AppDest.Homework,
+            AppDest.Materials,
             AppDest.Settings,
             AppDest.Platforms,
             AppDest.AddPlatform,
@@ -583,6 +584,14 @@ fun MainScreen(
     }
 
     val backStack = rememberMotionDestBackStack(startDestination)
+    // Opening the app on its default Grades page is not a request for an Inbar SMS.
+    var userOpenedPages by remember { mutableStateOf<Set<AppDest>>(emptySet()) }
+    fun navigateFromUser(destination: MotionDest, topLevel: Boolean = false) {
+        if (destination == AppDest.Grades || destination == AppDest.Schedule) {
+            userOpenedPages = userOpenedPages + (destination as AppDest)
+        }
+        if (topLevel) backStack.navigateTop(destination) else backStack.navigateTo(destination)
+    }
     var handledHomeworkOpenRequest by rememberSaveable { mutableIntStateOf(0) }
     var handledProvidersOpenRequest by rememberSaveable { mutableIntStateOf(0) }
     LaunchedEffect(providersOpenRequest) {
@@ -615,7 +624,7 @@ fun MainScreen(
     val messagesViewModel: MessagesViewModel = viewModel()
     LaunchedEffect(platforms) { messagesViewModel.configure(platforms) }
 
-    val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, overflowPagesList, homeworkOpenRequest) {
+    val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, overflowPagesList, homeworkOpenRequest, userOpenedPages, currentScreen) {
         AppState(
             preloadedCourses = preloadedCourses,
             repository = repository,
@@ -628,6 +637,8 @@ fun MainScreen(
             overflowPages = overflowPagesList,
             messagesViewModel = messagesViewModel,
             homeworkOpenRequest = homeworkOpenRequest,
+            userOpenedPages = userOpenedPages,
+            activePage = currentScreen,
         )
     }
 
@@ -650,7 +661,7 @@ fun MainScreen(
                     selectedDestination = selectedNavbarDest,
                     pinnedEndDestination = AppDest.Settings,
                     replacePinnedEndWhenFull = true,
-                    onDestinationSelected = { dest -> backStack.navigateTop(dest) },
+                    onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = true) },
                     contrastBlurEnabled = navigationBlurred,
                     onOverflowChanged = { overflowPagesList = it.filterIsInstance<AppDest>() },
                 )

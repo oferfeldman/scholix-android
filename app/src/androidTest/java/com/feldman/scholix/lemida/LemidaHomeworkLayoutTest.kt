@@ -27,7 +27,7 @@ class LemidaHomeworkLayoutTest {
                 MaterialTheme {
                     Box(Modifier.width(320.dp)) {
                         LemidaHomeworkFilters(19, 0L,
-                            listOf(Homework("1", 1, "מתמטיקה בדידה", "תרגיל", "assign", "", "")),
+                            listOf(LemidaCourse(1, "מתמטיקה בדידה")),
                             "", {}, null, {}, "all", {})
                     }
                 }

@@ -51,6 +51,19 @@ sealed class AppDest : MotionDest {
 
     @Serializable
     @Parcelize
+    data object Materials : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Materials"
+        @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
+        @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_docs_outline
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.drive.DriveMaterialsPage(searchQuery)
+        }
+    }
+
+    @Serializable
+    @Parcelize
     data object Homework : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Homework"
         @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Description
@@ -129,7 +142,9 @@ sealed class AppDest : MotionDest {
             val state = LocalAppState.current
             GradesScreen(
                 preloadedCourses = state.preloadedCourses,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                inbarAccessRequested = Grades in state.userOpenedPages,
+                isActive = state.activePage == Grades
             )
         }
     }
@@ -157,7 +172,9 @@ sealed class AppDest : MotionDest {
         ) {
             SchedulePage(
                 platforms = LocalAppState.current.platforms,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                inbarAccessRequested = Schedule in LocalAppState.current.userOpenedPages,
+                isActive = LocalAppState.current.activePage == Schedule
             )
         }
     }

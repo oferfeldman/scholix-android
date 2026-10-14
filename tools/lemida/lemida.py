@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import re
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -21,6 +23,61 @@ ROOT = Path(__file__).resolve().parent
 
 def text(node):
     return ' '.join(node.stripped_strings) if node else ''
+
+
+def list_ordinal(raw):
+    match = re.match(r'^[\t\n\f\r ]*([+-]?[0-9]+)', str(raw or ''))
+    return int(match[1]) if match else None
+
+
+def list_marker(ordinal, kind):
+    if kind in ('a', 'A') and ordinal > 0:
+        letters = ''
+        while ordinal > 0:
+            ordinal, remainder = divmod(ordinal - 1, 26)
+            letters = chr(ord('a') + remainder) + letters
+        return letters.upper() if kind == 'A' else letters
+    if kind in ('i', 'I') and 1 <= ordinal <= 3999:
+        roman = ''
+        for value, symbol in ((1000, 'M'), (900, 'CM'), (500, 'D'), (400, 'CD'),
+                              (100, 'C'), (90, 'XC'), (50, 'L'), (40, 'XL'),
+                              (10, 'X'), (9, 'IX'), (5, 'V'), (4, 'IV'), (1, 'I')):
+            count, ordinal = divmod(ordinal, value)
+            roman += symbol * count
+        return roman.lower() if kind == 'i' else roman
+    return str(ordinal)
+
+
+def readable_text(node):
+    if node is None:
+        return ''
+    content = soup(str(node))
+    for br in content.select('br'):
+        br.replace_with('\n')
+    for listing in content.select('ol, ul, menu'):
+        items = listing.find_all('li', recursive=False)
+        ordered = listing.name == 'ol'
+        reversed_list = listing.has_attr('reversed')
+        ordinal = list_ordinal(listing.get('start'))
+        if ordinal is None:
+            ordinal = len(items) if reversed_list else 1
+        for item in items:
+            value = list_ordinal(item.get('value')) if ordered else None
+            if value is not None:
+                ordinal = value
+            marker = list_marker(ordinal, item.get('type') or listing.get('type')) + '.' if ordered else '•'
+            item.insert(0, marker + ' ')
+            ordinal += -1 if reversed_list else 1
+        listing.insert(0, '\n')
+        listing.append('\n')
+    for item in content.select('li'):
+        if item.parent.name not in ('ol', 'ul', 'menu'):
+            item.insert(0, '• ')
+    for cell in content.select('th, td'):
+        cell.append(' ')
+    for block in content.select('p, div, li, h1, h2, h3, tr'):
+        block.append('\n')
+    return '\n'.join(' '.join(line.split()) for line in content.get_text().splitlines() if line.strip())
 
 
 def soup(html):
@@ -68,15 +125,11 @@ def tables(container):
                 content = soup(str(cell))
                 for nested in content.select('table'):
                     nested.decompose()
-                for br in content.select('br'):
-                    br.replace_with('\n')
-                for block in content.select('p, div, li, h1, h2, h3'):
-                    block.append('\n')
-                cells.append('\n'.join(' '.join(line.split()) for line in content.get_text().splitlines() if line.strip()))
+                cells.append(readable_text(content))
             if any(cells):
                 rows.append(cells)
         if rows:
-            result.append({'caption': text(table.find('caption', recursive=False)), 'rows': rows})
+            result.append({'caption': readable_text(table.find('caption', recursive=False)), 'rows': rows})
     return result
 
 
@@ -134,16 +187,30 @@ def parse_detail(html):
     main = s.select_one('#region-main') or s.select_one('main') or s
     for node in main.select('script, style, noscript'):
         node.decompose()
+    descriptions = main.select('.activity-description, #intro, .generalbox')
+    top_level = [node for node in descriptions if not any(parent in descriptions for parent in node.parents)]
     return {'title': text(s.select_one('h1')) or text(s.title),
-            'description': text(main.select_one('.activity-description, .box.generalbox')),
+            'description': '\n\n'.join(readable_text(node) for node in top_level),
             'dates': [{'timestamp': n.get('data-timestamp'), 'text': text(n)}
                       for n in main.select('[data-timestamp]')],
-            'tables': tables(main), 'files': files(main), 'text': text(main)}
+            'tables': tables(main), 'files': files(main), 'text': readable_text(main)}
 
 
 def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
+    temporary = None
+    try:
+        # Publish only a complete file; a failed write must leave the previous export intact.
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                         prefix=f'.{path.name}.', suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def offline(args):
@@ -248,11 +315,17 @@ class Client:
                 return
             with tolerate_navigation():
                 if urlparse(self.page.url).hostname == 'login.microsoftonline.com':
+                    otp = self.page.locator('#idTxtBx_SAOTCC_OTC')
+                    otp_visible = otp.count() and otp.is_visible()
+                    if otp_visible:
+                        # A challenge may already exist without this run selecting SMS.
+                        # Keep the guards even if navigation later hides the field.
+                        switched = sms_selected = True
                     if self.args.mfa == 'sms' and not switched:
                         alternative = self.page.locator('#signInAnotherWay')
                         if alternative.count() and alternative.is_visible():
-                            alternative.click()
                             switched = True
+                            alternative.click()
                     if self.args.mfa == 'sms' and not sms_selected:
                         choice = self.page.locator('[data-value="OneWaySMS"]').first
                         if not choice.count():
@@ -263,8 +336,7 @@ class Client:
                             sms_selected = True
                             choice.click()
                             print('Selected SMS verification. No automatic resend will be requested.')
-                    otp = self.page.locator('#idTxtBx_SAOTCC_OTC')
-                    if otp.count() and otp.is_visible() and not code_prompted:
+                    if otp_visible and not code_prompted:
                         code_prompted = True
                         print('SMS code entry detected. Enter the code in the browser.')
                         if self.args.console_sms:
@@ -349,6 +421,7 @@ class Client:
 
 def live(args):
     client = Client(args)
+    result = None
     try:
         client.login()
         if args.command == 'login':
@@ -359,13 +432,13 @@ def live(args):
             raise RuntimeError('No courses found. Supply --course-id from a course URL.')
         result = {'source': BASE, 'exported_at': datetime.now(timezone.utc).isoformat(),
                   'courses': [], 'errors': []}
+        failed_output = args.output.with_name(f'{args.output.stem}.failed{args.output.suffix}')
         for cid, course in selected.items():
             print(f'Reading course {cid}...')
             try:
                 record = parse_course(client.fetch(course['url']), course['url'])
                 result['courses'].append(record)
             except LoginRequired:
-                write_json(args.output, result)
                 raise
             except Exception as exc:
                 result['errors'].append({'course_id': cid, 'stage': 'course', 'error': str(exc)})
@@ -380,15 +453,23 @@ def live(args):
                     else:
                         next(a for a in record['activities'] if a['url'] == url)['detail'] = detail
                 except LoginRequired:
-                    write_json(args.output, result)
                     raise
                 except Exception as exc:
                     result['errors'].append({'course_id': cid, 'url': url, 'stage': kind, 'error': str(exc)})
                 client.page.wait_for_timeout(300)
-            write_json(args.output, result)
-        print(f'Exported {len(result["courses"])} courses to {args.output}; {len(result["errors"])} errors.')
         if result['errors']:
+            write_json(failed_output, result)
+            print(f'Update incomplete: {len(result["errors"])} errors. Previous export preserved. '
+                  f'Partial diagnostics saved to {failed_output}.')
             return 2
+        write_json(args.output, result)
+        print(f'Exported {len(result["courses"])} courses to {args.output}; 0 errors.')
+    except LoginRequired as exc:
+        if result is not None:
+            result['errors'].append({'stage': 'session', 'error': str(exc)})
+            write_json(failed_output, result)
+            print(f'Sync stopped. Previous export preserved. Partial diagnostics saved to {failed_output}.')
+        raise
     finally:
         client.close()
 

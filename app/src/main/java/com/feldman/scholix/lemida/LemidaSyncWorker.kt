@@ -21,11 +21,11 @@ class LemidaSyncWorker(private val context: Context, params: WorkerParameters) :
         val repo = LemidaRepository(context)
         if (!repo.enabled() && !inputData.getBoolean(MANUAL_REFRESH, false)) return Result.success()
         return try {
-            val account = if (repo.needsLogin()) null else try {
+            val account = if (repo.needsLogin() && !LemidaSignInStore(context).canRecover()) null else try {
                 repo.sync()
             } catch (_: LemidaSessionExpired) { null }
             if (account == null) {
-                // No background MFA/CAPTCHA attempts or SMS resends; stale reminders are suppressed.
+                // A manual browser check remains necessary when automatic recovery cannot finish.
                 repo.deliverLoginReminder { notify(context, 73121, "Lemida needs sign-in",
                     "Open Homework and sign in again to resume automatic updates.") }
             } else {

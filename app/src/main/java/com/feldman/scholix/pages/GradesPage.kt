@@ -676,8 +676,18 @@ private fun CoursePickerPane(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
+fun GradesScreen(
+    modifier: Modifier,
+    preloadedCourses: List<JSONObject>,
+    inbarAccessRequested: Boolean = false,
+    isActive: Boolean = true,
+) {
     val context = LocalContext.current
+    var inbarRequestedByUser by remember { mutableStateOf(false) }
+    val active by rememberUpdatedState(isActive)
+    val navigationRequested by rememberUpdatedState(inbarAccessRequested)
+    fun inbarAllowed() = active && (navigationRequested || inbarRequestedByUser)
+    val canAccessInbar = inbarAllowed()
     val expressiveDesign by remember(context) { context.expressiveDesignFlow() }.collectAsState(initial = true)
 
 
@@ -723,18 +733,49 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                 PlatformStorage.loadPlatforms(context).associateBy { it.id }
             }.getOrDefault(emptyMap())
         }
-        // A saved account may still be waiting for its first SMS verification.
-        if (courses.isEmpty()) {
-            inbarRelogin = providersById.values.filterIsInstance<InbarPlatform>()
-                .firstOrNull { !it.isLoggedIn() && it.hasSavedLoginDetails() }
-            if (inbarRelogin != null) { reloginAttempted = true; isLoading = true }
+    }
+    LaunchedEffect(canAccessInbar, providersById, courses.isEmpty()) {
+        if (canAccessInbar && courses.isEmpty() && !reloginAttempted) {
+            val account = providersById.values.filterIsInstance<InbarPlatform>()
+                .firstOrNull { it.hasSavedLoginDetails() } ?: return@LaunchedEffect
+            reloginAttempted = true
+            isLoading = true
+            try {
+                val result = withContext(Dispatchers.IO) { account.getGrades("all", null, null) }
+                if (!inbarAllowed()) return@LaunchedEffect
+                if (result.optJSONObject(0)?.optString("error") == "login_failed") {
+                    inbarRelogin = account
+                } else {
+                    courses = withContext(Dispatchers.IO) {
+                        PlatformStorage.saveInbarLoginProgress(context, account)
+                        PlatformStorage.getCourses(context)
+                    }
+                    courseLoadFinished = true
+                    isLoading = false
+                    if (courses.isNotEmpty()) reloginAttempted = false
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                isLoading = false
+                errorMessage = "Cannot reach the server.\nCheck your internet connection."
+            }
+        }
+    }
+    LaunchedEffect(isActive) {
+        if (!isActive) {
+            inbarRequestedByUser = false
+            inbarRelogin = null
+            reloginAttempted = false
+            loadedKey = null
+            isLoading = false
         }
     }
     var portalRelogin by remember { mutableStateOf<StudentsPortalPlatform?>(null) }
     var webtopRelogin by remember { mutableStateOf<WebtopPlatform?>(null) }
     fun keyFor(course: JSONObject?, year: Int, semester: String) =
         course?.let {
-            "${it.optString("courseKey").ifBlank { it.optString("name") }}|$year|${semester.lowercase()}"
+            "${it.optString("courseKey").ifBlank { it.optString("name") }}|$year|${semester.lowercase()}|$canAccessInbar"
         }
 
     Log.d("GradesPage", "initial year: $initialYear | initial semester: $initialSemester")
@@ -783,6 +824,9 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                     if (platform == null) {
                         gradesArray = JSONArray()
                         requestError = "Could not find account for this course."
+                    } else if (platform is InbarPlatform && !inbarAllowed()) {
+                        // Startup displays saved grades without contacting Inbar or requesting SMS.
+                        gradesArray = course.optJSONArray("grades") ?: JSONArray()
                     } else {
                         gradesArray = platform.getGrades(
                             course = course.optString("courseKey").ifBlank { course.optString("name") },
@@ -821,7 +865,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
             if (currentId == requestId) {
                 val inbar = requestPlatform as? InbarPlatform
                 if (requestErrorCode == "login_failed" && inbar != null &&
-                    inbar.hasSavedLoginDetails() && !reloginAttempted && inbarRelogin == null) {
+                    inbarAllowed() && inbar.hasSavedLoginDetails() && !reloginAttempted && inbarRelogin == null) {
                     reloginAttempted = true
                     inbarRelogin = inbar
                     isLoading = true
@@ -860,7 +904,8 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
 
     var sortBy by rememberSaveable { mutableStateOf("Date") }
 
-    LaunchedEffect(courses, selectedTab, semesterState, yearState) {
+    LaunchedEffect(courses, selectedTab, semesterState, yearState, canAccessInbar, isActive) {
+        if (!isActive) return@LaunchedEffect
         if (inbarRelogin != null) return@LaunchedEffect
         val selectedCourse = courses.getOrNull(selectedTab)
         val selectedKey = keyFor(selectedCourse, yearState, semesterState)
@@ -1006,17 +1051,17 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
         }
     }
 
-    inbarRelogin?.let { savedAccount ->
+    inbarRelogin?.takeIf { canAccessInbar }?.let { savedAccount ->
         val pending = remember(savedAccount) { savedAccount.forSmsLogin() }
         HiddenInbarLogin(account = pending,
             reuseSavedSession = { withContext(Dispatchers.IO) { PlatformStorage.restoreVerifiedInbarSession(context, pending) } },
             onSmsRequested = { account ->
-                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                withContext(Dispatchers.IO) { PlatformStorage.saveInbarLoginProgress(context, account) }
             }, onResult = { account, error ->
                 if (account != null) {
                     val selectedKey = courses.getOrNull(selectedTab)?.optString("courseKey")
                     val refreshed = withContext(Dispatchers.IO) {
-                        PlatformStorage.addPlatforms(context, listOf(account))
+                        PlatformStorage.saveInbarLoginProgress(context, account)
                         PlatformStorage.getCourses(context)
                     }
                     inbarRelogin = null
@@ -1041,10 +1086,13 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (!courseLoadFinished || inbarRelogin != null || isLoading) {
                 GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
+            } else if (!canAccessInbar && providersById.values.any { it is InbarPlatform && it.hasSavedLoginDetails() }) {
+                TextButton(onClick = { inbarRequestedByUser = true }) { Text("Load Inbar grades") }
             } else if (errorMessage != null) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
                     TextButton(onClick = {
+                        inbarRequestedByUser = true
                         inbarRelogin = providersById.values.filterIsInstance<InbarPlatform>()
                             .firstOrNull { it.hasSavedLoginDetails() }
                         if (inbarRelogin != null) { isLoading = true; errorMessage = null }
@@ -1071,7 +1119,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                 CoursePickerPane(
                     courses = courses,
                     selectedIndex = selectedTab,
-                    onSelected = { selectedTab = it },
+                    onSelected = {
+                        if (providersById[courses.getOrNull(it)?.optString("platformId")] is InbarPlatform) inbarRequestedByUser = true
+                        selectedTab = it
+                    },
                     providersById = providersById,
                     modifier = Modifier
                         .width(280.dp)
@@ -1094,7 +1145,10 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                 CoursePickerBar(
                     courses = courses,
                     selectedIndex = selectedTab,
-                    onSelected = { selectedTab = it },
+                    onSelected = {
+                        if (providersById[courses.getOrNull(it)?.optString("platformId")] is InbarPlatform) inbarRequestedByUser = true
+                        selectedTab = it
+                    },
                     expanded = courseMenuExpanded,
                     onExpandedChange = { courseMenuExpanded = it },
                     providersById = providersById
@@ -1103,6 +1157,9 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
             }
 
             val pullRefreshState = rememberPullToRefreshState()
+            if (!canAccessInbar && providersById[courses.getOrNull(selectedTab)?.optString("platformId")] is InbarPlatform) {
+                TextButton(onClick = { inbarRequestedByUser = true }) { Text("Load Inbar grades") }
+            }
             var gradesViewportHeight by remember { mutableIntStateOf(0) }
             var gradesControlsHeight by remember { mutableIntStateOf(0) }
             val density = LocalDensity.current
@@ -1112,6 +1169,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                 isRefreshing = isRefreshing,
                 onRefresh = {
                     val selectedCourse = courses.getOrNull(selectedTab)
+                    if (providersById[selectedCourse?.optString("platformId")] is InbarPlatform) inbarRequestedByUser = true
                     if (selectedCourse != null) {
                         launchGradesRequest(
                             context,
@@ -1172,6 +1230,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                             selected = yearState.toString(),
                                             optionIcon = { rememberSymbolPainter(name = MotionSymbols.ic_calendar_month) },
                                             onSelectedChange = { newYear ->
+                                                if (providersById[selectedCourse?.optString("platformId")] is InbarPlatform) inbarRequestedByUser = true
                                                 yearState = newYear.toInt()
                                                 val selectedCourse = courses[selectedTab]
                                                 launchGradesRequest(
@@ -1200,6 +1259,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                                 )
                                             },
                                             onSelectedChange = { newSemester ->
+                                                if (providersById[selectedCourse?.optString("platformId")] is InbarPlatform) inbarRequestedByUser = true
                                                 semesterState = newSemester
                                                 val selectedCourse = courses[selectedTab]
                                                 launchGradesRequest(
@@ -1382,6 +1442,7 @@ fun GradesScreen(modifier: Modifier, preloadedCourses: List<JSONObject>) {
                                     val savedInbar = providersById[selectedCourse?.optString("platformId")] as? InbarPlatform
                                     if (savedInbar?.hasSavedLoginDetails() == true) {
                                         TextButton(onClick = {
+                                            inbarRequestedByUser = true
                                             inbarRelogin = savedInbar
                                             isLoading = true
                                             errorMessage = null
