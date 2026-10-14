@@ -53,7 +53,7 @@ import com.feldman.motion.MotionButtonState
 import com.feldman.motion.MotionDropdown
 import com.feldman.motion.MotionDropdownDefaults
 import com.feldman.motion.MotionDropdownDirection
-import com.feldman.motion.MotionDropdownFolder
+import androidx.compose.animation.AnimatedContent
 import com.feldman.motion.MotionDropdownMenuAlignment
 import com.feldman.motion.MotionDropdownTextFit
 import com.feldman.motion.MotionLazyColumn
@@ -359,11 +359,12 @@ private fun CoursePickerBar(
         menuDescriptions = visibleMenuDescriptions,
         menuHeader = if (!hasFolders) null else {
             {
-                MotionDropdownFolder(
-                    inFolder = openFolderPlatformId != null,
+                AnimatedContent(
+                    targetState = openFolderPlatformId,
                     modifier = Modifier.fillMaxWidth(),
-                ) { inFolder ->
-                    val activeFolderId = openFolderPlatformId
+                    label = "Course folder",
+                ) { activeFolderId ->
+                    val inFolder = activeFolderId != null
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()

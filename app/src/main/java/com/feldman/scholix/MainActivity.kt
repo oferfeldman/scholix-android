@@ -126,8 +126,6 @@ import com.feldman.scholix.services.GradeMonitorWorker
 import com.feldman.scholix.services.MessageMonitorWorker
 import com.feldman.scholix.storage.OrientationMode
 import com.feldman.scholix.storage.orientationModeFlow
-import com.feldman.scholix.storage.defaultNavbarPages
-import com.feldman.scholix.storage.navbarPagesFlow
 import com.feldman.scholix.widgets.GradesWidgetReceiver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay

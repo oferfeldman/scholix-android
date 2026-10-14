@@ -8,7 +8,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
-import com.feldman.motion.MotionIcons
 import com.feldman.motion.MotionDest
 import com.feldman.motion.MotionNavigator
 import com.feldman.motion.MotionBottomSheetBackdropScope
@@ -66,7 +65,6 @@ sealed class AppDest : MotionDest {
     @Parcelize
     data object Homework : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Homework"
-        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Description
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
         @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_docs_outline
         @Composable
@@ -124,7 +122,6 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Grades"
-        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Description
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_docs
@@ -155,7 +152,6 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Schedule"
-        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.ViewAgenda
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_schedule
@@ -185,7 +181,6 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Attendance"
-        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Alarm
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_alarm
@@ -211,7 +206,6 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Messages"
-        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Chat
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_message
@@ -343,7 +337,6 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Locker"
-        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Lock
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_lock
@@ -379,7 +372,6 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Tiktek"
-        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.LiveHelp
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_live_help
@@ -453,7 +445,6 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel
         @Transient
         override val label = "Settings"
-        @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Settings
         @IgnoredOnParcel
         @Transient
         override val filledIcon = R.drawable.ic_settings

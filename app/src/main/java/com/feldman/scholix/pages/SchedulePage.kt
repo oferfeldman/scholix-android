@@ -767,10 +767,12 @@ fun SchedulePage(
                             val inbar = platform as? InbarPlatform
                             if (inbar != null && inbar.hasSavedLoginDetails()) {
                                 TextButton(onClick = {
+                                    inbarRequestedByUser = true
                                     errorMessages[page] = null
                                     isLoading = true
-                                    inbarRelogin = inbar.forSmsLogin()
-                                }) { Text("Retry login") }
+                                    if (canAccessInbar) inbarRelogin = inbar.forSmsLogin()
+                                    else scheduleReloadTrigger++
+                                }) { Text(if (canAccessInbar) "Retry login" else "Load Inbar schedule") }
                             }
                             }
                         }
