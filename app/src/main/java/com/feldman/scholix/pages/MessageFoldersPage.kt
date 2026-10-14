@@ -1,5 +1,6 @@
 package com.feldman.scholix.pages
 
+import com.feldman.motion.MotionDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -11,10 +12,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.feldman.motion.*
 import com.feldman.scholix.AppDest
-import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.LocalAppState
 import com.feldman.scholix.api.platforms.*
 import com.feldman.scholix.ui.components.SettingsTopBar
+import com.feldman.scholix.ui.components.pickerMenuWidth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -41,6 +42,11 @@ fun MessageFoldersPage(destination: AppDest.MessageFolders, onBack: () -> Unit) 
         if (vm.error != null || vm.notice != null) Item { MailFeedback(vm) }
         Item(modifier = Modifier.padding(vertical = 12.dp)) {
             MotionDropdown(
+                sizes = MotionDropdownDefaults.sizes(
+                    menuMaxWidth = pickerMenuWidth(listOf("New folder") + folders.map { it.text("name") }),
+                ),
+                text = MotionDropdownDefaults.text(valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
+                menu = MotionDropdownDefaults.menu(matchAnchorWidth = false, alignment = MotionDropdownMenuAlignment.Center),
                 options = listOf(0) + folders.map { it.optInt("id", -1) }.filter { it > 0 },
                 selected = editing,
                 onSelected = ::choose,
@@ -91,25 +97,24 @@ fun MessageFoldersPage(destination: AppDest.MessageFolders, onBack: () -> Unit) 
                 }
             }
         }
-        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
     deletion?.let { target ->
-        AlertDialog(
+        MotionDialog(
             onDismissRequest = { deletion = null },
-            title = { Text("Delete folder?") },
-            text = { Text("Delete \"${target.text("name")}\"?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    val id = target.optInt("id", -1)
-                    deletion = null
-                    vm.action("folder-delete") {
-                        withContext(Dispatchers.IO) { vm.mailbox(destination.providerId).deleteFolder(folder, id) }
-                        if (editing == id) { editing = 0; name = "" }
-                        reload()
-                    }
-                }) { Text("Delete") }
+            icon = "delete",
+            title = "Delete folder?",
+            text = "Delete \"${target.text("name")}\"?",
+            confirmText = "Delete",
+            confirmIcon = "delete",
+            onConfirm = {
+                val id = target.optInt("id", -1)
+                vm.action("folder-delete") {
+                    withContext(Dispatchers.IO) { vm.mailbox(destination.providerId).deleteFolder(folder, id) }
+                    if (editing == id) { editing = 0; name = "" }
+                    reload()
+                }
             },
-            dismissButton = { TextButton(onClick = { deletion = null }) { Text("Cancel") } }
+            dismissText = "Cancel",
         )
     }
 }
@@ -144,6 +149,11 @@ fun NotificationsPage(providerId: String, onNavigate: MotionNavigator, onBack: (
         } }
         if (children.isNotEmpty()) Item {
             MotionDropdown(
+                sizes = MotionDropdownDefaults.sizes(
+                    menuMaxWidth = pickerMenuWidth(children.map { it.text("name") }),
+                ),
+                text = MotionDropdownDefaults.text(valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
+                menu = MotionDropdownDefaults.menu(matchAnchorWidth = false, alignment = MotionDropdownMenuAlignment.Center),
                 options = children,
                 selected = children.firstOrNull { it.text("id") == child } ?: children.first(),
                 onSelected = { child = it.text("id") },
@@ -187,9 +197,19 @@ fun NotificationsPage(providerId: String, onNavigate: MotionNavigator, onBack: (
                 })
             }
         } }
-        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
-    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete notifications?") },
-        confirmButton = { TextButton(onClick = { confirmDelete = false; vm.action("notifications-delete") { withContext(Dispatchers.IO) { vm.mailbox(providerId).deleteNotifications(selected) }; selected = emptyList(); refresh() } }) { Text("Delete") } },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
+    if (confirmDelete) MotionDialog(
+        onDismissRequest = { confirmDelete = false },
+        icon = "delete",
+        title = "Delete notifications?",
+        confirmText = "Delete",
+        confirmIcon = "delete",
+        onConfirm = {
+            vm.action("notifications-delete") {
+                withContext(Dispatchers.IO) { vm.mailbox(providerId).deleteNotifications(selected) }
+                selected = emptyList(); refresh()
+            }
+        },
+        dismissText = "Cancel",
+    )
 }

@@ -3,6 +3,7 @@ package com.feldman.scholix.ui.components
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.print.PrintAttributes
 import android.print.PrintManager
@@ -13,16 +14,19 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
 import org.json.JSONTokener
+import kotlin.math.ceil
 
 class MessageEditorController {
     internal var view: WebView? = null
@@ -68,6 +72,8 @@ fun RichMessageEditor(
         .put("selected", "#%06X".format(0xFFFFFF and scheme.primaryContainer.toArgb()))
         .put("onSelected", "#%06X".format(0xFFFFFF and scheme.onPrimaryContainer.toArgb()))
     val currentColors by rememberUpdatedState(colors.toString())
+    val isRtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+    val placeholder = if (isRtl) "כתיבת הודעה…" else "Write a message…"
     AndroidView(
         modifier = modifier.clip(MaterialTheme.shapes.large),
         factory = { context ->
@@ -86,7 +92,10 @@ fun RichMessageEditor(
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
                     override fun onPageFinished(view: WebView, url: String) {
                         if (url != EDITOR_URL) return
-                        val config = JSONObject(currentColors).put("html", MessageHtml.sanitize(initial))
+                        val config = JSONObject(currentColors)
+                            .put("html", MessageHtml.sanitize(initial))
+                            .put("rtl", isRtl)
+                            .put("placeholder", placeholder)
                         evaluateJavascript("Scholix.init($config)", null)
                     }
                 }
@@ -110,11 +119,24 @@ fun RichMessageBody(html: String, modifier: Modifier = Modifier, onView: (WebVie
     val background = "#%06X".format(0xFFFFFF and scheme.surface.toArgb())
     val foreground = "#%06X".format(0xFFFFFF and scheme.onSurface.toArgb())
     val content = remember(html, background, foreground) {
-        """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline';"><style>body{margin:12px;font:16px sans-serif;background:$background;color:$foreground;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{border-collapse:collapse;max-width:100%}td,th{border:1px solid #888;padding:5px}a{color:inherit;text-decoration:underline}blockquote{border-inline-start:3px solid #888;margin-inline:6px;padding-inline:10px}math{font-size:1.1em}pre{white-space:pre-wrap}</style></head><body dir="auto">${MessageHtml.sanitize(html)}</body></html>"""
+        """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline';"><style>body{margin:12px;font:16px sans-serif;background:$background;color:$foreground;overflow-wrap:anywhere}img{max-width:100%;height:auto}img.an1,img[src*="/notoemoji/"]{width:1.2em!important;height:1.2em!important;vertical-align:middle}table{border-collapse:collapse;max-width:100%}td,th{border:1px solid #888;padding:5px}a{color:inherit;text-decoration:underline}blockquote{border-inline-start:3px solid #888;margin-inline:6px;padding-inline:10px}math{font-size:1.1em}pre{white-space:pre-wrap}</style></head><body dir="auto">${MessageHtml.sanitize(html)}</body></html>"""
     }
-    AndroidView(modifier = modifier, factory = {
-        WebView(context).apply {
+    var bodyHeightPx by remember { mutableIntStateOf(1) }
+    val bodyHeight = with(LocalDensity.current) { bodyHeightPx.toDp() }
+    AndroidView(modifier = modifier.height(bodyHeight), factory = {
+        object : WebView(context) {
+            @Suppress("DEPRECATION")
+            override fun onDraw(canvas: Canvas) {
+                super.onDraw(canvas)
+                val height = ceil(contentHeight * scale).toInt().coerceAtLeast(1)
+                if (height != bodyHeightPx) {
+                    post { bodyHeightPx = height }
+                }
+            }
+        }.apply {
             safeSettings()
+            isVerticalScrollBarEnabled = false
+            isNestedScrollingEnabled = false
             settings.javaScriptEnabled = false
             setBackgroundColor(scheme.surface.toArgb())
             webViewClient = object : WebViewClient() {
@@ -128,7 +150,7 @@ fun RichMessageBody(html: String, modifier: Modifier = Modifier, onView: (WebVie
         }
     }, update = { view ->
         onView(view)
-        if (view.tag != content) { view.tag = content; view.loadDataWithBaseURL("https://webtop.smartschool.co.il/", content, "text/html", "UTF-8", null) }
+        if (view.tag != content) { view.tag = content; bodyHeightPx = 1; view.loadDataWithBaseURL("https://webtop.smartschool.co.il/", content, "text/html", "UTF-8", null) }
     }, onRelease = { it.destroy() })
 }
 

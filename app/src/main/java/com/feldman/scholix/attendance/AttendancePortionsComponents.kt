@@ -25,12 +25,39 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.Immutable
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.res.pluralStringResource
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.max
+import kotlin.math.roundToInt
 import com.feldman.motion.*
 import com.feldman.scholix.R
 import com.feldman.scholix.pages.isRtlText
 import com.feldman.scholix.ui.components.SubjectIcon
-import kotlin.math.min
 
+/** Semantic colors for a grade impact, so the chart and badges follow the dynamic theme. */
+@Immutable
+data class PortionsStatusColors(val accent: Color, val container: Color, val onContainer: Color)
+
+@Composable
+fun portionsStatusColors(status: GradeImpactStatus): PortionsStatusColors {
+    val scheme = MaterialTheme.colorScheme
+    return when (status) {
+        GradeImpactStatus.BONUS -> PortionsStatusColors(scheme.primary, scheme.primaryContainer, scheme.onPrimaryContainer)
+        GradeImpactStatus.NEUTRAL -> PortionsStatusColors(scheme.secondary, scheme.secondaryContainer, scheme.onSecondaryContainer)
+        GradeImpactStatus.DEDUCTION -> PortionsStatusColors(scheme.tertiary, scheme.tertiaryContainer, scheme.onTertiaryContainer)
+        GradeImpactStatus.FAILING -> PortionsStatusColors(scheme.error, scheme.errorContainer, scheme.onErrorContainer)
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PortionsSummaryBanner(
     summaries: List<SubjectPortionsSummary>,
@@ -38,106 +65,90 @@ fun PortionsSummaryBanner(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bonusCount = summaries.count { it.status == GradeImpactStatus.BONUS }
-    val deductionCount = summaries.count { it.status == GradeImpactStatus.DEDUCTION }
-    val failingCount = summaries.count { it.status == GradeImpactStatus.FAILING }
-    val neutralCount = summaries.count { it.status == GradeImpactStatus.NEUTRAL }
-
-    val hasCritical = failingCount > 0
-    val hasDeduction = deductionCount > 0
-
-    val bannerContainerColor = when {
-        hasCritical -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
-        hasDeduction -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
-        else -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-    }
+    val counts = remember(summaries) { summaries.groupingBy { it.status }.eachCount() }
+    val netPoints = remember(summaries) { summaries.filterNot { it.isFailing }.sumOf { it.pointsDelta } }
+    val failing = counts[GradeImpactStatus.FAILING] ?: 0
+    val netColors = portionsStatusColors(
+        when {
+            failing > 0 -> GradeImpactStatus.FAILING
+            netPoints > 0 -> GradeImpactStatus.BONUS
+            netPoints < 0 -> GradeImpactStatus.DEDUCTION
+            else -> GradeImpactStatus.NEUTRAL
+        }
+    )
 
     MotionCard(
         modifier = modifier.fillMaxWidth(),
         position = MotionItemPosition.Alone,
-        containerColor = bannerContainerColor
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentPadding = 0.dp
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = rememberSymbolPainter(
-                            if (hasCritical) MotionSymbols.ic_warning else MotionSymbols.ic_calculate
-                        ),
-                        contentDescription = null,
-                        tint = when {
-                            hasCritical -> MaterialTheme.colorScheme.error
-                            hasDeduction -> MaterialTheme.colorScheme.tertiary
-                            else -> MaterialTheme.colorScheme.primary
-                        },
-                        modifier = Modifier.size(28.dp)
+        Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(top = 12.dp)) {
+                    Text(
+                        text = stringResource(R.string.attendance_portions_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontFamily = MotionFonts.feldman(weight = 700),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = stringResource(R.string.attendance_portions_title),
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = MotionFonts.feldman(weight = 700)
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "${summaries.size} מקצועות מחושבים",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        text = stringResource(R.string.portions_calculated_subjects, summaries.size),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(
-                        onClick = onOpenTable,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Icon(
-                            painter = rememberSymbolPainter(MotionSymbols.ic_table_chart),
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.portions_school_table), style = MaterialTheme.typography.labelMedium)
-                    }
-
-                    IconButton(
-                        onClick = onOpenSettings,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            painter = rememberSymbolPainter(MotionSymbols.ic_settings),
-                            contentDescription = stringResource(R.string.portions_settings),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                IconButton(onClick = onOpenTable) {
+                    Icon(
+                        painter = rememberSymbolPainter(MotionSymbols.ic_table_chart),
+                        contentDescription = stringResource(R.string.portions_school_table),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(
+                        painter = rememberSymbolPainter(MotionSymbols.ic_settings),
+                        contentDescription = stringResource(R.string.portions_settings),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(16.dp))
 
-            PortionsDistributionBar(
-                bonusCount = bonusCount,
-                neutralCount = neutralCount,
-                deductionCount = deductionCount,
-                failingCount = failingCount
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 12.dp)) {
+                Surface(shape = MaterialShapes.Cookie9Sided.toShape(), color = netColors.container) {
+                    Box(Modifier.size(88.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = if (netPoints > 0) "+$netPoints" else "$netPoints",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontFamily = MotionFonts.feldman(weight = 800),
+                            color = netColors.onContainer,
+                            maxLines = 1
+                        )
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.portions_net_impact),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    PortionsDistributionBar(
+                        bonusCount = counts[GradeImpactStatus.BONUS] ?: 0,
+                        neutralCount = counts[GradeImpactStatus.NEUTRAL] ?: 0,
+                        deductionCount = counts[GradeImpactStatus.DEDUCTION] ?: 0,
+                        failingCount = failing
+                    )
+                }
+            }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PortionsDistributionBar(
     bonusCount: Int,
@@ -146,67 +157,38 @@ fun PortionsDistributionBar(
     failingCount: Int,
     modifier: Modifier = Modifier
 ) {
-    val total = bonusCount + neutralCount + deductionCount + failingCount
-    if (total == 0) return
-
-    val bonusColor = Color(0xFF2E7D32)
-    val neutralColor = Color(0xFF1976D2)
-    val deductionColor = Color(0xFFE65100)
-    val failingColor = MaterialTheme.colorScheme.error
+    if (bonusCount + neutralCount + deductionCount + failingCount == 0) return
+    val segments = listOf(
+        Triple(GradeImpactStatus.BONUS, bonusCount, R.string.portions_legend_bonus),
+        Triple(GradeImpactStatus.NEUTRAL, neutralCount, R.string.portions_legend_neutral),
+        Triple(GradeImpactStatus.DEDUCTION, deductionCount, R.string.portions_legend_deduction),
+        Triple(GradeImpactStatus.FAILING, failingCount, R.string.portions_legend_failing),
+    ).filter { it.second > 0 }
 
     Column(modifier = modifier.fillMaxWidth()) {
+        // Separate rounded segments with a gap, as Material's segmented indicators do.
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(10.dp)
-                .clip(RoundedCornerShape(5.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+            modifier = Modifier.fillMaxWidth().height(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            if (bonusCount > 0) {
+            segments.forEach { (status, count, _) ->
                 Box(
-                    modifier = Modifier
-                        .weight(bonusCount.toFloat())
+                    Modifier
+                        .weight(count.toFloat())
                         .fillMaxHeight()
-                        .background(bonusColor)
-                )
-            }
-            if (neutralCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .weight(neutralCount.toFloat())
-                        .fillMaxHeight()
-                        .background(neutralColor)
-                )
-            }
-            if (deductionCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .weight(deductionCount.toFloat())
-                        .fillMaxHeight()
-                        .background(deductionColor)
-                )
-            }
-            if (failingCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .weight(failingCount.toFloat())
-                        .fillMaxHeight()
-                        .background(failingColor)
+                        .clip(CircleShape)
+                        .background(portionsStatusColors(status).accent)
                 )
             }
         }
-
-        Spacer(Modifier.height(8.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Spacer(Modifier.height(10.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            LegendItem(color = bonusColor, label = "בונוס ($bonusCount)")
-            LegendItem(color = neutralColor, label = "ללא שינוי ($neutralCount)")
-            LegendItem(color = deductionColor, label = "הפחתה ($deductionCount)")
-            LegendItem(color = failingColor, label = "ציון שלילי ($failingCount)")
+            segments.forEach { (status, count, label) ->
+                LegendItem(color = portionsStatusColors(status).accent, label = stringResource(label, count))
+            }
         }
     }
 }
@@ -220,245 +202,203 @@ private fun LegendItem(color: Color, label: String) {
                 .clip(CircleShape)
                 .background(color)
         )
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(6.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
+/**
+ * Where the subject sits on the portion scale: the bonus, no-change, deduction and failing zones
+ * drawn as a track, filled up to the portions used so far.
+ */
 @Composable
-fun SubjectPortionCard(
-    summary: SubjectPortionsSummary,
-    position: MotionItemPosition,
-    onEditHours: () -> Unit,
+fun PortionsGauge(
+    portions: Float,
+    status: GradeImpactStatus,
+    config: PortionsConfig,
     modifier: Modifier = Modifier
 ) {
-    val isRtl = isRtlText(summary.subject)
+    val bonusEnd = config.bonusThresholdPortions
+    val neutralEnd = max(bonusEnd, config.neutralThresholdPortions)
+    val failStart = max(neutralEnd, config.failingThresholdPortions)
+    val scaleMax = max(failStart + 1f, ceil(portions + 0.25f))
+    val zoneColors = listOf(
+        portionsStatusColors(GradeImpactStatus.BONUS).accent,
+        portionsStatusColors(GradeImpactStatus.NEUTRAL).accent,
+        portionsStatusColors(GradeImpactStatus.DEDUCTION).accent,
+        portionsStatusColors(GradeImpactStatus.FAILING).accent,
+    )
+    val fillColor = portionsStatusColors(status).accent
+    val markerColor = MaterialTheme.colorScheme.onSurface
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val bounds = listOf(0f, bonusEnd, neutralEnd, failStart, scaleMax)
+    val ticks = listOf(0f, bonusEnd, neutralEnd, failStart).distinct()
 
-    val badgeColor = when (summary.status) {
-        GradeImpactStatus.BONUS -> Color(0xFF2E7D32)
-        GradeImpactStatus.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
-        GradeImpactStatus.DEDUCTION -> Color(0xFFD84315)
-        GradeImpactStatus.FAILING -> MaterialTheme.colorScheme.error
-    }
-
-    val badgeContainerColor = when (summary.status) {
-        GradeImpactStatus.BONUS -> Color(0xFFE8F5E9)
-        GradeImpactStatus.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-        GradeImpactStatus.DEDUCTION -> Color(0xFFFBE9E7)
-        GradeImpactStatus.FAILING -> MaterialTheme.colorScheme.errorContainer
-    }
-
-    val badgeText = when (summary.status) {
-        GradeImpactStatus.BONUS -> "+${summary.pointsDelta} נק' בונוס"
-        GradeImpactStatus.NEUTRAL -> "0 נק' (ללא שינוי)"
-        GradeImpactStatus.DEDUCTION -> "${summary.pointsDelta} נקודות"
-        GradeImpactStatus.FAILING -> "ציון שלילי"
-    }
-
-    MotionCard(
-        modifier = modifier.fillMaxWidth(),
-        position = position
-    ) {
-        CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    SubjectIcon(
-                        subject = summary.subject,
-                        assignment = "חיסור"
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = summary.subject,
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontFamily = MotionFonts.feldman(weight = 700),
-                                fontWeight = FontWeight.Bold
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "${summary.unjustifiedHours} שעות לא מוצדקות • ${summary.weeklyHours} שעות שבועיות",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Spacer(Modifier.width(8.dp))
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = badgeContainerColor,
-                        contentColor = badgeColor
-                    ) {
-                        Text(
-                            text = badgeText,
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = MotionFonts.feldman(weight = 700)
-                            ),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(14.dp))
-
-                PortionsGaugeBar(
-                    portions = summary.portions,
-                    modifier = Modifier.fillMaxWidth()
+    Column(modifier.fillMaxWidth()) {
+        Canvas(Modifier.fillMaxWidth().height(14.dp)) {
+            val trackHeight = 8.dp.toPx()
+            val top = (size.height - trackHeight) / 2f
+            val gap = 2.dp.toPx()
+            fun x(value: Float): Float {
+                val px = size.width * (value / scaleMax).coerceIn(0f, 1f)
+                return if (rtl) size.width - px else px
+            }
+            for (i in 0 until 4) {
+                val from = x(bounds[i])
+                val to = x(bounds[i + 1])
+                val left = minOf(from, to) + if (i > 0) gap / 2 else 0f
+                val right = maxOf(from, to) - if (i < 3) gap / 2 else 0f
+                if (right <= left) continue
+                drawRoundRect(
+                    color = zoneColors[i].copy(alpha = 0.22f),
+                    topLeft = Offset(left, top),
+                    size = Size(right - left, trackHeight),
+                    cornerRadius = CornerRadius(trackHeight / 2)
                 )
-
-                Spacer(Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val portionsFormatted = "%.1f".format(summary.portions)
+            }
+            val start = x(0f)
+            val end = x(portions)
+            if (portions > 0f) {
+                drawRoundRect(
+                    color = fillColor,
+                    topLeft = Offset(minOf(start, end), top),
+                    size = Size(abs(end - start).coerceAtLeast(trackHeight), trackHeight),
+                    cornerRadius = CornerRadius(trackHeight / 2)
+                )
+            }
+            // Where the subject is now.
+            val markerX = end.coerceIn(2.dp.toPx(), size.width - 2.dp.toPx())
+            drawLine(
+                color = markerColor,
+                start = Offset(markerX, 0f),
+                end = Offset(markerX, size.height),
+                strokeWidth = 3.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        // Threshold labels under the zone boundaries.
+        Layout(
+            content = {
+                ticks.forEach { tick ->
                     Text(
-                        text = "נצברו $portionsFormatted מנות",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    val hintText = when {
-                        summary.isFailing -> "צברת 5 מנות ויותר - הציון שלילי"
-                        summary.status == GradeImpactStatus.BONUS && summary.hoursUntilBonusLost != null ->
-                            "נותרו ${summary.hoursUntilBonusLost} שעות לבונוס"
-                        summary.hoursUntilNextPenalty != null ->
-                            "נותרו ${summary.hoursUntilNextPenalty} שעות להפחתה הבאה"
-                        else -> summary.detailsMessage
-                    }
-
-                    Text(
-                        text = hintText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (summary.isFailing) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        text = formatPortions(tick),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
-                Spacer(Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextButton(
-                        onClick = onEditHours,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Icon(
-                            painter = rememberSymbolPainter(MotionSymbols.ic_edit),
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = "הגדר שעות (${summary.weeklyHours} ש״ש)",
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { measurables, constraints ->
+            val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0)) }
+            val height = placeables.maxOfOrNull { it.height } ?: 0
+            layout(constraints.maxWidth, height) {
+                placeables.forEachIndexed { i, p ->
+                    val center = constraints.maxWidth * (ticks[i] / scaleMax)
+                    val x = (center - p.width / 2f).coerceIn(0f, (constraints.maxWidth - p.width).toFloat())
+                    // Mirrored in RTL, matching the track above.
+                    p.placeRelative(x.roundToInt(), 0)
                 }
             }
         }
     }
 }
 
+fun formatPortions(value: Float): String =
+    if (value % 1f == 0f) value.toInt().toString() else String.format(java.util.Locale.US, "%.1f", value)
+
 @Composable
-fun PortionsGaugeBar(
-    portions: Float,
+fun SubjectPortionCard(
+    summary: SubjectPortionsSummary,
+    config: PortionsConfig,
+    position: MotionItemPosition,
+    onEditHours: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val clampedPortions = portions.coerceIn(0f, 6f)
-    val progressFraction = clampedPortions / 6f
+    val isRtl = isRtlText(summary.subject)
+    val colors = portionsStatusColors(summary.status)
 
-    val bonusFraction = 1f / 6f
-    val neutralFraction = 1f / 6f
-    val deductionFraction = 3f / 6f
-    val failingFraction = 1f / 6f
-
-    val isDark = isMotionDarkTheme()
-    val bonusColor = if (isDark) Color(0xFF4CAF50) else Color(0xFF2E7D32)
-    val neutralColor = if (isDark) Color(0xFF64B5F6) else Color(0xFF1976D2)
-    val deductionColor = if (isDark) Color(0xFFFFB74D) else Color(0xFFF57C00)
-    val failingColor = if (isDark) Color(0xFFE57373) else Color(0xFFD32F2F)
-
-    Column(modifier = modifier) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(12.dp)
-                .clip(RoundedCornerShape(6.dp))
-        ) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                Box(
-                    modifier = Modifier
-                        .weight(bonusFraction)
-                        .fillMaxHeight()
-                        .background(bonusColor.copy(alpha = 0.35f))
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(neutralFraction)
-                        .fillMaxHeight()
-                        .background(neutralColor.copy(alpha = 0.35f))
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(deductionFraction)
-                        .fillMaxHeight()
-                        .background(deductionColor.copy(alpha = 0.35f))
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(failingFraction)
-                        .fillMaxHeight()
-                        .background(failingColor.copy(alpha = 0.35f))
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(progressFraction)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(
-                        when {
-                            portions <= 1f -> bonusColor
-                            portions <= 2f -> neutralColor
-                            portions < 5f -> deductionColor
-                            else -> failingColor
-                        }
-                    )
-            )
+    val badgeText = when (summary.status) {
+        GradeImpactStatus.BONUS -> stringResource(R.string.bonus_pts_badge, summary.pointsDelta)
+        GradeImpactStatus.NEUTRAL -> stringResource(R.string.neutral_pts_badge)
+        GradeImpactStatus.DEDUCTION -> stringResource(R.string.deduction_pts_badge, summary.pointsDelta)
+        GradeImpactStatus.FAILING -> stringResource(R.string.failing_grade_badge)
+    }
+    val hint = when (summary.status) {
+        GradeImpactStatus.BONUS -> summary.hoursUntilBonusLost?.let {
+            if (it == 0) stringResource(R.string.portions_hint_bonus_last)
+            else pluralStringResource(R.plurals.portions_hint_bonus_left, it, it)
         }
+        GradeImpactStatus.NEUTRAL -> summary.hoursUntilNextPenalty?.let {
+            pluralStringResource(R.plurals.portions_hint_until_deduction, it, it)
+        }
+        GradeImpactStatus.DEDUCTION -> summary.hoursUntilNextPenalty?.let {
+            pluralStringResource(R.plurals.portions_hint_until_next_deduction, it, it)
+        }
+        GradeImpactStatus.FAILING -> stringResource(R.string.portions_hint_failing)
+    }
 
-        Spacer(Modifier.height(4.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("0 מנות", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("1 מנה (בונוס)", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("2 מנות (ללא שינוי)", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("5 מנות (שלילי)", style = MaterialTheme.typography.labelSmall, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    MotionCard(
+        modifier = modifier.fillMaxWidth().clickable(onClick = onEditHours),
+        position = position,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        contentPadding = 0.dp
+    ) {
+        CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SubjectIcon(
+                        subject = summary.subject,
+                        assignment = "חיסור",
+                        size = 44.dp,
+                        iconSize = 26.dp
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = summary.subject,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontFamily = MotionFonts.feldman(weight = 700),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = stringResource(R.string.absences_count, summary.unjustifiedHours) +
+                                " · " + stringResource(R.string.weekly_hours_suffix, summary.weeklyHours) +
+                                " · " + stringResource(R.string.portions_value, formatPortions(summary.portions)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Surface(shape = CircleShape, color = colors.container, contentColor = colors.onContainer) {
+                        Text(
+                            text = badgeText,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontFamily = MotionFonts.feldman(weight = 800),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                PortionsGauge(portions = summary.portions, status = summary.status, config = config)
+                if (hint != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = hint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (summary.status == GradeImpactStatus.FAILING) colors.accent
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
@@ -471,175 +411,175 @@ fun EditSubjectHoursDialog(
     onConfirm: (Int) -> Unit
 ) {
     var hours by remember { mutableIntStateOf(initialHours.coerceIn(1, 20)) }
+    val isRtl = isRtlText(subject)
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp)
+    MotionDialog(
+        onDismissRequest = onDismiss,
+        icon = "schedule",
+        title = stringResource(R.string.portions_subject_hours_title),
+        text = subject + "\n" + stringResource(R.string.portions_subject_hours_desc),
+        confirmText = stringResource(R.string.save),
+        onConfirm = { onConfirm(hours) },
+        dismissText = stringResource(R.string.cancel),
+    ) {
+        CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+            Column(Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = "שעות שבועיות למקצוע",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontFamily = MotionFonts.feldman(weight = 700),
-                        fontWeight = FontWeight.Bold
+                FilledTonalIconButton(
+                    onClick = { if (hours > 1) hours-- },
+                    enabled = hours > 1,
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Icon(painter = rememberSymbolPainter(MotionSymbols.ic_remove), contentDescription = null)
+                }
+
+                Spacer(Modifier.width(20.dp))
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "$hours",
+                        style = MaterialTheme.typography.displayMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            fontFamily = MotionFonts.feldman(weight = 900)
+                        ),
+                        color = MaterialTheme.colorScheme.primary
                     )
-                )
-                Text(
-                    text = subject,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(Modifier.height(16.dp))
-
-                Text(
-                    text = "בחר את מספר השעות השבועיות שנלמדות במקצוע זה. מנה אחת שווה למספר שעות זה.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(Modifier.height(20.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    FilledTonalIconButton(
-                        onClick = { if (hours > 1) hours-- },
-                        enabled = hours > 1,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(painter = rememberSymbolPainter(MotionSymbols.ic_remove), contentDescription = "הפחת")
-                    }
-
-                    Spacer(Modifier.width(20.dp))
-
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "$hours",
-                            style = MaterialTheme.typography.displayMedium.copy(
-                                fontWeight = FontWeight.Black,
-                                fontFamily = MotionFonts.feldman(weight = 900)
-                            ),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "שעות שבועיות",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Spacer(Modifier.width(20.dp))
-
-                    FilledTonalIconButton(
-                        onClick = { if (hours < 25) hours++ },
-                        enabled = hours < 25,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(painter = rememberSymbolPainter(MotionSymbols.ic_add), contentDescription = "הוסף")
-                    }
+                    Text(
+                        text = stringResource(R.string.weekly_hours),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.width(20.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                FilledTonalIconButton(
+                    onClick = { if (hours < 25) hours++ },
+                    enabled = hours < 25,
+                    modifier = Modifier.size(46.dp)
                 ) {
-                    listOf(2, 3, 4, 5, 6).forEach { preset ->
-                        FilterChip(
-                            selected = hours == preset,
-                            onClick = { hours = preset },
-                            label = { Text("$preset ש״ש") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    Icon(painter = rememberSymbolPainter(MotionSymbols.ic_add), contentDescription = null)
                 }
+            }
 
-                Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "מדרגות היעדרות למקצוע זה:",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+            // Preset chips
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(2, 3, 4, 5, 6).forEach { preset ->
+                    MotionButton(
+                        text = stringResource(R.string.weekly_hours_suffix, preset),
+                        onClick = { hours = preset },
+                        modifier = Modifier.weight(1f),
+                        sizes = MotionButtonDefaults.sizes(height = 36.dp, fontSize = 12.sp),
+                        states = MotionButtonDefaults.states(
+                            default = if (hours == preset) {
+                                MotionButtonState(
+                                    backgroundColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                MotionButtonState(
+                                    backgroundColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = "• בונוס: עד $hours שעות חיסור",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        val neutralText = if (hours == 1) "2 שעות" else "${hours + 1}-${2 * hours - 1} שעות"
-                        Text(
-                            text = "• ללא שינוי: $neutralText",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        val minus5Start = if (hours == 1) 3 else 2 * hours
-                        Text(
-                            text = "• הפחתת 5 נק': מ-$minus5Start שעות חיסור",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        val failingStart = if (hours == 1) 6 else 5 * hours
-                        Text(
-                            text = "• ציון שלילי: מ-$failingStart שעות חיסור ומעלה",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
+                    )
                 }
+            }
 
-                Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("ביטול")
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = stringResource(R.string.portions_subject_thresholds_title),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "• " + stringResource(R.string.portions_threshold_bonus, hours),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    val neutralText = if (hours == 1) {
+                        stringResource(R.string.hours_suffix, 2)
+                    } else {
+                        "${hours + 1}-${2 * hours - 1} " + stringResource(R.string.hours_suffix, 1).replace("1 ", "")
                     }
-                    Spacer(Modifier.width(8.dp))
-                    Button(onClick = { onConfirm(hours) }) {
-                        Text("שמור")
-                    }
+                    Text(
+                        text = "• " + stringResource(R.string.portions_threshold_neutral, neutralText),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    val minus5Start = if (hours == 1) 3 else 2 * hours
+                    Text(
+                        text = "• " + stringResource(R.string.portions_threshold_minus5, minus5Start),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    val failingStart = if (hours == 1) 6 else 5 * hours
+                    Text(
+                        text = "• " + stringResource(R.string.portions_threshold_failing, failingStart),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
+            }
             }
         }
     }
 }
 
+/**
+ * Bottom Sheet content for the School Reference Table.
+ * Designed to fit smoothly within MotionBottomSheetScene / MotionScaffold(fitContentHeight = true).
+ */
 @Composable
 fun SchoolPortionsTableDialog(
+    onDismiss: () -> Unit,
     currentWeeklyHours: Int? = null,
-    onDismiss: () -> Unit
+    modifier: Modifier = Modifier
+) {
+    SchoolPortionsTableSheet(
+        onClose = onDismiss,
+        currentWeeklyHours = currentWeeklyHours,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun SchoolPortionsTableSheet(
+    onClose: () -> Unit,
+    currentWeeklyHours: Int? = null,
+    modifier: Modifier = Modifier
 ) {
     val tableRows = remember { AttendancePortionsCalculator.buildSchoolReferenceTable() }
+    val isAppRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.9f)
-        ) {
+    MotionScaffold(
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(0.dp),
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0),
+        fitContentHeight = true
+    ) {
+        Item {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 14.dp)
             ) {
+                // Top Header Row with Title and Close Button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -647,40 +587,54 @@ fun SchoolPortionsTableDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "טבלת מנות היעדרות",
+                            text = stringResource(R.string.portions_school_table),
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontFamily = MotionFonts.feldman(weight = 700),
                                 fontWeight = FontWeight.Bold
-                            )
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "על פי הנחיות משרד החינוך",
+                            text = stringResource(R.string.portions_school_table_subtitle),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(painter = rememberSymbolPainter(MotionSymbols.ic_close), contentDescription = "סגור")
-                    }
+
+                    MotionButton(
+                        icon = MotionSymbols.ic_close,
+                        onClick = onClose,
+                        sizes = MotionButtonDefaults.sizes(width = 38.dp, height = 38.dp, iconSize = 20.dp),
+                        states = MotionButtonDefaults.states(
+                            default = MotionButtonState(
+                                backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        )
+                    )
                 }
 
                 Spacer(Modifier.height(12.dp))
 
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth()
+                // Guidelines summary card
+                MotionCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    position = MotionItemPosition.Alone,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    contentPadding = 12.dp
                 ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
+                    Column {
                         Text(
-                            text = "כללי חישוב מנת היעדרות:",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                            text = stringResource(R.string.portions_rules_title),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(Modifier.height(4.dp))
                         Text(
-                            text = "1. מנת היעדרות = מספר השעות השבועיות במקצוע.\n" +
-                                    "2. החישוב נעשה לכל מקצוע בנפרד, בכל מחצית.\n" +
-                                    "3. בונוס 2 נק' יינתן אם נצברה עד מנה אחת ולא הוצדקו מעל 2 מנות.\n" +
-                                    "4. צבירת 5 מנות ומעלה מביאה לציון שלילי במקצוע.",
+                            text = stringResource(R.string.portions_rule_1) + "\n" +
+                                    stringResource(R.string.portions_rule_2) + "\n" +
+                                    stringResource(R.string.portions_rule_3) + "\n" +
+                                    stringResource(R.string.portions_rule_4),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -689,43 +643,41 @@ fun SchoolPortionsTableDialog(
 
                 Spacer(Modifier.height(14.dp))
 
+                // Scrollable Table
                 val horizontalScroll = rememberScrollState()
-                val verticalScroll = rememberScrollState()
 
                 Box(
                     modifier = Modifier
-                        .weight(1f)
                         .fillMaxWidth()
                         .horizontalScroll(horizontalScroll)
                 ) {
                     Column(
                         modifier = Modifier
                             .width(620.dp)
-                            .verticalScroll(verticalScroll)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
                     ) {
+                        // Header Row
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(
-                                    MaterialTheme.colorScheme.primaryContainer,
-                                    RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
-                                )
+                                .background(MaterialTheme.colorScheme.primaryContainer)
                                 .padding(vertical = 10.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TableHeaderCell("ש״ש", Modifier.width(55.dp))
-                            TableHeaderCell("בונוס\n(+2)", Modifier.width(80.dp))
-                            TableHeaderCell("ללא שינוי\n(0)", Modifier.width(95.dp))
-                            TableHeaderCell("הפחתה\n(-5)", Modifier.width(95.dp))
-                            TableHeaderCell("הפחתה\n(-7)", Modifier.width(95.dp))
-                            TableHeaderCell("הפחתה\n(-9)", Modifier.width(95.dp))
-                            TableHeaderCell("ציון שלילי\n(נכשל)", Modifier.width(105.dp))
+                            TableHeaderCell(stringResource(R.string.portions_table_header_weekly), Modifier.width(60.dp))
+                            TableHeaderCell(stringResource(R.string.portions_table_header_bonus), Modifier.width(85.dp))
+                            TableHeaderCell(stringResource(R.string.portions_table_header_neutral), Modifier.width(95.dp))
+                            TableHeaderCell(stringResource(R.string.portions_table_header_minus_5), Modifier.width(95.dp))
+                            TableHeaderCell(stringResource(R.string.portions_table_header_minus_7), Modifier.width(95.dp))
+                            TableHeaderCell(stringResource(R.string.portions_table_header_minus_9), Modifier.width(95.dp))
+                            TableHeaderCell(stringResource(R.string.portions_table_header_failing), Modifier.width(95.dp))
                         }
 
                         tableRows.forEachIndexed { index, row ->
                             val isSelected = currentWeeklyHours == row.weeklyHours
                             val rowColor = when {
-                                isSelected -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+                                isSelected -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f)
                                 index % 2 == 0 -> MaterialTheme.colorScheme.surface
                                 else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
                             }
@@ -734,33 +686,41 @@ fun SchoolPortionsTableDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .background(rowColor)
-                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                    .padding(vertical = 9.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 TableDataCell(
                                     "${row.weeklyHours}",
-                                    Modifier.width(55.dp),
+                                    Modifier.width(60.dp),
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                 )
-                                TableDataCell(row.bonusHoursText, Modifier.width(80.dp), color = Color(0xFF2E7D32))
+                                TableDataCell(row.bonusHoursText, Modifier.width(85.dp), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                 TableDataCell(row.neutralHoursText, Modifier.width(95.dp))
-                                TableDataCell(row.minus5HoursText, Modifier.width(95.dp), color = Color(0xFFD84315))
-                                TableDataCell(row.minus7HoursText, Modifier.width(95.dp), color = Color(0xFFD84315))
-                                TableDataCell(row.minus9HoursText, Modifier.width(95.dp), color = Color(0xFFD84315))
-                                TableDataCell(row.failingHoursText, Modifier.width(105.dp), color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                                TableDataCell(row.minus5HoursText, Modifier.width(95.dp), color = MaterialTheme.colorScheme.tertiary)
+                                TableDataCell(row.minus7HoursText, Modifier.width(95.dp), color = MaterialTheme.colorScheme.tertiary)
+                                TableDataCell(row.minus9HoursText, Modifier.width(95.dp), color = MaterialTheme.colorScheme.tertiary)
+                                TableDataCell(row.failingHoursText, Modifier.width(95.dp), color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
 
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(18.dp))
 
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("סגור")
-                }
+                MotionButton(
+                    text = stringResource(R.string.close),
+                    onClick = onClose,
+                    modifier = Modifier.fillMaxWidth(),
+                    sizes = MotionButtonDefaults.sizes(height = 46.dp, fontSize = 15.sp),
+                    states = MotionButtonDefaults.states(
+                        default = MotionButtonState(
+                            backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    )
+                )
+
+                Spacer(Modifier.height(8.dp))
             }
         }
     }

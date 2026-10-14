@@ -65,8 +65,13 @@ fun <T> PickerBar(
     optionDescription: (T) -> String = { "" },
     optionIcon: @Composable (T) -> Unit = {},
     menuContainerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
+    menuHeader: (@Composable () -> Unit)? = null,
+    showOptionsInMenu: Boolean = true,
+    menuLabels: List<String> = options.map(optionLabel),
+    menuDescriptions: List<String> = options.map(optionDescription),
 ) {
     val selected = options.getOrNull(selectedIndex) ?: return
+    val menuWidth = pickerMenuWidth(menuLabels, menuDescriptions, horizontalSpace = 132.dp)
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -85,7 +90,7 @@ fun <T> PickerBar(
         )
 
         MotionDropdown(
-            options = options,
+            options = if (showOptionsInMenu) options else emptyList(),
             selected = selected,
             onSelected = { option -> onSelected(options.indexOf(option)) },
             leadingContent = { optionIcon(selected) },
@@ -104,6 +109,7 @@ fun <T> PickerBar(
             ),
             direction = MotionDropdownDirection.Auto,
             contentDescription = contentDescription,
+            menuHeader = menuHeader,
             optionContent = { option, isSelected ->
                 val name = optionLabel(option)
                 val supportingText = optionDescription(option)
@@ -173,7 +179,7 @@ fun <T> PickerBar(
                 .height(64.dp),
             items = MotionDropdownDefaults.items(label = optionLabel, description = { option -> optionDescription(option).takeIf { it.isNotBlank() } }, key = optionKey),
             shapes = MotionDropdownDefaults.shapes(anchor = RoundedCornerShape(28.dp), menu = RoundedCornerShape(28.dp), menuItem = RoundedCornerShape(24.dp)),
-            sizes = MotionDropdownDefaults.sizes(borderWidth = 0.dp, minHeight = 64.dp, menuMaxHeight = 420.dp, menuMinWidth = 320.dp, menuMaxWidth = 360.dp),
+            sizes = MotionDropdownDefaults.sizes(borderWidth = 0.dp, minHeight = 64.dp, menuMaxHeight = 420.dp, menuMinWidth = 112.dp.coerceAtMost(menuWidth), menuMaxWidth = menuWidth),
             text = MotionDropdownDefaults.text(value = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
             menu = MotionDropdownDefaults.menu(matchAnchorWidth = false, alignment = MotionDropdownMenuAlignment.Center)
         )
@@ -194,11 +200,20 @@ fun <T> PickerBar(
 
 /** The provider's product name ("Webtop", "Mashov"), not the account holder's. */
 fun Platform.providerLabel(): String {
-    if (platformDisplayName.isNotBlank() && !platformDisplayName.endsWith("Platform")) {
-        return platformDisplayName
-    }
     return platformOptions.firstOrNull { it.factory()::class == this::class }?.name
+        ?: platformDisplayName.takeIf { it.isNotBlank() && !it.endsWith("Platform") }
         ?: javaClass.simpleName.removeSuffix("Platform")
+}
+
+/** Only show a supporting label when the user deliberately gave this account a custom name. */
+private fun Platform.providerDescription(): String {
+    val canonical = providerLabel()
+    val name = getName().trim()
+    if (name.isBlank() || name == canonical) return ""
+    if (this is com.feldman.scholix.api.platforms.ShahafPlatform &&
+        name == "Shahaf · ${getStudentName()}"
+    ) return ""
+    return name
 }
 
 /** The provider's logo as a painter, or null if it has none. */
@@ -240,7 +255,7 @@ fun ProviderPickerBar(
         expanded = expanded,
         onExpandedChange = onExpandedChange,
         optionLabel = { it.providerLabel() },
-        optionDescription = { it.getName() },
+        optionDescription = { it.providerDescription() },
         optionKey = { it.id },
         optionIcon = { ProviderIcon(it) },
         contentDescription = "Choose provider",

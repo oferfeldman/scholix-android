@@ -29,11 +29,12 @@
   function init(config) {
     theme(config);
     if (editor) return;
+    const isRtl = config.rtl !== undefined ? config.rtl : true;
     editor = SUNEDITOR.create(byId('editor'), {
       plugins: SUNEDITOR.plugins,
-      lang: SUNEDITOR_LANG.he, width: '100%', height: '280px', minHeight: '240px',
-      textDirection: 'rtl', stickyToolbar: false,
-      placeholder: 'Write a message…',
+      lang: isRtl ? SUNEDITOR_LANG.he : SUNEDITOR_LANG.en, width: '100%', height: '280px', minHeight: '240px',
+      textDirection: isRtl ? 'rtl' : 'ltr', stickyToolbar: false,
+      placeholder: config.placeholder || (isRtl ? 'כתיבת הודעה…' : 'Write a message…'),
       buttonList: [
         ['undo', 'redo', 'removeFormat'], ['font', 'fontSize', 'blockStyle'],
         ['bold', 'italic', 'underline', 'strike', 'subscript', 'superscript'],
@@ -50,6 +51,7 @@
     editable().setAttribute('aria-label', 'Message body');
     editable().setAttribute('aria-multiline', 'true');
     document.addEventListener('selectionchange', saveSelection);
+    document.body.classList.add('ready');
   }
   window.Scholix = {init, theme, content: () => editor ? editor.$.html.get() : '', insert,
     image: url => { const img = document.createElement('img'); img.src = url; img.alt = ''; img.style.maxWidth = '100%'; insert(img.outerHTML); }

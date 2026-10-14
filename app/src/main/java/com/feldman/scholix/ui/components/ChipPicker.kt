@@ -1,16 +1,19 @@
 package com.feldman.scholix.ui.components
 
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.feldman.motion.MotionDropdownTextFit
+import com.feldman.motion.MotionDropdownMenuAlignment
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import com.feldman.motion.MotionDropdown
 import com.feldman.motion.MotionDropdownDefaults
 import com.feldman.motion.MotionDropdownDirection
 import com.feldman.motion.MotionDropdownLabelPosition
+import com.feldman.motion.MotionSymbols
+import com.feldman.motion.rememberSymbolPainter
 
 @Composable
 fun ChipPicker(
@@ -20,6 +23,30 @@ fun ChipPicker(
     onSelectedChange: (String) -> Unit,
     optionIcon: (@Composable (String) -> Painter?)? = null
 ) {
+    val menuWidth = pickerMenuWidth(options, horizontalSpace = if (optionIcon == null) 76.dp else 108.dp)
+    val anchorContainer = MaterialTheme.colorScheme.tertiaryContainer
+    val anchorContent = MaterialTheme.colorScheme.onTertiaryContainer
+    val dropdownColors = MotionDropdownDefaults.tonalColors(
+        containerColor = anchorContainer,
+        contentColor = anchorContent,
+    ).copy(
+        textColor = anchorContent,
+        expandedTextColor = anchorContent,
+        labelColor = anchorContent.copy(alpha = 0.78f),
+        expandedLabelColor = anchorContent.copy(alpha = 0.78f),
+        leadingIconColor = anchorContent,
+        expandedLeadingIconColor = anchorContent,
+        trailingIconColor = anchorContent,
+        expandedTrailingIconColor = anchorContent,
+        menuContainerColor = anchorContainer,
+        menuItemTextColor = anchorContent,
+        menuItemIconColor = anchorContent,
+        menuItemDescriptionColor = anchorContent.copy(alpha = 0.72f),
+        selectedMenuItemContainerColor = anchorContent,
+        selectedMenuItemTextColor = anchorContainer,
+        selectedMenuItemIconColor = anchorContainer,
+    )
+
     MotionDropdown(
         modifier = Modifier,
         options = options,
@@ -28,23 +55,17 @@ fun ChipPicker(
         label = label,
         labelPosition = MotionDropdownLabelPosition.Inside,
         direction = if (isMostlyRtl(selected)) MotionDropdownDirection.Rtl else MotionDropdownDirection.Ltr,
-        colors = MotionDropdownDefaults.colors(
-            expandedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
-            expandedTextColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            expandedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            expandedLeadingIconColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            expandedTrailingIconColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            menuContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
-            menuItemTextColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            menuItemIconColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            selectedMenuItemContainerColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            selectedMenuItemTextColor = MaterialTheme.colorScheme.tertiaryContainer,
-            selectedMenuItemIconColor = MaterialTheme.colorScheme.tertiaryContainer,
-            expandedBorderColor = MaterialTheme.colorScheme.tertiaryContainer,
-        ),
+        colors = dropdownColors,
         items = MotionDropdownDefaults.items(icon = optionIcon),
-        text = MotionDropdownDefaults.text(value = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), label = MaterialTheme.typography.labelMedium),
-        menu = MotionDropdownDefaults.menu(showSelectedCheck = true)
+        trailingIcon = rememberSymbolPainter(MotionSymbols.ic_keyboard_arrow_down),
+        text = MotionDropdownDefaults.text(value = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), label = MaterialTheme.typography.labelMedium, valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
+        sizes = MotionDropdownDefaults.sizes(menuMinWidth = 112.dp.coerceAtMost(menuWidth), menuMaxWidth = menuWidth),
+        menu = MotionDropdownDefaults.menu(
+            matchAnchorWidth = false,
+            alignment = MotionDropdownMenuAlignment.Center,
+            showSelectedCheck = true,
+            checkIcon = rememberSymbolPainter(MotionSymbols.ic_check),
+        )
     )
 }
 

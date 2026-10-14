@@ -9,6 +9,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -17,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.net.toUri
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -65,11 +70,34 @@ fun HiddenWebtopMoeLogin(
     timeoutMs: Long = 120_000,
     onResult: (key: String?, error: String?) -> Unit,
 ) {
+    var ownsBrowser by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        moeBrowserLoginMutex.lock()
+        try {
+            ownsBrowser = true
+            awaitCancellation()
+        } finally {
+            ownsBrowser = false
+            moeBrowserLoginMutex.unlock()
+        }
+    }
+    if (ownsBrowser) HiddenWebtopMoeLoginBrowser(username, password, timeoutMs, onResult)
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun HiddenWebtopMoeLoginBrowser(
+    username: String,
+    password: String,
+    timeoutMs: Long,
+    onResult: (key: String?, error: String?) -> Unit,
+) {
     val context = LocalContext.current
     val done = remember { AtomicBoolean(false) }
     val cookiesAccepted = remember { AtomicBoolean(false) }
     val moeClicked = remember { AtomicBoolean(false) }
     val credsFilled = remember { AtomicBoolean(false) }
+    val smsLogin = password.isBlank()
 
     fun finish(key: String?, error: String?) {
         if (done.compareAndSet(false, true)) onResult(key, error)
@@ -79,16 +107,21 @@ fun HiddenWebtopMoeLogin(
         val cm = CookieManager.getInstance()
         cm.setAcceptCookie(true)
         // A stale session short-circuits the SSO into a half-signed-in state.
-        cm.removeAllCookies(null)
-        cm.flush()
         WebStorage.getInstance().deleteAllData()
 
-        WebView(context).apply {
+        WebView(android.content.MutableContextWrapper(context)).apply {
             cm.setAcceptThirdPartyCookies(this, true)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            // Same zoom fix as the Shahaf SMS dialog: wide viewport + overview
+            // mode before first load, viewport meta injected per page.
+            applyMoeContentScale()
 
             webViewClient = object : WebViewClient() {
+                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                    keyFrom(url.orEmpty())?.let { finish(it, null) }
+                }
+
                 override fun shouldOverrideUrlLoading(
                     view: WebView?,
                     request: WebResourceRequest?,
@@ -106,6 +139,7 @@ fun HiddenWebtopMoeLogin(
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    view?.injectMoeViewport()
                     if (done.get()) return
                     // Belt and braces: some redirects arrive without going through
                     // shouldOverrideUrlLoading (server-side 30x chains).
@@ -113,7 +147,10 @@ fun HiddenWebtopMoeLogin(
                     Log.d(TAG, "page: ${runCatching { url?.toUri()?.host }.getOrNull()}")
                 }
             }
-            loadUrl(WEBTOP_LOGIN)
+            cm.removeAllCookies {
+                cm.flush()
+                if (!done.get()) loadUrl(WEBTOP_LOGIN)
+            }
         }
     }
 
@@ -122,7 +159,7 @@ fun HiddenWebtopMoeLogin(
         // without drowning the log.
         var lastConsent: String? = null
         var lastMoe: String? = null
-        val ok = withTimeoutOrNull(timeoutMs) {
+        val ok = withTimeoutOrNull(if (smsLogin) 600_000 else timeoutMs) {
             while (!done.get()) {
                 val host = runCatching { web.url?.toUri()?.host }.getOrNull().orEmpty()
 
@@ -156,8 +193,9 @@ fun HiddenWebtopMoeLogin(
                     }
                 }
 
-                if (host.endsWith("lgn.edu.gov.il", true) && !credsFilled.get()) {
-                    val r = suspendEval(web, loginJs(username, password))?.trim('"', ' ')
+                if (smsLogin && host == "lgn.edu.gov.il") credsFilled.set(true)
+                if (!smsLogin && host.endsWith("lgn.edu.gov.il", true) && !credsFilled.get()) {
+                    val r = suspendEval(web, moeLoginJs(username, password))?.trim('"', ' ')
                     when {
                         r == "filled" -> {
                             Log.d(TAG, "MOE credentials submitted")
@@ -172,6 +210,7 @@ fun HiddenWebtopMoeLogin(
         }
         if (ok == null) {
             finish(null, when {
+                smsLogin -> "SMS sign-in timed out. Please try again."
                 !moeClicked.get() ->
                     "Could not open the Ministry of Education login from Webtop. " +
                         "Please try again."
@@ -184,7 +223,16 @@ fun HiddenWebtopMoeLogin(
         }
     }
 
-    AndroidView(modifier = Modifier.size(1.dp).alpha(0f), factory = { web })
+    DisposableEffect(web) {
+        onDispose {
+            done.set(true)
+            web.stopLoading()
+            web.destroy()
+        }
+    }
+
+    if (smsLogin) MoeSmsLoginScreen(web, username) { finish(null, "SMS sign-in cancelled") }
+    else AndroidView(modifier = Modifier.size(1.dp).alpha(0f), factory = { web })
 }
 
 private const val TAG = "HiddenWebtopMoe"
@@ -242,7 +290,7 @@ private fun clickByText(text: String): String {
 }
 
 /** Fill + submit the MOE Angular form (native setter + input event). */
-private fun loginJs(username: String, password: String): String {
+internal fun moeLoginJs(username: String, password: String): String {
     val u = JSONObject.quote(username)
     val p = JSONObject.quote(password)
     return """

@@ -1,6 +1,13 @@
 package com.feldman.scholix.pages
 
 
+import com.feldman.motion.MotionItemPosition
+import com.feldman.motion.MotionCard
+import androidx.compose.ui.unit.sp
+import com.feldman.motion.MotionButtonState
+import com.feldman.motion.MotionButtonDefaults
+import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionDialog
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -10,7 +17,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import com.feldman.motion.MotionLazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -35,7 +42,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.room.*
-import com.feldman.scholix.BottomBarSpacing
+import com.feldman.motion.motionBottomBarClearance
 import com.feldman.scholix.R
 import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.api.Platform
@@ -299,7 +306,7 @@ fun ManualTabContent(tab: LockerTabEntity, viewModel: LockerViewModel) {
     val items by viewModel.items.collectAsState()
     val tabItems = items.filter { it.platformId == "manual_${tab.id}" }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().padding(16.dp).motionBottomBarClearance()) {
         Text("Manual Tab: ${tab.name}", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
 
@@ -383,7 +390,7 @@ fun LockerApp(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .offset(y = 32.dp- BottomBarSpacing()),
+                    .motionBottomBarClearance(),
                 contentAlignment = Alignment.BottomEnd
             ) {
                 FloatingActionButtonMenu(
@@ -489,7 +496,7 @@ fun LockerApp(
                 SharedTransitionLayout {
                     key(platforms.getOrNull(selectedTabIndex)?.id) {
                         if (selectedTabIndex < platforms.size) {
-                            LazyColumn(
+                            MotionLazyColumn(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .padding(horizontal = 16.dp),
@@ -544,10 +551,8 @@ fun LockerApp(
                                             viewModel = viewModel
                                         )
                                     }
-                                    item { Spacer(Modifier.height(100.dp)) }
                                 }
 
-                                item { Spacer(Modifier.height(BottomBarSpacing())) }
                             }
                         }
                     }
@@ -556,59 +561,54 @@ fun LockerApp(
         }
 
         if (showDialog) {
-            AlertDialog(
+            MotionDialog(
                 onDismissRequest = { showDialog = false },
-                title = { Text("Add Subject") },
-                text = {
-                    OutlinedTextField(
-                        value = newItemName,
-                        onValueChange = { newItemName = it },
-                        label = { Text("Subject name") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done)
-                    )
+                icon = "add",
+                title = "Add Subject",
+                confirmText = "Add",
+                confirmIcon = "add",
+                onConfirm = {
+                    if (newItemName.isNotBlank()) {
+                        viewModel.addItem(newItemName, platforms[selectedPlatformIndex].id)
+                        newItemName = ""
+                    }
                 },
-                confirmButton = {
-                    Button(onClick = {
-                        if (newItemName.isNotBlank()) {
-                            viewModel.addItem(newItemName, platforms[selectedPlatformIndex].id)
-                            newItemName = ""
-                            showDialog = false
-                        }
-                    }) { Text("Add") }
-                },
-                dismissButton = {
-                    OutlinedButton(onClick = { showDialog = false }) { Text("Cancel") }
-                }
-            )
+                dismissText = "Cancel",
+            ) {
+                OutlinedTextField(
+                    value = newItemName,
+                    onValueChange = { newItemName = it },
+                    label = { Text("Subject name") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
 
         if (showNewTabDialog) {
-            AlertDialog(
+            MotionDialog(
                 onDismissRequest = { showNewTabDialog = false },
-                title = { Text("Create New Tab") },
-                text = {
-                    OutlinedTextField(
-                        value = newTabName,
-                        onValueChange = { newTabName = it },
-                        label = { Text("Tab Name") }
-                    )
-                },
-                confirmButton = {
-                    Button(onClick = {
-                        if (newTabName.isNotBlank()) {
-                            viewModel.addTab(newTabName)
-                            newTabName = ""
-                            showNewTabDialog = false
-                        }
-                    }) { Text("Create") }
-                },
-                dismissButton = {
-                    OutlinedButton(onClick = { showNewTabDialog = false }) {
-                        Text("Cancel")
+                icon = "tab",
+                title = "Create New Tab",
+                confirmText = "Create",
+                confirmIcon = "add",
+                onConfirm = {
+                    if (newTabName.isNotBlank()) {
+                        viewModel.addTab(newTabName)
+                        newTabName = ""
                     }
-                }
-            )
+                },
+                dismissText = "Cancel",
+            ) {
+                OutlinedTextField(
+                    value = newTabName,
+                    onValueChange = { newTabName = it },
+                    label = { Text("Tab Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
 
     }
@@ -628,28 +628,17 @@ fun ItemList(
 
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items.forEachIndexed { index, item ->
-            val isFirst = index == 0
-            val isLast = index == items.lastIndex
-            val isSingle = items.size == 1
-
-            val shape = when {
-                isSingle -> RoundedCornerShape(16.dp)
-                isFirst -> RoundedCornerShape(
-                    topStart = 16.dp, topEnd = 16.dp,
-                    bottomStart = 6.dp, bottomEnd = 6.dp
-                )
-                isLast -> RoundedCornerShape(
-                    topStart = 6.dp, topEnd = 6.dp,
-                    bottomStart = 16.dp, bottomEnd = 16.dp
-                )
-                else -> RoundedCornerShape(4.dp)
+            val position = when {
+                items.size == 1 -> MotionItemPosition.Alone
+                index == 0 -> MotionItemPosition.Start
+                index == items.lastIndex -> MotionItemPosition.End
+                else -> MotionItemPosition.Middle
             }
-
-            var selected by remember { mutableStateOf(false) }
 
             with(sharedTransitionScope) {
                 AnimatedVisibility(visible = true, enter = fadeIn(), exit = fadeOut()) {
-                    Card(
+                    MotionCard(
+                        position = position,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(100.dp)
@@ -661,20 +650,15 @@ fun ItemList(
                                 onClick = { viewModel.moveItem(item) },
                                 onLongClick = { editingItem = item; newLabel = item.label }
                             ),
-                        shape = shape,
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = when {
-                                selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                    .compositeOver(MaterialTheme.colorScheme.surface)
-
-                                item.hidden -> MaterialTheme.colorScheme.surfaceVariant
-                                    .copy(alpha = 0.7f)
-                                    .compositeOver(MaterialTheme.colorScheme.surface)
-
-                                else -> MaterialTheme.colorScheme.surfaceVariant
-                            }
-                        )
+                        containerColor = if (item.hidden) {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                                .compositeOver(MaterialTheme.colorScheme.surface)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        contentPadding = 0.dp,
+                        // Long press opens the editor here.
+                        longPressMorphEnabled = false
                     ) {
                         Row(
                             modifier = Modifier
@@ -726,102 +710,63 @@ fun ItemList(
     }
 
 
-// 🔹 Edit label dialog
-    if (editingItem != null) {
-        val isHidden = editingItem!!.hidden
+    editingItem?.let { item ->
+        val isHidden = item.hidden
 
-        AlertDialog(
+        MotionDialog(
             onDismissRequest = { editingItem = null },
-            title = { Text("Edit Subject") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = newLabel,
-                        onValueChange = { newLabel = it },
-                        label = { Text("Display Label") }
-                    )
+            icon = "edit",
+            title = "Edit Subject",
+            text = "Original name: ${item.name}",
+            confirmText = "Save",
+            onConfirm = { viewModel.updateLabel(item, newLabel) },
+            dismissText = "Cancel",
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = newLabel,
+                    onValueChange = { newLabel = it },
+                    label = { Text("Display Label") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-                    Text(
-                        text = "Original name: ${editingItem!!.name}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    if (editingItem!!.userCreated) {
-                        Button(
-                            onClick = {
-                                viewModel.deleteItem(editingItem!!)
-                                editingItem = null
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_delete),
-                                contentDescription = "Delete",
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("Delete Subject")
+                // The item's one other action, prominent next to the label it changes.
+                val destructive = item.userCreated || !isHidden
+                MotionButton(
+                    onClick = {
+                        when {
+                            item.userCreated -> viewModel.deleteItem(item)
+                            isHidden -> viewModel.unhideItem(item)
+                            else -> viewModel.hideItem(item)
                         }
-                    }
-                    else {
-                        Button(
-                            onClick = {
-                                if (editingItem!!.hidden) {
-                                    viewModel.unhideItem(editingItem!!)
-                                } else {
-                                    viewModel.hideItem(editingItem!!)
-                                }
-                                editingItem = null
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp), // thick button
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isHidden)
-                                    MaterialTheme.colorScheme.primaryContainer
-                                else
-                                    MaterialTheme.colorScheme.errorContainer,
-                                contentColor = if (isHidden)
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                else
-                                    MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        ) {
-                            Icon(
-                                painter = painterResource(
-                                    id = if (isHidden) R.drawable.ic_visibility else R.drawable.ic_visibility_off
-                                ),
-                                contentDescription = if (isHidden) "Show" else "Hide",
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (isHidden) "Show Subject" else "Hide Subject")
+                        editingItem = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    text = when {
+                        item.userCreated -> "Delete Subject"
+                        isHidden -> "Show Subject"
+                        else -> "Hide Subject"
+                    },
+                    icon = painterResource(
+                        when {
+                            item.userCreated -> R.drawable.ic_delete
+                            isHidden -> R.drawable.ic_visibility
+                            else -> R.drawable.ic_visibility_off
                         }
-                    }
-
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    viewModel.updateLabel(editingItem!!, newLabel)
-                    editingItem = null
-                }) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { editingItem = null }) {
-                    Text("Cancel")
-                }
+                    ),
+                    sizes = MotionButtonDefaults.sizes(height = 56.dp, fontSize = 16.sp, iconSize = 22.dp),
+                    states = MotionButtonDefaults.states(
+                        default = MotionButtonState(
+                            backgroundColor = if (destructive) MaterialTheme.colorScheme.errorContainer
+                            else MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = if (destructive) MaterialTheme.colorScheme.onErrorContainer
+                            else MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    )
+                )
             }
-        )
+        }
     }
 
 }

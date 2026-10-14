@@ -195,7 +195,10 @@ class StudentsPortalPlatform() : Platform {
      * silently re-run the off-screen sign-in instead of asking the user to retype.
      */
     fun needsInteractiveRelogin(): Boolean =
-        !loggedIn && !username.isNullOrBlank() && !password.isNullOrBlank()
+        !loggedIn && (!username.isNullOrBlank() || password.isNullOrBlank())
+
+    override val canRestoreSession: Boolean
+        get() = password.isNullOrBlank() && !username.isNullOrBlank()
 
     /**
      * Re-establish this provider's session from a cookie captured by a fresh

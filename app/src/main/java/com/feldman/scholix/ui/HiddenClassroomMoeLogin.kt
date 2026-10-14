@@ -10,9 +10,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -39,9 +43,28 @@ fun HiddenClassroomMoeLogin(
     onResult: (email: String?, error: String?) -> Unit,
     timeoutMs: Long = 60_000,
 ) {
+    var ownsBrowser by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        moeBrowserLoginMutex.lock()
+        try { ownsBrowser = true; awaitCancellation() }
+        finally { ownsBrowser = false; moeBrowserLoginMutex.unlock() }
+    }
+    if (ownsBrowser) ClassroomMoeLoginBrowser(username, password, onStatus, onResult, timeoutMs)
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun ClassroomMoeLoginBrowser(
+    username: String,
+    password: String,
+    onStatus: (String) -> Unit,
+    onResult: (email: String?, error: String?) -> Unit,
+    timeoutMs: Long,
+) {
     val context = LocalContext.current
     val filled = remember { AtomicBoolean(false) }
     val done = remember { AtomicBoolean(false) }
+    val smsLogin = password.isBlank()
 
     fun finish(email: String?, err: String?) {
         if (done.compareAndSet(false, true)) {
@@ -51,13 +74,17 @@ fun HiddenClassroomMoeLogin(
     }
 
     val web = remember {
-        WebView(context).apply {
+        WebView(android.content.MutableContextWrapper(context)).apply {
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
                 userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
             }
+            // Same zoom fix as the Shahaf SMS dialog: wide viewport + overview
+            // mode before first load (matters when this WebView is shown in
+            // MoeSmsLoginScreen), viewport meta injected per page.
+            applyMoeContentScale()
             val cookieManager = CookieManager.getInstance()
             cookieManager.setAcceptCookie(true)
             cookieManager.setAcceptThirdPartyCookies(this, true)
@@ -68,6 +95,7 @@ fun HiddenClassroomMoeLogin(
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
+                    view?.injectMoeViewport()
                     val host = runCatching { url?.toUri()?.host }.getOrNull().orEmpty()
                     Log.i(TAG, "onPageFinished: $url (host=$host, submitted=${filled.get()})")
                 }
@@ -77,6 +105,7 @@ fun HiddenClassroomMoeLogin(
 
     DisposableEffect(Unit) {
         onDispose {
+            done.set(true)
             web.stopLoading()
             web.destroy()
         }
@@ -84,7 +113,7 @@ fun HiddenClassroomMoeLogin(
 
     LaunchedEffect(username, password) {
         onStatus("מתחבר לשער משרד החינוך...")
-        val completed = withTimeoutOrNull(timeoutMs) {
+        val completed = withTimeoutOrNull(if (smsLogin) 600_000 else timeoutMs) {
             var loopCount = 0
             while (!done.get()) {
                 loopCount++
@@ -96,7 +125,8 @@ fun HiddenClassroomMoeLogin(
                 }
 
                 // 1. Submit credentials on lgn.edu.gov.il NetIQ form if needed
-                if (!filled.get() && host.endsWith("lgn.edu.gov.il", true)) {
+                if (smsLogin && host == "lgn.edu.gov.il") filled.set(true)
+                if (!smsLogin && !filled.get() && host.endsWith("lgn.edu.gov.il", true)) {
                     onStatus("מזין פרטי הזדהות משרד החינוך...")
                     val r = suspendEvaluate(web, loginJs(username, password))?.trim('"', ' ')
                     when {
@@ -151,7 +181,9 @@ fun HiddenClassroomMoeLogin(
 
         if (completed == null && !done.get()) {
             Log.w(TAG, "Timeout waiting for MOE login")
-            val msg = if (filled.get()) {
+            val msg = if (smsLogin) {
+                "SMS sign-in timed out. Please try again."
+            } else if (filled.get()) {
                 "ההתחברות הצליחה, אך טעינת נתוני חשבון גוגל ממשרד החינוך ארכה זמן רב מדי. אנא נסה שוב."
             } else {
                 "זמן ההתחברות למשרד החינוך פג. אנא ודא ששם המשתמש והסיסמה נכונים ונסה שוב."
@@ -162,9 +194,11 @@ fun HiddenClassroomMoeLogin(
 
     DisposableEffect(Unit) {
         val startUrl = "https://my.edu.gov.il/auth/eduidp?next=https%3A%2F%2Fmy.edu.gov.il%2F"
-        web.loadUrl(startUrl)
+        if (smsLogin) CookieManager.getInstance().removeAllCookies { if (!done.get()) web.loadUrl(startUrl) }
+        else web.loadUrl(startUrl)
         onDispose { }
     }
+    if (smsLogin) MoeSmsLoginScreen(web, username) { finish(null, "SMS sign-in cancelled") }
 }
 
 /**

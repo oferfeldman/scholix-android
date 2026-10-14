@@ -64,6 +64,15 @@ android {
                 "proguard-rules.pro"
             )
         }
+        // Release without R8: not debuggable, so it runs at release speed, but builds in minutes.
+        // Same id and key as release, so it installs over it. For testing on a device only.
+        create("fast") {
+            initWith(getByName("release"))
+            isMinifyEnabled = false
+            isShrinkResources = false
+            isDebuggable = false
+            matchingFallbacks += listOf("release")
+        }
         getByName("debug") {
             providers.gradleProperty("scholix.applicationIdSuffix").orNull?.let { applicationIdSuffix = it }
             // Sign debug with the release key only when credentials are available.

@@ -1,5 +1,6 @@
 package com.feldman.scholix.pages
 
+import com.feldman.motion.MotionDialog
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
@@ -15,7 +16,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.feldman.motion.*
 import com.feldman.scholix.AppDest
-import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.LocalAppState
 import com.feldman.scholix.R
 import com.feldman.scholix.api.platforms.*
@@ -111,12 +111,17 @@ fun MessageComposePage(destination: AppDest.ComposeMessage, onNavigate: MotionNa
             Item(modifier = Modifier.padding(bottom = 12.dp)) { MailAction("Discard draft", "send:${destination.draftKey}" !in vm.busy) { discard = true } }
             if (draft.scheduledAt.isNotEmpty()) Item { Text("Scheduled for ${draft.scheduledAt}") }
         }
-        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
-    if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Discard this local draft?") },
-        text = { Text("A copy already saved to Webtop will remain in Webtop Drafts.") },
-        confirmButton = { TextButton(onClick = { discard = false; vm.discardDraft(destination.draftKey); onBack() }) { Text("Discard") } },
-        dismissButton = { TextButton(onClick = { discard = false }) { Text("Keep draft") } })
+    if (discard) MotionDialog(
+        onDismissRequest = { discard = false },
+        icon = "delete",
+        title = "Discard this local draft?",
+        text = "A copy already saved to Webtop will remain in Webtop Drafts.",
+        confirmText = "Discard",
+        confirmIcon = "delete",
+        onConfirm = { vm.discardDraft(destination.draftKey); onBack() },
+        dismissText = "Keep draft",
+    )
 }
 
 @Composable
@@ -254,6 +259,5 @@ fun MessageSignaturePage(providerId: String, onBack: () -> Unit) {
                 }
             } } }
         }
-        Item { Spacer(Modifier.height(BottomBarSpacing())) }
     }
 }

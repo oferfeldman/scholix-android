@@ -75,6 +75,7 @@ import com.feldman.scholix.api.platforms.GoogleClassroomPlatform
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.ui.HiddenClassroomMoeLogin
+import com.feldman.scholix.ui.MoeSmsLoginButton
 import com.google.android.gms.auth.api.identity.AuthorizationResult
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.ApiException
@@ -369,6 +370,13 @@ fun ClassroomLoginView(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    MoeSmsLoginButton(enabled = !isLoading) {
+                        isLoading = true
+                        loadingMessage = "Signing in with MOE SMS"
+                        errorMessage = null
+                        pendingMoeLogin = "" to ""
+                    }
 
                     // Saved MOE credentials hint
                     if (savedMoePlatform != null && savedMoePlatform.getUsername().isNotBlank()) {

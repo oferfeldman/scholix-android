@@ -27,7 +27,7 @@ import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.pages.GradesLoadingIndicator
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
-import com.feldman.lockerapp.ui.theme.AppTheme
+import com.feldman.motion.MotionTheme
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -50,7 +50,7 @@ class GradesWidgetConfigureActivity : ComponentActivity() {
         }
 
         setContent {
-            AppTheme {
+            MotionTheme {
                 val courses by produceState<List<String>?>(initialValue = null) {
                     value = withContext(Dispatchers.IO) {
                         PlatformStorage.getCourses(this@GradesWidgetConfigureActivity).map { it.optString("name") }
@@ -93,7 +93,7 @@ fun GradesWidgetConfigureScreen(courses: List<String>, onCourseSelected: (String
 @Preview
 @Composable
 fun GradesWidgetConfigureScreenPreview() {
-    AppTheme {
+    MotionTheme {
         GradesWidgetConfigureScreen(listOf("Math", "Science")) {}
     }
 }

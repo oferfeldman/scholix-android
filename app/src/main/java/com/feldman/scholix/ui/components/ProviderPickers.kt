@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.feldman.motion.MotionCard
 import com.feldman.motion.MotionPageSettingsItem
@@ -14,6 +15,7 @@ import com.feldman.motion.MotionSegmentedPicker
 import com.feldman.motion.rememberSymbolPainter
 import com.feldman.motion.MotionItemPosition
 import com.feldman.scholix.api.PlatformInfo
+import com.feldman.scholix.R
 
 /** Corner treatment for a row at [index] of a connected group of [count] rows. */
 private fun groupPosition(index: Int, count: Int): MotionItemPosition = when {
@@ -81,5 +83,32 @@ fun WebtopLoginMethodPicker(
             }
         },
         modifier = modifier.fillMaxWidth()
+    )
+}
+
+private val MASHOV_LOGIN_METHODS = listOf("password", "sms")
+
+/** Mashov supports its password or a one-time code sent to the registered mobile. */
+@Composable
+fun MashovLoginMethodPicker(
+    state: MutableState<String>,
+    onSelectedChange: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    MotionSegmentedPicker(
+        options = listOf(
+            stringResource(R.string.mashov_password),
+            stringResource(R.string.sms_login),
+        ),
+        icons = null,
+        selectedIndex = MASHOV_LOGIN_METHODS.indexOf(state.value).coerceAtLeast(0),
+        onSelected = { index ->
+            val method = MASHOV_LOGIN_METHODS[index]
+            if (state.value != method) {
+                state.value = method
+                onSelectedChange(method)
+            }
+        },
+        modifier = modifier.fillMaxWidth(),
     )
 }

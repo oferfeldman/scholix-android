@@ -1,5 +1,6 @@
 package com.feldman.scholix.pages
 
+import com.feldman.scholix.attendance.EditSubjectHoursDialog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -13,101 +14,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.feldman.motion.*
+import com.feldman.scholix.AppDest
 import com.feldman.scholix.R
-import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.attendance.AttendancePortionsCalculator
 import com.feldman.scholix.attendance.AttendancePortionsStorage
 import com.feldman.scholix.attendance.PortionsConfig
-import com.feldman.scholix.attendance.SchoolPortionsTableDialog
 import com.feldman.scholix.ui.components.SettingsCategoryColor
 import com.feldman.scholix.ui.components.SettingsTopBar
 
 @Composable
-fun PortionsSettingsPage(onBack: () -> Unit) {
+fun PortionsSettingsPage(onNavigate: MotionNavigator? = null, onBack: () -> Unit) {
     val context = LocalContext.current
-    val config by AttendancePortionsStorage.configFlow(context)
-        .collectAsState(initial = AttendancePortionsStorage.getPortionsConfig(context))
+    val configFlow = remember(context) { AttendancePortionsStorage.configFlow(context) }
+    val initialConfig = remember(context) { AttendancePortionsStorage.getPortionsConfig(context) }
+    val config by configFlow.collectAsState(initial = initialConfig)
 
     val isDark = isMotionDarkTheme()
     val categoryColor = SettingsCategoryColor.PORTIONS.container(isDark)
     val categoryContentColor = SettingsCategoryColor.PORTIONS.content(isDark)
 
-    var showTableDialog by remember { mutableStateOf(false) }
     var editingSubject by remember { mutableStateOf<String?>(null) }
     var editingSubjectHours by remember { mutableIntStateOf(2) }
 
-    if (showTableDialog) {
-        SchoolPortionsTableDialog(onDismiss = { showTableDialog = false })
-    }
-
     if (editingSubject != null) {
-        Dialog(onDismissRequest = { editingSubject = null }) {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 6.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "שעות שבועיות: ${editingSubject.orEmpty()}",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontFamily = MotionFonts.feldman(weight = 700),
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
-                    Spacer(Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FilledTonalIconButton(
-                            onClick = { if (editingSubjectHours > 1) editingSubjectHours-- },
-                            enabled = editingSubjectHours > 1
-                        ) {
-                            Icon(painter = rememberSymbolPainter(MotionSymbols.ic_remove), contentDescription = null)
-                        }
-                        Spacer(Modifier.width(20.dp))
-                        Text(
-                            text = "$editingSubjectHours שעות",
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = MotionFonts.feldman(weight = 700)
-                            )
-                        )
-                        Spacer(Modifier.width(20.dp))
-                        FilledTonalIconButton(
-                            onClick = { if (editingSubjectHours < 25) editingSubjectHours++ },
-                            enabled = editingSubjectHours < 25
-                        ) {
-                            Icon(painter = rememberSymbolPainter(MotionSymbols.ic_add), contentDescription = null)
-                        }
-                    }
-
-                    Spacer(Modifier.height(20.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = { editingSubject = null }) {
-                            Text("ביטול")
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Button(onClick = {
-                            editingSubject?.let { sub ->
-                                AttendancePortionsStorage.setSubjectWeeklyHours(context, sub, editingSubjectHours)
-                            }
-                            editingSubject = null
-                        }) {
-                            Text("שמור")
-                        }
-                    }
-                }
+        EditSubjectHoursDialog(
+            subject = editingSubject.orEmpty(),
+            initialHours = editingSubjectHours,
+            onDismiss = { editingSubject = null },
+            onConfirm = { hours ->
+                editingSubject?.let { sub -> AttendancePortionsStorage.setSubjectWeeklyHours(context, sub, hours) }
+                editingSubject = null
             }
-        }
+        )
     }
 
     MotionScaffold(
@@ -260,7 +198,7 @@ fun PortionsSettingsPage(onBack: () -> Unit) {
                     title = "טבלת מנות משרד החינוך",
                     description = "צפייה בטבלה המלאה של מדרגות ההיעדרות לפי שעות שבועיות",
                     icon = rememberSymbolPainter(MotionSymbols.ic_table_chart),
-                    onClick = { showTableDialog = true }
+                    onClick = { onNavigate?.invoke(AppDest.SchoolPortionsTable()) }
                 )
             }
         }
@@ -275,9 +213,6 @@ fun PortionsSettingsPage(onBack: () -> Unit) {
             )
         }
 
-        Item {
-            Spacer(Modifier.height(BottomBarSpacing()))
-        }
     }
 }
 

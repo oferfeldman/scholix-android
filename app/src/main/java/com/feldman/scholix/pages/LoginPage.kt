@@ -54,9 +54,12 @@ import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.classroom.ClassroomLoginView
 import com.feldman.scholix.ui.HiddenMoeLogin
 import com.feldman.scholix.ui.HiddenInbarLogin
+import com.feldman.scholix.ui.HiddenMashovSmsLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
+import com.feldman.scholix.ui.MoeSmsLoginButton
 import com.feldman.scholix.ui.components.ProviderPickerList
 import com.feldman.scholix.ui.components.WebtopLoginMethodPicker
+import com.feldman.scholix.ui.components.MashovLoginMethodPicker
 import com.feldman.motion.MotionButton
 import com.feldman.motion.MotionButtonDefaults
 import com.feldman.motion.MotionButtonState
@@ -83,6 +86,8 @@ fun LoginPage(
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var inbarLogin by remember { mutableStateOf<InbarPlatform?>(null) }
+    var mashovLogin by remember { mutableStateOf<MashovPlatform?>(null) }
+    var mashovSmsFields by remember { mutableStateOf<LoginFields?>(null) }
     val savedInbar = remember(selectedPlatform) {
         if (selectedPlatform?.name == "Inbar (Bar-Ilan)")
             PlatformStorage.loadPlatforms(context).filterIsInstance<InbarPlatform>().lastOrNull()
@@ -92,7 +97,9 @@ fun LoginPage(
     // Webtop can be added either with a username/password or via Ministry-of-
     // Education (MOE) SSO. This picks which; it is only shown for Webtop.
     val loginMethod = remember { mutableStateOf("password") }
+    val mashovLoginMethod = remember { mutableStateOf("password") }
     val isWebtop = selectedPlatform?.name == "Webtop"
+    val isMashov = selectedPlatform?.name == "Mashov"
     // The Education Portal uses normal username/password fields; the credentials
     // are relayed by an off-screen engine because its IdP is bot-protected.
     val isPortal = selectedPlatform?.name == "Education Portal"
@@ -134,6 +141,10 @@ fun LoginPage(
                                 if (draft is InbarPlatform) PlatformStorage.loadPlatforms(context)
                                     .filterIsInstance<InbarPlatform>().lastOrNull()?.let { loadFrom(it) }
                             }
+                            if (draft is MashovPlatform) {
+                                mashovSmsFields = draft.getSmsLoginFields()
+                                mashovLoginMethod.value = "password"
+                            }
                         }
                         errorMessage = null
                     }
@@ -144,7 +155,12 @@ fun LoginPage(
         // ─── Inner Login Page ────────────────────────────
         AnimatedVisibility(visible = showLoginPage && inbarLogin == null, enter = fadeIn(), exit = fadeOut()) {
             selectedPlatform?.let { platform ->
-                val fields = loginFields ?: platform.factory().getLoginFields()
+                val defaultFields = loginFields ?: platform.factory().getLoginFields()
+                val fields = if (isMashov && mashovLoginMethod.value == "sms") {
+                    mashovSmsFields ?: (platform.factory() as MashovPlatform).getSmsLoginFields().also {
+                        mashovSmsFields = it
+                    }
+                } else defaultFields
 
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -162,6 +178,8 @@ fun LoginPage(
                                 errorMessage = null
                                 loginFields = null
                                 loginMethod.value = "password"
+                                mashovLoginMethod.value = "password"
+                                mashovSmsFields = null
                             },
                             modifier = Modifier.align(Alignment.CenterStart),
                         ) {
@@ -181,7 +199,14 @@ fun LoginPage(
                         )
                     }
 
-                    if (platform.name == "Google Classroom") {
+                    if (platform.name == "Shahaf") {
+                        ShahafLoginView(onSuccess = { created ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
+                                onLoginSuccess()
+                            }
+                        }, onCancel = { selectedPlatform = null })
+                    } else if (platform.name == "Google Classroom") {
                         ClassroomLoginView(
                             onSuccess = onLoginSuccess,
                             onCancel = {
@@ -199,6 +224,13 @@ fun LoginPage(
                             )
                             Spacer(Modifier.height(16.dp))
                         }
+                        if (isMashov) {
+                            MashovLoginMethodPicker(
+                                state = mashovLoginMethod,
+                                onSelectedChange = { errorMessage = null },
+                            )
+                            Spacer(Modifier.height(16.dp))
+                        }
 
                         if (useMoeLogin) {
                             // MOE sign-in: same fields, but these are the Ministry of
@@ -212,9 +244,17 @@ fun LoginPage(
                             Spacer(Modifier.height(16.dp))
                         }
                         run {
+                            if (isPortal || useMoeLogin) MoeSmsLoginButton(enabled = !isLoading) {
+                                isLoading = true
+                                errorMessage = null
+                                if (isPortal) portalCreds = "" to "" else webtopMoeCreds = "" to ""
+                            }
                             DynamicLoginFields(
                                 fields = fields,
-                                onFieldsChanged = { loginFields = it },
+                                onFieldsChanged = {
+                                    if (isMashov && mashovLoginMethod.value == "sms") mashovSmsFields = it
+                                    else loginFields = it
+                                },
                                 isLoading = isLoading,
                                 errorMessage = errorMessage,
                                 onSubmit = {
@@ -226,6 +266,13 @@ fun LoginPage(
 
                                     isLoading = true
                                     errorMessage = null
+
+                                    if (isMashov && mashovLoginMethod.value == "sms") {
+                                        mashovLogin = MashovPlatform().apply {
+                                            applySmsLoginFields(fields)
+                                        }
+                                        return@DynamicLoginFields
+                                    }
 
                                     if (platform.name == "Inbar (Bar-Ilan)") {
                                         inbarLogin = (savedInbar?.forSmsLogin() ?: InbarPlatform(fields)).apply {
@@ -346,6 +393,24 @@ fun LoginPage(
                     errorMessage = error
                     if (account != null) onLoginSuccess()
                 })
+        }
+
+        mashovLogin?.let { pending ->
+            HiddenMashovSmsLogin(
+                account = pending,
+                onSmsRequested = { account ->
+                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                },
+                onResult = { account, error ->
+                    if (account != null) withContext(Dispatchers.IO) {
+                        PlatformStorage.addPlatforms(context, listOf(account))
+                    }
+                    mashovLogin = null
+                    isLoading = false
+                    errorMessage = error
+                    if (account != null) onLoginSuccess()
+                },
+            )
         }
 
         // Off-screen MOE sign-in for the Education Portal (1dp, invisible).

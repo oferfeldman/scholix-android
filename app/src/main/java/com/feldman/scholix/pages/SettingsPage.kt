@@ -1,5 +1,7 @@
 package com.feldman.scholix.pages
 
+import com.feldman.motion.MotionTooltip
+import com.feldman.motion.MotionDialog
 import androidx.compose.ui.res.stringResource
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -35,8 +37,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import com.feldman.scholix.AppDest
-import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.api.LoginFields
+import com.feldman.scholix.api.Type
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformInfo
 import com.feldman.scholix.api.PlatformStorage
@@ -61,12 +63,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.ui.HiddenMoeLogin
 import com.feldman.scholix.ui.HiddenInbarLogin
+import com.feldman.scholix.ui.HiddenMashovSmsLogin
 import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
+import com.feldman.scholix.ui.MoeSmsLoginButton
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.ui.components.ProviderPickerList
 import com.feldman.scholix.ui.components.AccountIconColor
 import com.feldman.scholix.ui.components.WebtopLoginMethodPicker
+import com.feldman.scholix.ui.components.MashovLoginMethodPicker
 import com.feldman.scholix.ui.components.SettingsCategoryColor
 import com.feldman.scholix.ui.components.SettingsTopBar
 import com.feldman.scholix.ui.components.SubjectIcon
@@ -260,39 +266,29 @@ fun PlatformsPage(
         val platform = PlatformStorage.loadPlatforms(context).getOrNull(idx)
 
         if (platform != null) {
-            AlertDialog(
+            MotionDialog(
                 onDismissRequest = { confirmDeleteIndex = null },
-                title = { Text("Remove provider") },
-                text = { Text("Are you sure you want to remove this provider?") },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                withContext(Dispatchers.IO) {
-                                    val list = PlatformStorage.loadPlatforms(context).toMutableList()
-                                    if (idx in list.indices) {
-                                        val removed = list.removeAt(idx)
-                                        PlatformStorage.savePlatforms(context, list)
-                                        PlatformStorage.clearProviderCourseOverrides(context, removed.id)
-                                    }
-                                }
-                                withContext(Dispatchers.Main) {
-                                    confirmDeleteIndex = null
-                                    currentPlatforms = PlatformStorage.loadPlatforms(context)
-                                    onPlatformsChanged()
-                                    Log.d("ProvidersPage", "Deleted ${platform.javaClass.simpleName}")
-                                }
+                icon = "delete",
+                title = "Remove provider",
+                text = "Are you sure you want to remove this provider?",
+                confirmText = "Remove",
+                confirmIcon = "delete",
+                onConfirm = {
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            val list = PlatformStorage.loadPlatforms(context).toMutableList()
+                            if (idx in list.indices) {
+                                val removed = list.removeAt(idx)
+                                PlatformStorage.savePlatforms(context, list)
+                                PlatformStorage.clearProviderCourseOverrides(context, removed.id)
                             }
                         }
-                    ) {
-                        Text("Remove", color = MaterialTheme.colorScheme.error)
+                        currentPlatforms = PlatformStorage.loadPlatforms(context)
+                        onPlatformsChanged()
+                        Log.d("ProvidersPage", "Deleted ${platform.javaClass.simpleName}")
                     }
                 },
-                dismissButton = {
-                    TextButton(onClick = { confirmDeleteIndex = null }) {
-                        Text("Cancel")
-                    }
-                }
+                dismissText = "Cancel",
             )
         }
     }
@@ -311,8 +307,7 @@ private fun SectionHeaderWithHelp(
     helpTitle: String,
     helpText: String
 ) {
-    val tooltipState = rememberTooltipState(isPersistent = true)
-    val scope = rememberCoroutineScope()
+    var helpExpanded by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = title,
@@ -320,22 +315,14 @@ private fun SectionHeaderWithHelp(
             color = MaterialTheme.colorScheme.onBackground
         )
         Spacer(Modifier.width(4.dp))
-        TooltipBox(
-            positionProvider = TooltipDefaults.rememberRichTooltipPositionProvider(),
-            tooltip = {
-                RichTooltip(
-                    title = { Text(helpTitle) },
-                    action = {
-                        TextButton(onClick = { tooltipState.dismiss() }) { Text("Got it") }
-                    }
-                ) { Text(helpText) }
-            },
-            state = tooltipState
-        ) {
-            IconButton(
-                onClick = { scope.launch { tooltipState.show() } },
-                modifier = Modifier.size(28.dp)
-            ) {
+        MotionTooltip(
+            text = helpText,
+            title = helpTitle,
+            expanded = helpExpanded,
+            onExpandedChange = { helpExpanded = it },
+            action = { TextButton(onClick = { helpExpanded = false }) { Text("Got it") } },
+        ) { _, toggle ->
+            IconButton(onClick = toggle, modifier = Modifier.size(28.dp)) {
                 Icon(
                     painter = rememberSymbolPainter(MotionSymbols.ic_info),
                     contentDescription = "About $title",
@@ -360,6 +347,8 @@ fun AddPlatformSheet(
     }
     var selectedPlatform by remember { mutableStateOf<PlatformInfo?>(null) }
     var inbarLogin by remember { mutableStateOf<InbarPlatform?>(null) }
+    var mashovLogin by remember { mutableStateOf<MashovPlatform?>(null) }
+    var mashovSmsFields by remember { mutableStateOf<LoginFields?>(null) }
     val savedInbar = remember(selectedPlatform) {
         if (selectedPlatform?.name == "Inbar (Bar-Ilan)")
             PlatformStorage.loadPlatforms(context).filterIsInstance<InbarPlatform>().lastOrNull()
@@ -374,12 +363,25 @@ fun AddPlatformSheet(
     var webtopMoeCreds by remember { mutableStateOf<Pair<String, String>?>(null) }
     // Webtop can be added with its own username/password or via MOE SSO.
     val webtopLoginMethod = remember { mutableStateOf("password") }
+    val mashovLoginMethod = remember { mutableStateOf("password") }
     // For rendering only -- see submitAdd(), which reads the state directly.
     val webtopMoe = webtopLoginMethod.value == "moe"
     // What the busy screen says while an off-screen sign-in runs.
     val addStatus = when {
+        mashovLogin != null -> "Signing in with Mashov SMS"
         webtopMoeCreds != null || portalCreds != null -> "Signing in with the Ministry of Education"
         else -> "Signing in"
+    }
+
+    if (selectedPlatform?.name == "Shahaf") {
+        ShahafLoginView(onSuccess = { created ->
+            scope.launch {
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
+                onAdded()
+                onClose()
+            }
+        }, onCancel = { selectedPlatform = null })
+        return
     }
 
     inbarLogin?.let { pending ->
@@ -395,6 +397,25 @@ fun AddPlatformSheet(
                 errorMessage = error
                 if (account != null) { onAdded(); onClose() }
             })
+    }
+
+    mashovLogin?.let { pending ->
+        HiddenMashovSmsLogin(
+            account = pending,
+            onSmsRequested = { account ->
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+            },
+            onStatus = { /* the sheet's busy state stays compact; status changes are intentionally silent */ },
+            onResult = { account, error ->
+                if (account != null) withContext(Dispatchers.IO) {
+                    PlatformStorage.addPlatforms(context, listOf(account))
+                }
+                mashovLogin = null
+                isLoading = false
+                errorMessage = error
+                if (account != null) { onAdded(); onClose() }
+            },
+        )
     }
 
     // Off-screen MOE sign-in: the user types into this sheet's own fields and no
@@ -473,7 +494,10 @@ fun AddPlatformSheet(
     // Extracted so the sheet's action button and the keyboard's Done key
     // trigger the same submit.
     fun submitAdd() {
-        val fields = loginFields ?: selectedPlatform?.factory()?.getLoginFields() ?: return
+        val fields = if (selectedPlatform?.name == "Mashov" && mashovLoginMethod.value == "sms") {
+            mashovSmsFields ?: (selectedPlatform?.factory() as? MashovPlatform)?.getSmsLoginFields()
+        } else loginFields ?: selectedPlatform?.factory()?.getLoginFields()
+        if (fields == null) return
         if (fields.getFields().any { it.value.isNullOrBlank() }) {
             errorMessage = "Please fill in all fields"
             return
@@ -484,6 +508,10 @@ fun AddPlatformSheet(
             inbarLogin = (savedInbar?.forSmsLogin() ?: InbarPlatform(fields)).apply {
                 applyLoginFields(fields)
             }
+            return
+        }
+        if (selectedPlatform!!.name == "Mashov" && mashovLoginMethod.value == "sms") {
+            mashovLogin = MashovPlatform().apply { applySmsLoginFields(fields) }
             return
         }
         // Read the picker's state here, not a value captured when this function was
@@ -615,6 +643,10 @@ fun AddPlatformSheet(
                         if (draft is InbarPlatform) PlatformStorage.loadPlatforms(context)
                             .filterIsInstance<InbarPlatform>().lastOrNull()?.let { loadFrom(it) }
                     }
+                    if (draft is MashovPlatform) {
+                        mashovSmsFields = draft.getSmsLoginFields()
+                        mashovLoginMethod.value = "password"
+                    }
                     errorMessage = null
                 }
             )
@@ -643,6 +675,8 @@ fun AddPlatformSheet(
                     onClick = {
                         selectedPlatform = null
                         errorMessage = null
+                        mashovLoginMethod.value = "password"
+                        mashovSmsFields = null
                     },
                     modifier = Modifier.align(Alignment.CenterStart)
                 ) {
@@ -663,9 +697,32 @@ fun AddPlatformSheet(
 
                 Spacer(Modifier.height(12.dp))
             }
+            if (selectedPlatform!!.name == "Mashov") {
+                MashovLoginMethodPicker(
+                    state = mashovLoginMethod,
+                    onSelectedChange = { errorMessage = null },
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+            if (selectedPlatform!!.name == "Education Portal" ||
+                (selectedPlatform!!.name == "Webtop" && webtopLoginMethod.value == "moe")) {
+                MoeSmsLoginButton(enabled = !isLoading) {
+                    isLoading = true
+                    errorMessage = null
+                    if (selectedPlatform!!.name == "Education Portal") portalCreds = "" to ""
+                    else webtopMoeCreds = "" to ""
+                }
+            }
             DynamicLoginFields(
-                fields = loginFields ?: selectedPlatform!!.factory().getLoginFields(),
-                onFieldsChanged = { loginFields = it },
+                fields = if (selectedPlatform!!.name == "Mashov" && mashovLoginMethod.value == "sms") {
+                    mashovSmsFields ?: (selectedPlatform!!.factory() as MashovPlatform).getSmsLoginFields().also {
+                        mashovSmsFields = it
+                    }
+                } else loginFields ?: selectedPlatform!!.factory().getLoginFields(),
+                onFieldsChanged = {
+                    if (selectedPlatform!!.name == "Mashov" && mashovLoginMethod.value == "sms") mashovSmsFields = it
+                    else loginFields = it
+                },
                 isLoading = isLoading,
                 errorMessage = errorMessage,
                 onSubmit = ::submitAdd,
@@ -688,6 +745,16 @@ fun EditProviderSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    if (provider is com.feldman.scholix.api.platforms.ShahafPlatform) {
+        ShahafLoginView(provider, onSuccess = { updated ->
+            scope.launch {
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(updated)) }
+                onChanged()
+                onClose()
+            }
+        }, onCancel = onClose)
+        return
+    }
     val classroomLogin = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (it.resultCode == Activity.RESULT_OK) { onChanged(); onClose() }
     }
@@ -717,8 +784,15 @@ fun EditProviderSheet(
         }
         mutableStateOf<String>(initialMethod ?: "password")
     }
+    val mashovLoginMethod = remember(provider.id) {
+        mutableStateOf((provider as? MashovPlatform)?.loginMethod ?: "password")
+    }
+    var mashovSmsFields by remember(provider.id) {
+        mutableStateOf((provider as? MashovPlatform)?.getSmsLoginFields())
+    }
     var webtopRelogin by remember { mutableStateOf<Pair<String, String>?>(null) }
     var inbarRelogin by remember(provider.id) { mutableStateOf<InbarPlatform?>(null) }
+    var mashovRelogin by remember(provider.id) { mutableStateOf<MashovPlatform?>(null) }
     // Editing the portal's password must also re-establish its SSO session:
     // the stored cookie is what actually authenticates, and new credentials
     // alone would leave grades failing until the next manual re-add.
@@ -958,6 +1032,26 @@ fun EditProviderSheet(
             })
     }
 
+    mashovRelogin?.let { pending ->
+        HiddenMashovSmsLogin(
+            account = pending,
+            onSmsRequested = { account ->
+                if (providerName.isNotBlank()) account.setName(providerName)
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+            },
+            onResult = { account, error ->
+                if (account != null) {
+                    if (providerName.isNotBlank()) account.setName(providerName)
+                    withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(account)) }
+                }
+                mashovRelogin = null
+                busy = false
+                errorMessage = error
+                if (account != null) { onChanged(); courseOverridesChanged = false; onClose() }
+            },
+        )
+    }
+
     val orderedCourses = orderedCoursesState.value
     val hiddenCourseKeys = hiddenCourseKeysState.value
     val visibleCourses = orderedCourses.filter {
@@ -1003,8 +1097,23 @@ fun EditProviderSheet(
     // Extracted so the sheet's action button and the keyboard's Done key
     // trigger the same submit.
     fun submitEdit() {
-        val user = loginFields.getValue("username").orEmpty()
-        val pass = loginFields.getValue("password").orEmpty()
+        if (provider is MashovPlatform && mashovLoginMethod.value == "sms") {
+            val fields = mashovSmsFields ?: provider.getSmsLoginFields()
+            if (fields.getFields().any { it.value.isNullOrBlank() }) {
+                errorMessage = "Please fill in all fields"
+                return
+            }
+            savingStatus = "Signing in with Mashov SMS"
+            busy = true
+            errorMessage = null
+            mashovRelogin = provider.forSmsLogin().apply {
+                applySmsLoginFields(fields)
+                if (providerName.isNotBlank()) setName(providerName)
+            }
+            return
+        }
+        val user = loginFields.getValueByType(Type.Username).orEmpty()
+        val pass = loginFields.getValueByType(Type.Password).orEmpty()
         if (provider !is InbarPlatform && loginFields.getFields().isNotEmpty() && (user.isBlank() || pass.isBlank())) {
             errorMessage = "Please fill in all fields"
             return
@@ -1327,9 +1436,30 @@ fun EditProviderSheet(
 
                     Spacer(Modifier.height(12.dp))
                 }
+                if (provider is MashovPlatform) {
+                    MashovLoginMethodPicker(
+                        state = mashovLoginMethod,
+                        onSelectedChange = { errorMessage = null },
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+                if (provider is StudentsPortalPlatform || (provider is WebtopPlatform && webtopLoginMethod.value == "moe")) {
+                    MoeSmsLoginButton(enabled = !busy) {
+                        busy = true
+                        savingStatus = "Signing in with MOE SMS"
+                        errorMessage = null
+                        if (provider is StudentsPortalPlatform) portalRelogin = "" to ""
+                        else webtopRelogin = "" to ""
+                    }
+                }
                 DynamicLoginFields(
-                    fields = loginFields,
-                    onFieldsChanged = { loginFields = it },
+                    fields = if (provider is MashovPlatform && mashovLoginMethod.value == "sms") {
+                        mashovSmsFields ?: provider.getSmsLoginFields().also { mashovSmsFields = it }
+                    } else loginFields,
+                    onFieldsChanged = {
+                        if (provider is MashovPlatform && mashovLoginMethod.value == "sms") mashovSmsFields = it
+                        else loginFields = it
+                    },
                     isLoading = busy,
                     errorMessage = errorMessage,
                     onSubmit = ::submitEdit,
@@ -1518,7 +1648,7 @@ fun SettingsPage(
             )
             PageItem(
                 title = "Navigation",
-                description = "Choose the pages in your navbar",
+                description = "Order pages in your navbar and rail",
                 icon = painterResource(R.drawable.ic_menu),
                 iconStyle = MotionSectionDefaults.iconStyle(containerColor = SettingsCategoryColor.NAVIGATION.container(useDark), contentColor = SettingsCategoryColor.NAVIGATION.content(useDark)),
                 onClick = onOpenNavigation,
@@ -1554,8 +1684,5 @@ fun SettingsPage(
             )
         }
 
-        Item {
-            Spacer(Modifier.height(BottomBarSpacing()))
-        }
     }
 }

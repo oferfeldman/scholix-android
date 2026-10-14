@@ -97,7 +97,6 @@ class MessagesViewModel(application: Application) : AndroidViewModel(application
         val search = query
         val unread = unreadOnly
         val next = if (more) page + 1 else 1
-        if (!more) messages = emptyList()
         listJob = viewModelScope.launch {
             loading = true
             error = null

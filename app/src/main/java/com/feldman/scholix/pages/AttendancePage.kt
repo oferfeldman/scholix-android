@@ -3,7 +3,7 @@ package com.feldman.scholix.pages
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import com.feldman.motion.MotionLazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,9 +14,11 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import com.feldman.scholix.BottomBarSpacing
 import com.feldman.scholix.R
 import androidx.compose.runtime.mutableIntStateOf
 import com.feldman.scholix.TopBarSpacing
@@ -41,6 +43,9 @@ import java.time.format.DateTimeFormatter
 
 @Composable
 fun FiltersGrid(
+    viewMode: String,
+    onViewModeChange: (String) -> Unit,
+    portionsEnabled: Boolean,
     sortBy: String,
     onSortChange: (String) -> Unit,
     year: Int,
@@ -87,23 +92,48 @@ fun FiltersGrid(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ChipPicker(
-                label = stringResource(R.string.sort_by),
-                options = listOf("Type", "Date", "Subject"),
-                selected = sortBy,
-                optionIcon = { option ->
-                    rememberSymbolPainter(
-                        when (option) {
-                            "Type" -> MotionSymbols.ic_event_note
-                            "Subject" -> MotionSymbols.ic_school
-                            else -> MotionSymbols.ic_calendar_month
+            if (portionsEnabled) {
+                val eventsLabel = stringResource(R.string.attendance_view_events)
+                val portionsLabel = stringResource(R.string.attendance_view_portions)
+                Box(modifier = Modifier.weight(1f)) {
+                    ChipPicker(
+                        label = stringResource(R.string.view_mode),
+                        options = listOf(eventsLabel, portionsLabel),
+                        selected = if (viewMode == "portions") portionsLabel else eventsLabel,
+                        optionIcon = { option ->
+                            rememberSymbolPainter(
+                                if (option == portionsLabel) MotionSymbols.ic_calculate else MotionSymbols.ic_list
+                            )
+                        },
+                        onSelectedChange = { option ->
+                            onViewModeChange(if (option == portionsLabel) "portions" else "events")
                         }
                     )
-                },
-                onSelectedChange = onSortChange
-            )
+                }
+            }
+            if (!portionsEnabled || viewMode == "events") {
+                Box(modifier = Modifier.weight(1f)) {
+                    ChipPicker(
+                        label = stringResource(R.string.sort_by),
+                        options = listOf("Type", "Date", "Subject"),
+                        selected = sortBy,
+                        optionIcon = { option ->
+                            rememberSymbolPainter(
+                                when (option) {
+                                    "Type" -> MotionSymbols.ic_event_note
+                                    "Subject" -> MotionSymbols.ic_school
+                                    else -> MotionSymbols.ic_calendar_month
+                                }
+                            )
+                        },
+                        onSelectedChange = onSortChange
+                    )
+                }
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
         }
     }
 }
@@ -158,12 +188,13 @@ fun AttendancePage(
     var sortBy by rememberSaveable { mutableStateOf("Date") }
     var viewMode by rememberSaveable { mutableStateOf("events") } // "events" or "portions"
 
-    var showTableDialog by remember { mutableStateOf(false) }
     var editingSubject by remember { mutableStateOf<String?>(null) }
     var editingSubjectHours by remember { mutableIntStateOf(2) }
 
-    val portionsConfig by AttendancePortionsStorage.configFlow(context)
-        .collectAsState(initial = AttendancePortionsStorage.getPortionsConfig(context))
+    // Remembered: a new flow every recomposition restarts the collection and re-reads prefs.
+    val portionsConfigFlow = remember(context) { AttendancePortionsStorage.configFlow(context) }
+    val initialPortionsConfig = remember(context) { AttendancePortionsStorage.getPortionsConfig(context) }
+    val portionsConfig by portionsConfigFlow.collectAsState(initial = initialPortionsConfig)
 
     var attendancePlatforms by remember { mutableStateOf<List<Platform>>(emptyList()) }
     var selectedPlatformIndex by remember { mutableIntStateOf(0) }
@@ -290,10 +321,6 @@ fun AttendancePage(
         }
     }
 
-    if (showTableDialog) {
-        SchoolPortionsTableDialog(onDismiss = { showTableDialog = false })
-    }
-
     if (editingSubject != null) {
         EditSubjectHoursDialog(
             subject = editingSubject.orEmpty(),
@@ -326,6 +353,9 @@ fun AttendancePage(
         }
 
         FiltersGrid(
+            viewMode = viewMode,
+            onViewModeChange = { viewMode = it },
+            portionsEnabled = portionsConfig.enabled,
             sortBy = sortBy,
             onSortChange = { sortBy = it },
             year = yearState,
@@ -335,42 +365,6 @@ fun AttendancePage(
             currentYear = currentYear,
             modifier = Modifier.padding(vertical = 8.dp)
         )
-
-        if (portionsConfig.enabled) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = viewMode == "events",
-                    onClick = { viewMode = "events" },
-                    label = { Text(stringResource(R.string.attendance_view_events)) },
-                    leadingIcon = {
-                        Icon(
-                            painter = rememberSymbolPainter(MotionSymbols.ic_list),
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-                FilterChip(
-                    selected = viewMode == "portions",
-                    onClick = { viewMode = "portions" },
-                    label = { Text(stringResource(R.string.attendance_view_portions)) },
-                    leadingIcon = {
-                        Icon(
-                            painter = rememberSymbolPainter(MotionSymbols.ic_calculate),
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
 
         Spacer(Modifier.height(12.dp))
 
@@ -382,20 +376,22 @@ fun AttendancePage(
                     NoAttendanceState()
                 }
             } else if (viewMode == "portions" && portionsConfig.enabled) {
-                LazyColumn(
+                MotionLazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    item {
+                    item(key = "summary") {
                         PortionsSummaryBanner(
                             summaries = portionsSummaries,
-                            onOpenTable = { showTableDialog = true },
-                            onOpenSettings = { onNavigate?.invoke(AppDest.PortionsSettings) }
+                            onOpenTable = { onNavigate?.invoke(AppDest.SchoolPortionsTable()) },
+                            onOpenSettings = { onNavigate?.invoke(AppDest.PortionsSettings) },
+                            modifier = Modifier.padding(bottom = 14.dp)
                         )
                     }
 
                     if (portionsSummaries.isEmpty()) {
-                        item {
+                        item(key = "empty") {
                             Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                                 Text(
                                     text = stringResource(R.string.no_attendance_events_found),
@@ -405,15 +401,11 @@ fun AttendancePage(
                             }
                         }
                     } else {
-                        itemsIndexed(portionsSummaries) { index, summary ->
+                        itemsIndexed(portionsSummaries, key = { _, it -> "subject:${it.subject}" }) { index, summary ->
                             SubjectPortionCard(
                                 summary = summary,
-                                position = when {
-                                    portionsSummaries.size == 1 -> MotionItemPosition.Alone
-                                    index == 0 -> MotionItemPosition.Start
-                                    index == portionsSummaries.lastIndex -> MotionItemPosition.End
-                                    else -> MotionItemPosition.Middle
-                                },
+                                config = portionsConfig,
+                                position = itemPosition(index, portionsSummaries.size),
                                 onEditHours = {
                                     editingSubject = summary.subject
                                     editingSubjectHours = summary.weeklyHours
@@ -421,133 +413,184 @@ fun AttendancePage(
                             )
                         }
                     }
-
-                    item { Spacer(Modifier.height(180.dp)) }
                 }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                MotionLazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
                     if (portionsConfig.enabled && portionsSummaries.isNotEmpty()) {
                         val bonusCount = portionsSummaries.count { it.status == GradeImpactStatus.BONUS }
-                        item {
+                        item(key = "portions-teaser") {
+                            val chevronScale = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1f else 1f
                             MotionCard(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(bottom = 6.dp)
                                     .clickable { viewMode = "portions" },
                                 position = MotionItemPosition.Alone,
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentPadding = 0.dp
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
                                         painter = rememberSymbolPainter(MotionSymbols.ic_calculate),
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                         modifier = Modifier.size(24.dp)
                                     )
-                                    Spacer(Modifier.width(10.dp))
+                                    Spacer(Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = stringResource(R.string.attendance_portions_title),
-                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onSurface
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontFamily = MotionFonts.feldman(weight = 700),
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                         Text(
-                                            text = "בונוס פעיל ב-$bonusCount מקצועות • לחץ לצפייה במדדים המלאים",
+                                            text = stringResource(R.string.bonus_active_summary_banner, bonusCount),
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                                         )
                                     }
                                     Icon(
                                         painter = rememberSymbolPainter(MotionSymbols.ic_chevron_right),
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(20.dp)
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(20.dp).graphicsLayer { scaleX = chevronScale }
                                     )
                                 }
                             }
-                            Spacer(Modifier.height(10.dp))
                         }
                     }
 
-                    groupedEvents.forEach { (_, list) ->
-                        itemsIndexed(list) { index, event ->
-                            val subject = event.optString("subject")
-                            val isRtl = isRtlText(subject)
-
-                            MotionCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                position = when {
-                                    list.size == 1 -> MotionItemPosition.Alone
-                                    index == 0 -> MotionItemPosition.Start
-                                    index == list.lastIndex -> MotionItemPosition.End
-                                    else -> MotionItemPosition.Middle
-                                },
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                contentPadding = 0.dp
+                    groupedEvents.forEach { (group, list) ->
+                        item(key = "header:$group", contentType = "header") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 4.dp, end = 4.dp, top = 16.dp, bottom = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                CompositionLocalProvider(
-                                    LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        SubjectIcon(
-                                            subject = subject,
-                                            assignment = event.optString("type")
-                                        )
-                                        Spacer(Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = subject,
-                                                style = MaterialTheme.typography.titleLarge.copy(
-                                                    fontFamily = MotionFonts.feldman(weight = 700),
-                                                    fontWeight = FontWeight.Bold
-                                                ),
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = event.optString("teacher"),
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            event.optString("remark").takeIf { it.isNotBlank() }?.let { remark ->
-                                                Text(
-                                                    text = remark,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                        Spacer(Modifier.width(12.dp))
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(
-                                                text = event.optString("type"),
-                                                style = MaterialTheme.typography.titleMedium.copy(
-                                                    fontFamily = MotionFonts.feldman(weight = 700),
-                                                    fontWeight = FontWeight.Bold
-                                                ),
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = formatEventDate(event.optString("date")),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
+                                Text(
+                                    text = group.ifBlank { "—" },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontFamily = MotionFonts.feldman(weight = 700),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = list.size.toString(),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                            Spacer(Modifier.height(2.dp))
+                        }
+                        itemsIndexed(
+                            list,
+                            key = { index, _ -> "event:$group:$index" },
+                            contentType = { _, _ -> "event" }
+                        ) { index, event ->
+                            AttendanceEventCard(
+                                event = event,
+                                position = itemPosition(index, list.size)
+                            )
                         }
                     }
-                    item { Spacer(Modifier.height(180.dp)) }
+                }
+            }
+        }
+    }
+}
+
+private fun itemPosition(index: Int, size: Int) = when {
+    size == 1 -> MotionItemPosition.Alone
+    index == 0 -> MotionItemPosition.Start
+    index == size - 1 -> MotionItemPosition.End
+    else -> MotionItemPosition.Middle
+}
+
+@Composable
+private fun AttendanceEventCard(event: JSONObject, position: MotionItemPosition) {
+    val subject = event.optString("subject")
+    val type = event.optString("type")
+    val isRtl = remember(subject) { isRtlText(subject) }
+    val justified = event.optBoolean("isJustified", false) || type.contains("מוצדק")
+    val late = type.contains("איחור") || type.contains("late", ignoreCase = true)
+    val pillContainer = when {
+        justified -> MaterialTheme.colorScheme.secondaryContainer
+        late -> MaterialTheme.colorScheme.tertiaryContainer
+        else -> MaterialTheme.colorScheme.errorContainer
+    }
+    val pillContent = when {
+        justified -> MaterialTheme.colorScheme.onSecondaryContainer
+        late -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onErrorContainer
+    }
+
+    MotionCard(
+        modifier = Modifier.fillMaxWidth(),
+        position = position,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        contentPadding = 0.dp
+    ) {
+        CompositionLocalProvider(
+            LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SubjectIcon(subject = subject, assignment = type, size = 44.dp, iconSize = 26.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = subject,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = MotionFonts.feldman(weight = 700),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val secondary = listOf(event.optString("teacher"), formatEventDate(event.optString("date")))
+                        .filter { it.isNotBlank() }
+                        .joinToString(" · ")
+                    if (secondary.isNotBlank()) {
+                        Text(
+                            text = secondary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    event.optString("remark").takeIf { it.isNotBlank() }?.let { remark ->
+                        Text(
+                            text = remark,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                if (type.isNotBlank()) {
+                    Spacer(Modifier.width(8.dp))
+                    Surface(shape = CircleShape, color = pillContainer, contentColor = pillContent) {
+                        Text(
+                            text = type,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontFamily = MotionFonts.feldman(weight = 700),
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
                 }
             }
         }

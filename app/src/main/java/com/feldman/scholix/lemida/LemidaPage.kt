@@ -1,5 +1,7 @@
 package com.feldman.scholix.lemida
 
+import com.feldman.motion.MotionDropdownMenuItem
+import com.feldman.motion.MotionDropdownMenu
 import android.Manifest
 import android.content.Intent
 import androidx.activity.compose.BackHandler
@@ -32,6 +34,9 @@ import com.feldman.motion.MotionThemeDefaults
 import com.feldman.scholix.R
 import com.feldman.scholix.ui.components.SettingsTopBar
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
@@ -41,7 +46,7 @@ fun LemidaPage(searchQuery: String = "") {
     val repo = remember(context) { LemidaRepository(context) }
     val providers = com.feldman.scholix.LocalAppState.current.platforms
         .filterIsInstance<com.feldman.scholix.api.platforms.GoogleClassroomPlatform>()
-    var providerId by rememberSaveable { mutableStateOf(if (repo.lastSync() == 0L) providers.firstOrNull()?.id ?: "lemida" else "lemida") }
+    var providerId by rememberSaveable { mutableStateOf(providers.firstOrNull()?.id ?: "lemida") }
     val selected = providers.firstOrNull { it.id == providerId }
     val providerPicker: @Composable () -> Unit = {
         if (providers.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -61,22 +66,27 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val syncing by repo.syncing.collectAsStateWithLifecycle()
-    var homework by remember { mutableStateOf(repo.cached()) }
-    var status by remember { mutableStateOf(repo.status()) }
-    var updated by remember { mutableLongStateOf(repo.lastSync()) }
-    var enabled by remember { mutableStateOf(repo.enabled()) }
-    var needsLogin by remember { mutableStateOf(repo.needsLogin()) }
+    var homework by remember { mutableStateOf<List<Homework>>(emptyList()) }
+    var status by remember { mutableStateOf("") }
+    var updated by remember { mutableLongStateOf(0L) }
+    var enabled by remember { mutableStateOf(false) }
+    var needsLogin by remember { mutableStateOf(false) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var courseFilter by rememberSaveable { mutableStateOf<Int?>(null) }
     var typeFilter by rememberSaveable { mutableStateOf("all") }
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val scope = rememberCoroutineScope()
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        homework = repo.cached(); status = repo.status(); updated = repo.lastSync()
-        needsLogin = repo.needsLogin(); enabled = repo.enabled()
-        // A completed sign-in may change accounts. Return to the freshly loaded list.
-        if (result.resultCode == android.app.Activity.RESULT_OK) selectedId = null
+        scope.launch(Dispatchers.IO) {
+            val h = repo.cached(); val s = repo.status(); val u = repo.lastSync()
+            val nl = repo.needsLogin(); val e = repo.enabled()
+            withContext(Dispatchers.Main) {
+                homework = h; status = s; updated = u; needsLogin = nl; enabled = e
+                if (result.resultCode == android.app.Activity.RESULT_OK) selectedId = null
+            }
+        }
     }
     LaunchedEffect(homework, courseFilter, selectedId) {
         if (courseFilter != null && homework.none { it.courseId == courseFilter }) courseFilter = null
@@ -89,11 +99,30 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
     }
     LaunchedEffect(lifecycle) {
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (repo.enabled() && !repo.needsLogin() && !repo.syncing.value) LemidaSyncWorker.refresh(context)
+            val initialH = withContext(Dispatchers.IO) { repo.cached() }
+            val initialS = withContext(Dispatchers.IO) { repo.status() }
+            val initialU = withContext(Dispatchers.IO) { repo.lastSync() }
+            val initialE = withContext(Dispatchers.IO) { repo.enabled() }
+            val initialNl = withContext(Dispatchers.IO) { repo.needsLogin() }
+            homework = initialH
+            status = initialS
+            updated = initialU
+            enabled = initialE
+            needsLogin = initialNl
+
+            if (initialE && !initialNl && !repo.syncing.value) LemidaSyncWorker.refresh(context)
             while (true) {
-                homework = repo.cached(); status = repo.status(); updated = repo.lastSync(); needsLogin = repo.needsLogin()
-                enabled = repo.enabled()
                 delay(2000)
+                val h = withContext(Dispatchers.IO) { repo.cached() }
+                val s = withContext(Dispatchers.IO) { repo.status() }
+                val u = withContext(Dispatchers.IO) { repo.lastSync() }
+                val nl = withContext(Dispatchers.IO) { repo.needsLogin() }
+                val e = withContext(Dispatchers.IO) { repo.enabled() }
+                homework = h
+                status = s
+                updated = u
+                needsLogin = nl
+                enabled = e
             }
         }
     }
@@ -109,12 +138,12 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
             }
             Box {
                 IconButton(onClick = { options = true }) { Icon(Icons.Default.MoreVert, "Homework settings") }
-                DropdownMenu(expanded = options, onDismissRequest = { options = false }) {
-                    DropdownMenuItem(text = { Text("Reconnect Lemida") }, enabled = !syncing, onClick = {
+                MotionDropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                    MotionDropdownMenuItem(text = { Text("Reconnect Lemida") }, enabled = !syncing, onClick = {
                         options = false
                         login.launch(Intent(context, LemidaLoginActivity::class.java))
                     })
-                    DropdownMenuItem(text = { Text(if (enabled) "Pause automatic updates" else "Resume automatic updates") }, onClick = {
+                    MotionDropdownMenuItem(text = { Text(if (enabled) "Pause automatic updates" else "Resume automatic updates") }, onClick = {
                         enabled = !enabled; repo.setEnabled(enabled); options = false
                         if (enabled) { permission.launch(Manifest.permission.POST_NOTIFICATIONS); LemidaSyncWorker.schedule(context); LemidaSyncWorker.refresh(context, manual = true) }
                     })

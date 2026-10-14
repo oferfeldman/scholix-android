@@ -59,12 +59,21 @@ class WebtopPlatform() : Platform {
     var loginMethod: String? = null
 
     private var _cookies: String? = null
+    val cookies: String? get() = _cookies
     @Volatile
     private var cachedShotefKey: String? = null
     @Volatile
     private var cachedShotefDays: JSONArray? = null
     @Volatile
     private var cachedShotefTime: Long = 0
+
+    data class PupilCardSettings(
+        val divisions: Map<String, Int>,
+        val encryptedStudentId: String?,
+        val currentStudyYear: Int?
+    )
+    @Volatile
+    private var cachedPupilCardSettings: MutableMap<Int, PupilCardSettings> = mutableMapOf()
     private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
     val mailbox: WebtopMailbox = WebtopMailbox(
         cookie = { _cookies ?: "" },
@@ -78,7 +87,10 @@ class WebtopPlatform() : Platform {
         loginMethod == "moe" || (loginMethod.isNullOrBlank() && (username?.any { it.isLetter() } == true || !userStudentId.isNullOrBlank()))
 
     fun needsInteractiveRelogin(): Boolean =
-        isMoe() && !loggedIn && !username.isNullOrBlank() && !password.isNullOrBlank()
+        isMoe() && !loggedIn && (!username.isNullOrBlank() || password.isNullOrBlank())
+
+    override val canRestoreSession: Boolean
+        get() = isMoe() && password.isNullOrBlank() && !username.isNullOrBlank()
 
     fun adoptSession(key: String): Boolean {
         val payload = JSONObject()
@@ -113,6 +125,7 @@ class WebtopPlatform() : Platform {
                 loginMethod = "moe"
                 _cookies = response.headers("Set-Cookie").joinToString("; ")
                 cachedShotefKey = null
+                cachedPupilCardSettings.clear()
                 cachedShotefDays = null
                 loggedIn = true
                 true
@@ -144,7 +157,6 @@ class WebtopPlatform() : Platform {
     constructor(loginFields: LoginFields) : this() {
         val username = loginFields.getValueByType(Type.Username)
         val password = loginFields.getValueByType(Type.Password)
-        Log.d("WebtopPlatform", "constructing: $username $password")
         val loginSuccess = login(username ?: "", password ?: "")
 
         Log.d("WebtopPlatform", "success: $loginSuccess")
@@ -293,6 +305,157 @@ class WebtopPlatform() : Platform {
     }
 
 
+
+    fun fetchPupilCardSettings(year: Int): PupilCardSettings? {
+        cachedPupilCardSettings[year]?.let { return it }
+        try {
+            val payload = JSONObject().put("id", year)
+            val request = Request.Builder()
+                .url("https://webtopserver.smartschool.co.il/server/api/PupilCard/GetSettingsList")
+                .addHeader("Cookie", _cookies ?: "")
+                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            _client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w("WebtopPlatform", "Failed to fetch GetSettingsList: ${response.code}")
+                    return null
+                }
+                val body = response.body.string()
+                val json = JSONObject(body)
+                val data = json.optJSONObject("data") ?: return null
+
+                val divisions = mutableMapOf<String, Int>()
+                val divisionsList = data.optJSONArray("divisionsList")
+                if (divisionsList != null) {
+                    for (i in 0 until divisionsList.length()) {
+                        val div = divisionsList.getJSONObject(i)
+                        val divId = div.optInt("division_id")
+                        val yearDiv = div.optInt("year_division")
+                        val divName = div.optString("division_name", "")
+                        if (yearDiv == 1 || divName.contains("א")) {
+                            divisions["a"] = divId
+                        } else if (yearDiv == 2 || divName.contains("ב")) {
+                            divisions["b"] = divId
+                        }
+                    }
+                }
+
+                val children = data.optJSONArray("children")
+                val encId = children?.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }
+                val currentStudyYear = data.optInt("currentStudyYear").takeIf { it > 0 }
+
+                val settings = PupilCardSettings(divisions, encId, currentStudyYear)
+                cachedPupilCardSettings[year] = settings
+                Log.d("WebtopPlatform", "Fetched PupilCard settings for year $year: divisions=$divisions, encId=${encId?.take(10)}..., currentStudyYear=$currentStudyYear")
+                return settings
+            }
+        } catch (e: Exception) {
+            Log.e("WebtopPlatform", "Error fetching PupilCard settings for year $year", e)
+            return null
+        }
+    }
+
+    /**
+     * Student-specific weekly timetable used by Webtop's pupil-card page. The regular Shotef
+     * timetable is class-scoped and may contain parallel groups; this endpoint is keyed by the
+     * encrypted pupil id and is therefore suitable for resolving a student's actual group.
+     */
+    fun getPupilScheduleWeek(
+        weekIndex: Int = 0,
+        studyYear: Int? = null,
+        retry: Boolean = true,
+    ): JSONObject {
+        val now = LocalDate.now()
+        val fallbackStudyYear = if (now.monthValue >= 9) now.year + 1 else now.year
+        val requestedYear = studyYear ?: fallbackStudyYear
+        val settings = fetchPupilCardSettings(requestedYear)
+        val resolvedYear = settings?.currentStudyYear?.takeIf { it > 0 } ?: requestedYear
+        val encryptedStudentId = settings?.encryptedStudentId
+            ?: studentId
+            ?: return JSONObject().put("error", "login_failed")
+        val classCode = studentClass
+            ?.substringBefore('|')
+            ?.trim()
+            ?.toIntOrNull()
+            ?: return JSONObject().put("error", "missing_class")
+        val payload = JSONObject()
+            .put("weekIndex", weekIndex)
+            .put("viewType", 0)
+            .put("studyYear", resolvedYear)
+            .put("studentID", encryptedStudentId)
+            .put("classCode", classCode)
+            .put("moduleID", 10)
+
+        return try {
+            val request = Request.Builder()
+                .url("https://webtopserver.smartschool.co.il/server/api/PupilCard/GetPupilScheduale")
+                .addHeader("Cookie", _cookies ?: "")
+                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            _client.newCall(request).execute().use { response ->
+                val body = response.body.string()
+                if ((response.code == 401 || response.code == 403 || body.isBlank()) && retry) {
+                    if (refreshCookies()) return getPupilScheduleWeek(weekIndex, resolvedYear, retry = false)
+                    return JSONObject().put("error", "login_failed")
+                }
+                if (!response.isSuccessful) return JSONObject().put("error", "server_unreachable")
+                JSONObject(body)
+            }
+        } catch (e: Exception) {
+            Log.e("WebtopPlatform", "Failed to fetch pupil-card weekly schedule", e)
+            JSONObject().put("error", "server_unreachable")
+        }
+    }
+
+    /** The Events & Tests board used by Webtop's timetable page. */
+    fun getEventsTestsBoard(
+        selectedDate: LocalDate = LocalDate.now(),
+        selectedView: Int = 3,
+        loadFilters: Boolean = true,
+        studyYear: Int? = null,
+        retry: Boolean = true,
+    ): JSONObject {
+        val fallbackStudyYear = if (selectedDate.monthValue >= 9) selectedDate.year + 1 else selectedDate.year
+        val requestedYear = studyYear ?: fallbackStudyYear
+        val settings = fetchPupilCardSettings(requestedYear)
+        val resolvedYear = settings?.currentStudyYear?.takeIf { it > 0 } ?: requestedYear
+        val institution = studentInstitution?.toIntOrNull()
+            ?: return JSONObject().put("error", "missing_institution")
+        val selectedInstant = selectedDate
+            .atStartOfDay(java.time.ZoneId.systemDefault())
+            .toInstant()
+            .toString()
+        val payload = JSONObject()
+            .put("institutionCode", institution)
+            .put("selectedDate", selectedInstant)
+            .put("selectedView", selectedView)
+            .put("loadFilters", loadFilters)
+            .put("studyYear", resolvedYear)
+
+        return try {
+            val request = Request.Builder()
+                .url("https://webtopserver.smartschool.co.il/server/api/shotef/EventsTestsBoard")
+                .addHeader("Cookie", _cookies ?: "")
+                .post(payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+            _client.newCall(request).execute().use { response ->
+                val body = response.body.string()
+                if ((response.code == 401 || response.code == 403 || body.isBlank()) && retry) {
+                    if (refreshCookies()) {
+                        return getEventsTestsBoard(selectedDate, selectedView, loadFilters, resolvedYear, retry = false)
+                    }
+                    return JSONObject().put("error", "login_failed")
+                }
+                if (!response.isSuccessful) return JSONObject().put("error", "server_unreachable")
+                JSONObject(body)
+            }
+        } catch (e: Exception) {
+            Log.e("WebtopPlatform", "Failed to fetch Events & Tests board", e)
+            JSONObject().put("error", "server_unreachable")
+        }
+    }
+
     private fun getGrades(year: Int, semester: String, retry: Boolean = true): JSONArray {
         Log.d("WebtopPlatform", "private getGrades(year: $year, semester: $semester, retry: $retry) called.")
 
@@ -303,18 +466,20 @@ class WebtopPlatform() : Platform {
         }
 
         try {
+            val settings = fetchPupilCardSettings(year)
             val periodId = when (semester.lowercase()) {
-                "a" -> 1103
-                "b" -> 1102
+                "a" -> settings?.divisions?.get("a") ?: 938
+                "b" -> settings?.divisions?.get("b") ?: 939
                 "ab" -> 0
                 else -> throw IllegalArgumentException("Invalid semester")
             }
+            val targetStudentId = settings?.encryptedStudentId ?: studentId
 
             val requestJson = JSONObject()
                 .put("studyYear", year)
-                .put("moduleID", 1)
+                .put("moduleID", 6)
                 .put("periodID", periodId)
-                .put("studentID", studentId)
+                .put("studentID", targetStudentId)
 
             val request = Request.Builder()
                 .url("https://webtopserver.smartschool.co.il/server/api/PupilCard/GetPupilGrades")
@@ -902,6 +1067,7 @@ class WebtopPlatform() : Platform {
                     if (newCookies.isNotBlank()) {
                         _cookies = newCookies
                         cachedShotefKey = null
+                        cachedPupilCardSettings.clear()
                         cachedShotefDays = null
                         loggedIn = true
                         Log.i("WebtopPlatform", "MOE Webtop cookies refreshed successfully via headless flow")
@@ -971,105 +1137,38 @@ class WebtopPlatform() : Platform {
     }
     @Throws(JSONException::class, IOException::class)
     override fun getAttendanceEvents(period: String): JSONObject {
-
-        if (period !in listOf("a", "b", "ab")) {
-            throw IllegalArgumentException("Period must be a, b, or ab")
-        }
-        val periodId = when (period) {
-            "a" -> 1103
-            "b" -> 1102
-            "ab" -> 0
-            else -> throw IllegalArgumentException("Invalid period")
-        }
-
-        val result = JSONObject()
-
-        try {
-            val requestJson = JSONObject()
-                .put("studentID", studentId)
-                .put("moduleID", 11)
-                .put("periodID", periodId)
-
-            val request = Request.Builder()
-                .url("https://webtopserver.smartschool.co.il/server/api/PupilCard/GetPupilDiciplineEvents")
-                .addHeader("Cookie", _cookies ?: "")
-                .post(requestJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            _client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.e("WebtopPlatform", "Failed to fetch discipline events: ${response.code}")
-                    return result
-                }
-
-                val body = response.body.string()
-                val json = JSONObject(body)
-                val data = json.optJSONObject("data") ?: return result
-                val eventsArray = data.optJSONArray("disciplineEvents") ?: JSONArray()
-
-                // Transform into grouped events by type
-                val eventsByType = JSONObject()
-                for (i in 0 until eventsArray.length()) {
-                    val item = eventsArray.getJSONObject(i)
-                    var isJustified = item.optBoolean("isJustified", false)
-                    var justifiedReason = item.optString("justifiedReason", "")
-                    val autoJustifyInEvents = item.optBoolean("autoJustifyInEvents", false)
-                    if (autoJustifyInEvents) {
-                        isJustified = true
-                        justifiedReason = justifiedReason.ifBlank { "Auto Justified" } ?: "Auto Justified"
-                    }
-                    val rawDate = item.optString("eventDate", "")
-                    val formattedDate = try {
-                        LocalDate.parse(rawDate, inputFormatter).format(outputFormatter)
-                    } catch (_: Exception) {
-                        rawDate
-                    }
-
-                    val type = item.optString("eventType", "לא ידוע")
-                    val eventInfo = JSONObject()
-                        .put("type", type)
-                        .put("date", formattedDate)
-                        .put("subject", item.optString("subjectName", ""))
-                        .put("teacher", item.optString("teacherName", ""))
-                        .put("enableJustified", item.optBoolean("enableJustified", true))
-                        .put("isJustified", isJustified)
-                        .put("justifiedReason", justifiedReason)
-                        .put("remark", item.optString("remark").takeIf { it.isNotBlank() && it.lowercase() != "null" } ?: "") //notes
-
-                    if (!eventsByType.has(type)) {
-                        eventsByType.put(type, JSONArray())
-                    }
-                    eventsByType.getJSONArray(type).put(eventInfo)
-                }
-
-                result.put("events", eventsByType)
-            }
-        } catch (e: Exception) {
-            Log.e("WebtopPlatform", "Failed to fetch discipline events", e)
-        }
-        return result
+        val currentYear = java.time.Year.now().value
+        val currentMonth = java.time.LocalDate.now().monthValue
+        val studyYear = if (currentMonth in 9..12 || currentMonth == 1) currentYear + 1 else currentYear
+        return getAttendanceEvents(studyYear, period)
     }
+
     @Throws(JSONException::class, IOException::class)
     override fun getAttendanceEvents(year: Int, period: String): JSONObject {
         if (period !in listOf("a", "b", "ab")) {
             throw IllegalArgumentException("Period must be a, b, or ab")
         }
 
+        val settings = fetchPupilCardSettings(year)
         val periodId = when (period) {
-            "a" -> 1103
-            "b" -> 1102
+            "a" -> settings?.divisions?.get("a") ?: 938
+            "b" -> settings?.divisions?.get("b") ?: 939
             "ab" -> 0
             else -> throw IllegalArgumentException("Invalid period")
         }
+
+        val targetStudentId = settings?.encryptedStudentId ?: studentId
 
         val result = JSONObject()
 
         try {
             val requestJson = JSONObject()
-                .put("studentID", studentId)
+                .put("studentID", targetStudentId)
                 .put("moduleID", 4)
                 .put("periodID", periodId)
                 .put("studyYear", year)
+
+            Log.d("WebtopPlatform", "Fetching discipline events: $requestJson")
 
             val request = Request.Builder()
                 .url("https://webtopserver.smartschool.co.il/server/api/PupilCard/GetPupilDiciplineEvents")
@@ -1086,7 +1185,11 @@ class WebtopPlatform() : Platform {
                 val body = response.body.string()
                 val json = JSONObject(body)
                 val data = json.optJSONObject("data") ?: return result
-                val eventsArray = data.optJSONArray("diciplineEvents") ?: JSONArray()
+                val eventsArray = data.optJSONArray("diciplineEvents")
+                    ?: data.optJSONArray("disciplineEvents")
+                    ?: JSONArray()
+
+                Log.d("WebtopPlatform", "Discipline events found: ${eventsArray.length()}")
 
                 // Transform into grouped events by type
                 val eventsByType = JSONObject()
@@ -1175,8 +1278,6 @@ class WebtopPlatform() : Platform {
             p.schoolName = obj.optString("schoolName", "").ifEmpty { null }
             p.loginMethod = obj.optString("loginMethod", "").ifEmpty { null }
 
-            Log.d("WebtopPlatform", "fromJson: ${p.username} ${p.password}")
-            Log.d("WebtopPlatform", "fromJson obj: $obj")
 
             // Always guarantee one tab
             val course = JSONObject()
