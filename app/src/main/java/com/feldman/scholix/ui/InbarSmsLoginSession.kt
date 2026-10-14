@@ -76,10 +76,13 @@ internal class InbarSmsLoginSession {
                 } == true
                 if (!started) throw IOException("SMS verification is unavailable. Please allow SMS access and try again.")
             }
-            withContext(Dispatchers.IO) { reserveInbarSmsRequest(context, account.getUsername(), account.mobile) }
-            retainForCooldown = true
             requestedAt = SystemClock.elapsedRealtime()
-            withContext(Dispatchers.IO) { account.requestSms(account.getUsername(), account.mobile) }
+            withContext(Dispatchers.IO) {
+                account.requestSms(account.getUsername(), account.mobile) {
+                    reserveInbarSmsRequest(context, account.getUsername(), account.mobile)
+                    retainForCooldown = true
+                }
+            }
             Log.d("InbarLogin", "SMS request completed in ${SystemClock.elapsedRealtime() - requestedAt} ms")
             saveAccount(account)
             try { verifyInbarSmsCandidates(codes,

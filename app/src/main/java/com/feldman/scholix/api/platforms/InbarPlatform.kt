@@ -53,10 +53,10 @@ class InbarPlatform(override val id: String = generateId()) : Platform {
         next.schedulePeriods = LinkedHashMap(schedulePeriods)
     }
 
-    fun requestSms(identity: String, mobile: String) {
+    fun requestSms(identity: String, mobile: String, beforeSubmit: () -> Unit = {}) {
         this.identity = identity
         this.mobile = mobile
-        http.requestSms(identity, mobile)
+        http.requestSms(identity, mobile, beforeSubmit)
     }
     fun resendSms() = http.resendSms()
     @Synchronized fun verifySms(code: String) {

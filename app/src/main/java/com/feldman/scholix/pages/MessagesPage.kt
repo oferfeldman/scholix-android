@@ -45,6 +45,9 @@ import com.feldman.scholix.ui.components.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 @Composable
@@ -653,6 +656,11 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
     var reader by remember { mutableStateOf<WebView?>(null) }
     var recipients by rememberSaveable(destination) { mutableStateOf<String?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val attachmentScope = rememberCoroutineScope()
+    var openingAttachment by remember(destination) { mutableStateOf<String?>(null) }
+    var attachmentError by remember(destination) { mutableStateOf<String?>(null) }
+    var attachmentJob by remember(destination) { mutableStateOf<Job?>(null) }
+    DisposableEffect(destination) { onDispose { attachmentJob?.cancel() } }
     LaunchedEffect(destination, vm.providerId) {
         if (vm.providerId.isNotEmpty()) {
             vm.initialize(destination.providerId)
@@ -749,16 +757,36 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
             val attachments = message.optJSONArray("filesList")?.objects().orEmpty()
             if (attachments.isNotEmpty()) {
                 Title("Attachments")
+                if (openingAttachment != null) Item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Opening $openingAttachment…")
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        MailAction("Cancel") { attachmentJob?.cancel() }
+                    }
+                }
+                attachmentError?.let { error -> Item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(error, color = MaterialTheme.colorScheme.error)
+                        MailAction("Refresh message", enabled = key !in vm.busy) {
+                            attachmentError = null
+                            vm.loadMessage(destination.providerId, destination.messageId, folder, destination.fromInbox, true)
+                        }
+                    }
+                } }
                 Section { attachments.forEach { file ->
                     PageItem(title = file.text("fileName"), icon = painterResource(R.drawable.ic_docs), onClick = {
-                        vm.action("download:${file.text("fileName")}") {
-                            val url = file.text("fileUrl").toUri()
-                            require(url.scheme == "https") { "Webtop did not provide a download link." }
-                            val request = DownloadManager.Request(url).setTitle(file.text("fileName"))
-                                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, file.text("fileName").substringAfterLast('/').substringAfterLast('\\'))
-                            (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-                            vm.notice = "Download started"
+                        if (openingAttachment == null) {
+                            attachmentJob = attachmentScope.launch {
+                                openingAttachment = file.text("fileName")
+                                attachmentError = null
+                                try {
+                                    val downloaded = vm.prepareAttachment(destination.providerId, file)
+                                    openMessageAttachment(context, downloaded)
+                                } catch (cancelled: CancellationException) { throw cancelled
+                                } catch (error: Exception) {
+                                    attachmentError = error.message ?: "Cannot open this attachment. Try again."
+                                } finally { openingAttachment = null }
+                            }
                         }
                     })
                 } }

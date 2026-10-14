@@ -75,6 +75,7 @@ class WebtopPlatform() : Platform {
     @Volatile
     private var cachedPupilCardSettings: MutableMap<Int, PupilCardSettings> = mutableMapOf()
     private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
+    internal val messageAttachments = WebtopAttachmentDownload(cookie = { _cookies.orEmpty() })
     val mailbox: WebtopMailbox = WebtopMailbox(
         cookie = { _cookies ?: "" },
         refreshSession = { refreshCookies() },
