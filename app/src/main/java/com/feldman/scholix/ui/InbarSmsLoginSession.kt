@@ -18,6 +18,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.withLock
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 
 /** Owns SMS reception and the HTTP challenge independently of the page awaiting sign-in. */
@@ -39,10 +40,10 @@ internal class InbarSmsLoginSession {
         timeoutMs: Long): InbarPlatform = inbarSmsLoginMutex.withLock {
         reuseSession()?.let { return@withLock it }
         val appContext = context.applicationContext
-        var requestedAt = 0L
+        val requestedAt = AtomicLong(0L)
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if (requestedAt == 0L || SystemClock.elapsedRealtime() - requestedAt > timeoutMs) return
+                if (requestedAt.get() == 0L || SystemClock.elapsedRealtime() - requestedAt.get() > timeoutMs) return
                 if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION && useDirect) {
                     val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
                     val code = inbarAutomaticSmsCode(messages.joinToString("") { it.messageBody.orEmpty() },
@@ -76,15 +77,18 @@ internal class InbarSmsLoginSession {
                 } == true
                 if (!started) throw IOException("SMS verification is unavailable. Please allow SMS access and try again.")
             }
-            withContext(Dispatchers.IO) { reserveInbarSmsRequest(context, account.getUsername(), account.mobile) }
-            retainForCooldown = true
-            requestedAt = SystemClock.elapsedRealtime()
-            withContext(Dispatchers.IO) { account.requestSms(account.getUsername(), account.mobile) }
-            Log.d("InbarLogin", "SMS request completed in ${SystemClock.elapsedRealtime() - requestedAt} ms")
+            withContext(Dispatchers.IO) {
+                account.requestSms(account.getUsername(), account.mobile) {
+                    reserveInbarSmsRequest(context, account.getUsername(), account.mobile)
+                    retainForCooldown = true
+                    requestedAt.set(SystemClock.elapsedRealtime())
+                }
+            }
+            Log.d("InbarLogin", "SMS request completed in ${SystemClock.elapsedRealtime() - requestedAt.get()} ms")
             saveAccount(account)
             try { verifyInbarSmsCandidates(codes,
-                timeoutMs = (timeoutMs - (SystemClock.elapsedRealtime() - requestedAt)).coerceAtLeast(1)) { code ->
-                Log.d("InbarLogin", "SMS candidate received after ${SystemClock.elapsedRealtime() - requestedAt} ms")
+                timeoutMs = (timeoutMs - (SystemClock.elapsedRealtime() - requestedAt.get())).coerceAtLeast(1)) { code ->
+                Log.d("InbarLogin", "SMS candidate received after ${SystemClock.elapsedRealtime() - requestedAt.get()} ms")
                 withContext(Dispatchers.IO) { account.verifySms(code) }
             } } catch (e: InbarGradeLayoutChanged) {
                 // A reader error must not discard successful authentication and send another SMS.

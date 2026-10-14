@@ -57,6 +57,7 @@ fun HiddenInbarLogin(
                     permission.await()
                 })
                 InbarSmsLoginSessions.startOrJoin(context, account, useDirect, saveAccount, reuseSession, timeoutMs)
+
             }
             session = pending
             Log.d("InbarLogin", "Awaiting shared sign-in")
