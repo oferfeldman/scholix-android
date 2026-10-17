@@ -20,15 +20,12 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.nio.charset.StandardCharsets
-import java.security.SecureRandom
 import java.time.LocalDate
 import java.time.Year
 import java.time.format.DateTimeFormatter
 import java.util.*
 import javax.crypto.Cipher
-import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.IvParameterSpec
-import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 class WebtopPlatform() : Platform {
@@ -57,6 +54,8 @@ class WebtopPlatform() : Platform {
     var userType: Int? = null
     var schoolName: String? = null
     var loginMethod: String? = null
+    var loginError: String? = null
+        private set
 
     private var _cookies: String? = null
     val cookies: String? get() = _cookies
@@ -185,23 +184,27 @@ class WebtopPlatform() : Platform {
 
     /** Perform login once, keep cookies */
     private fun login(username: String, password: String): Boolean {
+        loginError = null
         val u = username
         val p = password
         if (u.isNullOrBlank() || p.isNullOrBlank()) {
             Log.w("WebtopPlatform", "Cannot refresh cookies: credentials missing")
             loggedIn = false
+            loginError = "Enter your Webtop username and password. Ministry credentials use the Education Ministry sign-in option."
             return false
         }
 
         return try {
             val loginData = JSONObject()
                 .put("Data", encrypt(username + "0"))
-                .put("username", username)
+                .put("UserName", username)
                 .put("Password", password)
                 .put("deviceDataJson", "{\"isMobile\":true,\"os\":\"Android\",\"browser\":\"Chrome\",\"cookies\":true}")
 
             val request = Request.Builder()
                 .url("https://webtopserver.smartschool.co.il/server/api/user/LoginByUserNameAndPassword")
+                .header("language", "he")
+                .header("rememberMe", "0")
                 .post(loginData.toString()
                     .toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
@@ -209,11 +212,24 @@ class WebtopPlatform() : Platform {
             _client.newCall(request).execute().use { response ->
                 val body = response.body.string()
                 if (!response.isSuccessful || body.isEmpty()) {
+                    loginError = "Webtop sign-in is temporarily unavailable (HTTP ${response.code}). Try again later or sign in on the provider website."
                     Log.e("WebtopPlatform", "Login failed: HTTP ${response.code}, body=$body")
                     return false
                 }
                 val jsonResponse = JSONObject(body)
-                val data = jsonResponse.optJSONObject("data") ?: return false
+                if (!jsonResponse.optBoolean("status")) {
+                    loginError = "Webtop did not accept the sign-in. Check your Webtop credentials; Ministry credentials use the Education Ministry option. If verification is required, sign in on the provider website."
+                    return false
+                }
+                val data = jsonResponse.optJSONObject("data")
+                if (jsonResponse.optString("message") == "get2FA" || data?.optBoolean("mustChangePassword") == true) {
+                    loginError = "Webtop requires additional verification or a password update. Complete sign-in on the provider website."
+                    return false
+                }
+                if (data == null) {
+                    loginError = "Webtop returned an incomplete sign-in response. Complete sign-in on the provider website."
+                    return false
+                }
 
                 studentId = data.getString("userId")
                 studentClass = data.getString("classCode") + "|" + data.get("classNumber")
@@ -227,6 +243,8 @@ class WebtopPlatform() : Platform {
                 true
             }
         } catch (e: Exception) {
+            loginError = if (e is IOException) "Could not reach Webtop. Try again later or sign in on the provider website."
+                else "Webtop returned an unexpected sign-in response. Complete sign-in on the provider website."
             Log.e("WebtopPlatform", "Login exception", e)
             false
         }
@@ -239,28 +257,13 @@ class WebtopPlatform() : Platform {
     override fun toString(): String =
         "WebtopPlatform(name=$studentName, institution=$studentInstitution, loggedIn=$loggedIn)"
 
-    private fun encrypt(data: String): String? {
+    internal fun encrypt(data: String): String {
         val key = "01234567890000000150778345678901"
-        return try {
-            val salt = ByteArray(16).apply { SecureRandom().nextBytes(this) }
-            val iv = ByteArray(16).apply { SecureRandom().nextBytes(this) }
-
-            val spec = PBEKeySpec(key.toCharArray(), salt, 100, 256)
-            val secretKey = SecretKeySpec(
-                SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1")
-                    .generateSecret(spec).encoded, "AES"
-            )
-
-            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey, IvParameterSpec(iv))
-            val encrypted = cipher.doFinal(data.toByteArray(StandardCharsets.UTF_8))
-
-            val combined = salt + iv + encrypted
-            Base64.getEncoder().encodeToString(combined)
-        } catch (e: Exception) {
-            Log.e("WebtopPlatform", "Encryption failed", e)
-            null
-        }
+        // Current website encryptStringToServer: JSON string, raw AES key and fixed IV.
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key.toByteArray(StandardCharsets.UTF_8), "AES"),
+            IvParameterSpec("6543210987654321".toByteArray(StandardCharsets.UTF_8)))
+        return Base64.getEncoder().encodeToString(cipher.doFinal(JSONObject.quote(data).toByteArray(StandardCharsets.UTF_8)))
     }
 
     /** Return the single Webtop course, fetch grades only once */
@@ -1085,18 +1088,21 @@ class WebtopPlatform() : Platform {
         return try {
             val loginData = JSONObject()
                 .put("Data", encrypt(username + "0"))
-                .put("username", username)
+                .put("UserName", username)
                 .put("Password", password)
                 .put("deviceDataJson", "{\"isMobile\":true,\"os\":\"Android\",\"browser\":\"Chrome\",\"cookies\":true}")
 
             val request = Request.Builder()
                 .url("https://webtopserver.smartschool.co.il/server/api/user/LoginByUserNameAndPassword")
+                .header("language", "he")
+                .header("rememberMe", "0")
                 .post(loginData.toString()
                     .toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
 
             _client.newCall(request).execute().use { response ->
                 val jsonResponse = JSONObject(response.body.string())
+                if (!jsonResponse.optBoolean("status") || jsonResponse.optString("message") == "get2FA") return false
                 val data = jsonResponse.optJSONObject("data") ?: return false
                 studentId = data.getString("userId")
                 studentClass = data.getString("classCode") + "|" + data.get("classNumber")

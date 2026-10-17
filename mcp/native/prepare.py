@@ -53,7 +53,7 @@ for relative in ["api/Platform.kt", "api/LoginFields.kt", "classroom/ClassroomAp
     target = OUT / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
-for name in ["WebtopMailboxTest", "WebtopAttachmentDownloadTest", "InbarHttpTest", "InbarScheduleTest", "ShahafMoeLoginTest", "WebtopMoeLoginTest"]:
+for name in ["WebtopMailboxTest", "WebtopAttachmentDownloadTest", "WebtopPasswordLoginTest", "InbarHttpTest", "InbarScheduleTest", "ShahafMoeLoginTest", "WebtopMoeLoginTest"]:
     target = OUT.parent / "providers-test" / (name + ".kt")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text((ROOT / "app/src/test/java/com/feldman/scholix/api/platforms" / (name + ".kt")).read_text(encoding="utf-8"), encoding="utf-8")

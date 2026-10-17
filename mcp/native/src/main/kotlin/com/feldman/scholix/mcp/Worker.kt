@@ -223,7 +223,8 @@ fun main() {
             }
         } catch (error: Exception) {
             // Keep stack traces, cookies, login payloads and arbitrary upstream responses out of tool output.
-            output.put("error", "Provider operation failed (${error.javaClass.simpleName}). Check the account/session and supported operation before retrying.")
+            val loginError = if (error is IllegalArgumentException && error.message == "Provider did not accept the login") (platform as? WebtopPlatform)?.loginError else null
+            output.put("error", loginError ?: "Provider operation failed (${error.javaClass.simpleName}). Check the account/session and supported operation before retrying.")
         }
         platform?.let { output.put("state", it.toJson()) }
         println(output)

@@ -33,6 +33,13 @@ Portal APIs were inspected read-only. No real service request, message, registra
 
 ## Build and export
 
+Webtop password login/refresh use the current website's `encryptStringToServer`
+format (JSON-quoted input, raw AES key and fixed IV), not its older PBKDF2/salt
+format. `WebtopPasswordLoginTest` checks vectors captured directly from the live
+website on 2026-10-17 (`main.878d6d935b432b30.js`). The worker exposes only fixed,
+safe login error messages for rejected credentials, unavailable responses and
+additional verification; it never forwards provider bodies or stack traces.
+
 From the Scholix repository root, with Java 17+ available:
 
 ```powershell
