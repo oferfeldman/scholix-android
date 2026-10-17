@@ -39,6 +39,9 @@ format. `WebtopPasswordLoginTest` checks vectors captured directly from the live
 website on 2026-10-17 (`main.878d6d935b432b30.js`). The worker exposes only fixed,
 safe login error messages for rejected credentials, unavailable responses and
 additional verification; it never forwards provider bodies or stack traces.
+Password login and refresh share the same profile parser. Numeric/string IDs and
+optional class/name fields are handled consistently across Android and the JVM;
+JVM `JSONObject.getString` must not be used to coerce numeric Webtop identifiers.
 
 From the Scholix repository root, with Java 17+ available:
 

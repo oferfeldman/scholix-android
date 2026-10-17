@@ -5,9 +5,42 @@ import com.feldman.scholix.api.Type
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
+import org.json.JSONObject
 
 class WebtopPasswordLoginTest {
+    @Test
+    fun acceptsNumericIdsFromSuccessfulPasswordLogin() {
+        val platform = WebtopPlatform()
+        val data = JSONObject("""{"userId":12345,"classCode":10,"classNumber":2,"institutionCode":123456,"firstName":"Test","lastName":"Student","userType":2}""")
+        assertTrue(platform.adoptPasswordLoginData(data, "session=test"))
+        assertTrue(platform.isLoggedIn())
+        assertEquals("12345", platform.studentId)
+        assertEquals("10|2", platform.studentClass)
+        assertEquals("123456", platform.studentInstitution)
+        assertEquals("Test Student", platform.getName())
+        assertEquals("session=test", platform.cookies)
+    }
+
+    @Test
+    fun acceptsStringIdsAndOptionalProfileFields() {
+        val platform = WebtopPlatform()
+        assertTrue(platform.adoptPasswordLoginData(JSONObject("""{"userId":"parent-id","institutionCode":123456,"classCode":null,"classNumber":null}"""), "session=parent"))
+        assertEquals("parent-id", platform.studentId)
+        assertEquals("123456", platform.studentInstitution)
+        assertNull(platform.studentClass)
+        assertEquals("", platform.getName())
+    }
+
+    @Test
+    fun rejectsMissingUserIdWithoutCreatingASession() {
+        val platform = WebtopPlatform()
+        assertFalse(platform.adoptPasswordLoginData(JSONObject(), "session=test"))
+        assertFalse(platform.isLoggedIn())
+        assertTrue(platform.loginError!!.contains("user ID"))
+    }
+
     @Test
     fun matchesCurrentWebsiteEncryption() {
         // Captured directly from the live website's encryptStringToServer on 2026-10-17.

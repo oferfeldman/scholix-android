@@ -231,16 +231,7 @@ class WebtopPlatform() : Platform {
                     return false
                 }
 
-                studentId = data.getString("userId")
-                studentClass = data.getString("classCode") + "|" + data.get("classNumber")
-                studentInstitution = data.getString("institutionCode")
-                studentName = "${data.getString("firstName")} ${data.getString("lastName")}"
-                userStudentId = data.optString("studentId").ifEmpty { null }
-                userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
-                schoolName = data.optString("institutionName").ifEmpty { null }
-                loginMethod = "password"
-                _cookies = response.headers("Set-Cookie").joinToString("; ")
-                true
+                adoptPasswordLoginData(data, response.headers("Set-Cookie").joinToString("; "))
             }
         } catch (e: Exception) {
             loginError = if (e is IOException) "Could not reach Webtop. Try again later or sign in on the provider website."
@@ -256,6 +247,32 @@ class WebtopPlatform() : Platform {
 
     override fun toString(): String =
         "WebtopPlatform(name=$studentName, institution=$studentInstitution, loggedIn=$loggedIn)"
+
+    internal fun adoptPasswordLoginData(data: JSONObject, cookieHeader: String): Boolean {
+        val userId = data.optString("userId")
+        if (userId.isBlank()) {
+            loginError = "Webtop sign-in response did not include a user ID."
+            return false
+        }
+        // Android getString coerces numeric IDs; the JVM org.json implementation does not.
+        studentId = userId
+        val classCode = data.optString("classCode")
+        val classNumber = data.optString("classNumber")
+        studentClass = if (classCode.isNotBlank() && classNumber.isNotBlank()) "$classCode|$classNumber" else null
+        studentInstitution = data.optString("institutionCode").ifEmpty { null }
+        studentName = "${data.optString("firstName")} ${data.optString("lastName")}".trim()
+        userStudentId = data.optString("studentId").ifEmpty { null }
+        userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
+        schoolName = data.optString("institutionName").ifEmpty { null }
+        loginMethod = "password"
+        loginError = null
+        _cookies = cookieHeader
+        cachedShotefKey = null
+        cachedPupilCardSettings.clear()
+        cachedShotefDays = null
+        loggedIn = true
+        return true
+    }
 
     internal fun encrypt(data: String): String {
         val key = "01234567890000000150778345678901"
@@ -1104,17 +1121,7 @@ class WebtopPlatform() : Platform {
                 val jsonResponse = JSONObject(response.body.string())
                 if (!jsonResponse.optBoolean("status") || jsonResponse.optString("message") == "get2FA") return false
                 val data = jsonResponse.optJSONObject("data") ?: return false
-                studentId = data.getString("userId")
-                studentClass = data.getString("classCode") + "|" + data.get("classNumber")
-                studentInstitution = data.getString("institutionCode")
-                userStudentId = data.optString("studentId").ifEmpty { null }
-                userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
-                schoolName = data.optString("institutionName").ifEmpty { null }
-                _cookies = response.headers("Set-Cookie").joinToString("; ")
-                cachedShotefKey = null
-                cachedShotefDays = null
-                loggedIn = true
-                true
+                adoptPasswordLoginData(data, response.headers("Set-Cookie").joinToString("; "))
             }
         } catch (e: Exception) {
             Log.e("WebtopPlatform", "Failed to refresh cookies", e)
