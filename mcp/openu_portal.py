@@ -34,6 +34,7 @@ def register(operation):
     add("exam_registration", "Read exam registration eligibility, available sittings, deadlines and links in the legacy בחינות screen. Does not register/change/cancel an exam.")
     add("registration_options", "Read all currently offered registration semesters (including upcoming semesters), teaching modes, degree/subject, credit, department, time and location filters. Does not add a course to the basket.")
     filters = {key: string for key in ("semester", "course_id", "query", "degree", "subject", "language", "level", "credits", "department", "area", "center", "hours", "days", "instruction_type")}
+    filters["page"] = {"type": "integer", "minimum": 1}
     add("course_offerings", "Search available courses and study groups for an offered semester, including future semesters and annual offerings. Returns the site's table, registration availability, times and course links. No course is added/registered.", filters, ("semester",))
     add("academic_timetable", "Read the published academic timetable: semesters, registration periods, holidays and exam periods.")
     add("personal_timetable", "Read the owner's Sheilta timetable and calendar links. Does not export/synchronize a calendar.")
@@ -178,7 +179,7 @@ async def invoke(service, op, args):
         data = await request(service, "/Main/StudyPrograms/GetIndexData")
         return {k: v for k, v in data.items() if k not in {"Menu", "CurrentUser", "ActorUser"}}
     if op == "study_program_search": return await request(service, "/Main/StudyPrograms/" + ("SearchProgramsBySubSubjectID?" + urlencode({"subSubjectId": args["subject_codes"]}) if "subject_codes" in args else "GetSearchItems"))
-    if op == "study_program_details": return await request(service, "/Main/StudyPrograms/GetProgramXML?" + urlencode({"programCode": args["program_code"], "programId": args.get("program_id", ""), "parentCode": args.get("parent_code", ""), "status": "3"}))
+    if op == "study_program_details": return await request(service, "/Main/StudyPrograms/GetProgramXML?" + urlencode({"programCode": args["program_code"], "programId": args.get("program_id", ""), "parentCode": args.get("parent_code", ""), "status": "3" if args.get("program_id") else "1"}))
     if op == "study_program_courses":
         name, params = {
             "courses": ("GetCourses", {"subjectIds": args.get("subject_ids", ""), "levelIds": args.get("level_ids", ""), "freeText": args.get("query", ""), "mindExpanding": str(args.get("mind_expanding", False)).lower()}),
@@ -187,8 +188,15 @@ async def invoke(service, op, args):
             "course": ("GetCourseById", {"courseId": args.get("course_id", ""), "isAdditional": "true"})}[args["resource"]]
         return await request(service, "/Main/StudyPrograms/" + name + "?" + urlencode(params))
     if op == "course_offerings":
-        mapping = {"semester": "Semester", "query": "CourseName", "degree": "Degree", "subject": "Subject", "language": "LearningLanguage", "level": "Openinglevel", "credits": "Credits", "department": "AD", "area": "GeographicalArea", "center": "LearningCenter", "hours": "InstructionHours", "days": "Days", "instruction_type": "InstructionType"}
-        params = {mapping[k]: v for k, v in args.items() if k in mapping}
+        mapping = {"semester": "Semester", "query": "CourseName", "degree": "Degree", "subject": "Subject", "language": "LearningLanguage", "level": "Openinglevel", "credits": "Credits", "department": "AD", "area": "GeographicalArea", "center": "LearningCenter", "hours": "InstructionHours", "days": "Days", "instruction_type": "InstructionType", "page": "Page"}
+        params = {"Degree": "0", "GeographicalArea": ",01,02,03,04,05,06,07,09,", "InstructionHours": "00:01", "Days": "111111", "Page": "1"}
+        params.update({mapping[k]: v for k, v in args.items() if k in mapping})
+        for key in ("subject", "language", "level", "credits", "department", "area", "center"):
+            if key in args:
+                value = args[key].strip(",")
+                if key == "area" and value == "99": continue
+                if value == "all": params.pop(mapping[key], None)
+                else: params[mapping[key]] = "," + value + ","
         if "course_id" in args: params["CourseIDs"] = "," + args["course_id"] + ","
         return await page(service, "/CoursesRegistration/Pages/GroupSearchResults.aspx?" + urlencode(params))
     urls = {"registration_options": "/CoursesRegistration/Pages/GroupsSearch.aspx", "exam_registration": "/pls/dmyopt2/course_info.Home_Test",

@@ -59,3 +59,27 @@ def test_private_document_link_download_and_expiry(tmp_path):
         store.put("openu_download", token, store.get("openu_download", token), time.time() - 1)
         assert client.get(result["download_url"]).status_code == 404
     store.db.close()
+
+
+def test_course_search_matches_website_defaults_and_pagination(monkeypatch):
+    from urllib.parse import urlsplit, parse_qs
+    view = AsyncMock(return_value={})
+    monkeypatch.setattr(openu_portal, "page", view)
+    asyncio.run(openu_portal.invoke(object(), "course_offerings", {"semester": "2027ב", "course_id": "20109", "page": 2}))
+    query = parse_qs(urlsplit(view.call_args.args[1]).query)
+    assert query["Semester"] == ["2027ב"]
+    assert query["CourseIDs"] == [",20109,"]
+    assert query["GeographicalArea"] == [",01,02,03,04,05,06,07,09,"]
+    assert query["Days"] == ["111111"]
+    assert query["InstructionHours"] == ["00:01"]
+    assert query["Degree"] == ["0"]
+    assert query["Page"] == ["2"]
+
+
+def test_study_program_uses_preview_for_catalog_and_display_for_saved_program(monkeypatch):
+    from urllib.parse import urlsplit, parse_qs
+    get = AsyncMock(return_value={})
+    monkeypatch.setattr(openu_portal, "request", get)
+    for args, status in [({"program_code": "AF"}, "1"), ({"program_code": "AF", "program_id": "fixture"}, "3")]:
+        asyncio.run(openu_portal.invoke(object(), "study_program_details", args))
+        assert parse_qs(urlsplit(get.call_args.args[1]).query)["status"] == [status]
