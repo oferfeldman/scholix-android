@@ -545,6 +545,7 @@ fun MainScreen(
             AppDest.TiktekBook(bookId = "", bookName = "", subjectId = ""),
             AppDest.TiktekSolution(imageUrl = ""),
             AppDest.Locker,
+            AppDest.Lockerim,
             AppDest.Homework,
             AppDest.Materials,
             AppDest.Settings,

@@ -17,6 +17,7 @@ import com.feldman.motion.MotionSymbols
 import com.feldman.scholix.R
 import com.feldman.scholix.api.platforms.DemoPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.api.platforms.LockerimPlatform
 import com.feldman.scholix.api.platforms.GoogleClassroomPlatform
 import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.OpenAUPlatform
@@ -40,6 +41,7 @@ data class ProviderCourseOverrides(
 )
 
 val platformOptions = listOf(
+    PlatformInfo("לוקרים", R.drawable.ic_lock) { LockerimPlatform() },
     PlatformInfo("Google Classroom", R.drawable.ic_docs, iconSymbol = MotionSymbols.ic_school) { GoogleClassroomPlatform() },
     PlatformInfo("Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
     PlatformInfo("Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
@@ -58,6 +60,7 @@ val platformOptions = listOf(
 
 /** The provider's name as the provider list shows it, for messages about it. */
 fun Platform.providerName(): String = when (this) {
+    is LockerimPlatform -> "לוקרים"
     is GoogleClassroomPlatform -> "Google Classroom"
     is WebtopPlatform -> "Webtop"
     is InbarPlatform -> "Inbar (Bar-Ilan)"
@@ -188,6 +191,8 @@ object PlatformStorage {
                     existing is WebtopPlatform && np is WebtopPlatform
                 ) || (
                     existing is GoogleClassroomPlatform && np is GoogleClassroomPlatform && existing.getUsername() == np.getUsername()
+                ) || (
+                    existing is LockerimPlatform && np is LockerimPlatform && existing.phone == np.phone
                 )
             }
             platforms.add(np)

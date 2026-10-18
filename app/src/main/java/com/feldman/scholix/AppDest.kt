@@ -51,6 +51,19 @@ sealed class AppDest : MotionDest {
 
     @Serializable
     @Parcelize
+    data object Lockerim : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "לוקרים"
+        @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_lock
+        @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_lock_outline
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.lockerim.LockerimPage(searchQuery, onConnect = { onNavigate(AddPlatform) })
+        }
+    }
+
+    @Serializable
+    @Parcelize
     data object Materials : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Materials"
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs

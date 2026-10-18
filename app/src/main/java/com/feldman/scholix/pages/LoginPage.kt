@@ -202,7 +202,14 @@ fun LoginPage(
                         )
                     }
 
-                    if (platform.name == "Shahaf") {
+                    if (platform.name == "לוקרים") {
+                        com.feldman.scholix.lockerim.LockerimLoginView(onSuccess = { created ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
+                                onLoginSuccess()
+                            }
+                        }, onCancel = { selectedPlatform = null })
+                    } else if (platform.name == "Shahaf") {
                         ShahafLoginView(onSuccess = { created ->
                             scope.launch {
                                 withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }

@@ -30,7 +30,7 @@ private object PrefKeys {
     val NAVIGATION_ORDER = stringPreferencesKey("navigation_order")
 }
 
-val defaultNavigationOrder = listOf("Grades", "Schedule", "Attendance", "Settings", "Messages", "Homework", "Locker", "Tiktek", "Materials")
+val defaultNavigationOrder = listOf("Grades", "Schedule", "Attendance", "Settings", "Messages", "Homework", "Locker", "Tiktek", "Materials", "לוקרים")
 
 fun Context.navigationOrderFlow(): Flow<List<String>> =
     appPrefsDataStore.data.map { prefs ->
