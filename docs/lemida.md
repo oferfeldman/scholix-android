@@ -8,6 +8,21 @@ homework. Linked and embedded PDF files are retained in the saved detail model,
 including older cache compatibility. Moodle resource links labelled as PDFs are
 also supported when they redirect to a PDF or contain one unambiguous embedded PDF.
 
+Use **Download** in the PDF reader to keep a copy in **Downloads → Scholix**.
+The save copies the already authenticated preview without another network request.
+It preserves Hebrew filenames and uses Android's scoped Downloads collection,
+without requesting broad storage access. The file stays hidden until the copy
+finishes; failed or cancelled saves remove the pending entry. A saved copy remains
+available after closing the reader, while the private preview is still removed.
+
+The download update passed 108 focused Android cases and 88 overlapping core
+cases. Five synthetic provider tests execute the production save code and verify
+binary integrity after preview deletion, publication only after copying, storage
+failure cleanup, cancellation cleanup and rejection of invalid preview content.
+The filename case covers Hebrew, extensions, paths and control characters. These
+are host tests with a controlled MediaStore provider; actual device storage/UI
+behavior remains to be checked.
+
 Files use the existing authenticated Lemida WebView session, after verifying the
 saved Moodle account. Only university HTTPS file/resource endpoints are accepted;
 external/login links, credentials in URLs and path traversal are rejected.

@@ -249,6 +249,9 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack
     var openingPdf by remember(item.id) { mutableStateOf<String?>(null) }
     var pdfError by remember(item.id) { mutableStateOf<String?>(null) }
     val pdfScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val downloadMessages = remember(item.id) { SnackbarHostState() }
+    var savingPdf by remember(item.id) { mutableStateOf(false) }
     DisposableEffect(pdfFile) { val file = pdfFile; onDispose { file?.delete() } }
     LaunchedEffect(item.id, retry) {
         loading = true
@@ -264,7 +267,22 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack
     }
     pdfFile?.let { file ->
         BackHandler { pdfFile = null }
-        Scaffold(topBar = { SettingsTopBar(pdfName, onBack = { pdfFile = null }) }) { padding ->
+        Scaffold(snackbarHost = { SnackbarHost(downloadMessages) }, topBar = {
+            SettingsTopBar(pdfName, onBack = { pdfFile = null }, actions = {
+                TextButton(enabled = !savingPdf, onClick = {
+                    if (!savingPdf) pdfScope.launch {
+                        savingPdf = true
+                        val message = try {
+                            LemidaPdfDownloads.save(context, file, pdfName)
+                            "Saved to Downloads/Scholix"
+                        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                        catch (e: Exception) { e.message ?: "Could not save the PDF. Try again." }
+                        finally { savingPdf = false }
+                        downloadMessages.showSnackbar(message)
+                    }
+                }) { Text(if (savingPdf) "Saving…" else "Download") }
+            })
+        }) { padding ->
             com.feldman.scholix.drive.DrivePdfReader(file,
                 Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp).padding(bottom = 80.dp),
                 errorMessage = "This PDF could not be displayed. Go back and try opening it again.")
