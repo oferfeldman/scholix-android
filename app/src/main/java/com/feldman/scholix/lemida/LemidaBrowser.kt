@@ -193,6 +193,43 @@ internal class LemidaBrowser(context: Context, agent: String?, supplied: WebView
             }
         }
     }
+    override suspend fun downloadPdf(url: String, file: java.io.File) = withContext(Dispatchers.IO) {
+        require(LemidaPdf.allowedUrl(url))
+        check(!closed)
+        val slot = "lemida_pdf_" + UUID.randomUUID().toString().replace("-", "")
+        try {
+            withTimeoutOrNull(60_000) {
+                if (evaluate(LemidaPdfScript.start(slot, url)) != "true") throw LemidaSessionExpired()
+                var result: JSONObject
+                while (true) {
+                    val value = JSONTokener(evaluate(LemidaPdfScript.poll(slot))).nextValue() as? String
+                    if (value != null && value != "null") { result = JSONObject(value); break }
+                    delay(250)
+                }
+                if (result.optBoolean("verification")) throw LemidaSessionExpired()
+                if (result.optBoolean("lost")) throw IOException("Lemida navigated while opening the PDF. Try again.")
+                if (result.optBoolean("error")) throw IOException(if (result.optBoolean("oversized")) "This PDF exceeds the 20 MB limit." else "The PDF could not download. Try again.")
+                val size = result.getInt("size")
+                if (size !in 5..LemidaPdf.MAX_BYTES) throw IOException("The PDF is empty or too large.")
+                file.outputStream().use { output ->
+                    var offset = 0
+                    while (offset < size) {
+                        val raw = JSONTokener(evaluate(LemidaPdfScript.chunk(slot, offset))).nextValue() as? String
+                            ?: throw IOException("The PDF download was interrupted.")
+                        val bytes = android.util.Base64.decode(raw, android.util.Base64.DEFAULT)
+                        if (bytes.size != minOf(32768, size - offset)) throw IOException("The PDF download was incomplete.")
+                        output.write(bytes); offset += bytes.size
+                    }
+                }
+                LemidaPdf.requireFile(file)
+                withContext(Dispatchers.Main) { snapshot() }
+                true
+            } ?: throw IOException("The PDF download timed out. Try again.")
+            Unit
+        } finally {
+            withContext(NonCancellable) { runCatching { withTimeoutOrNull(1_000) { evaluate(LemidaRequestScript.cleanup(slot)) } } }
+        }
+    }
     private suspend fun snapshot() {
         CookieManager.getInstance().flush()
         val value = CookieManager.getInstance().getCookie("${LemidaParser.BASE}/my/")

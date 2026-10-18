@@ -244,6 +244,12 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack
     var error by remember(item.id) { mutableStateOf<String?>(null) }
     var requiresSignIn by remember(item.id) { mutableStateOf(false) }
     var retry by remember(item.id) { mutableIntStateOf(0) }
+    var pdfFile by remember(item.id) { mutableStateOf<java.io.File?>(null) }
+    var pdfName by remember(item.id) { mutableStateOf("") }
+    var openingPdf by remember(item.id) { mutableStateOf<String?>(null) }
+    var pdfError by remember(item.id) { mutableStateOf<String?>(null) }
+    val pdfScope = rememberCoroutineScope()
+    DisposableEffect(pdfFile) { val file = pdfFile; onDispose { file?.delete() } }
     LaunchedEffect(item.id, retry) {
         loading = true
         error = null
@@ -255,6 +261,15 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack
             requiresSignIn = e is LemidaSessionExpired
         }
         finally { loading = false }
+    }
+    pdfFile?.let { file ->
+        BackHandler { pdfFile = null }
+        Scaffold(topBar = { SettingsTopBar(pdfName, onBack = { pdfFile = null }) }) { padding ->
+            com.feldman.scholix.drive.DrivePdfReader(file,
+                Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp).padding(bottom = 80.dp),
+                errorMessage = "This PDF could not be displayed. Go back and try opening it again.")
+        }
+        return
     }
     MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = { SettingsTopBar("Homework details", onBack = onBack) }) {
         Item { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -269,6 +284,25 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack
             else PageItem(title = "Retry loading homework", icon = rememberVectorPainter(Icons.Default.Refresh), onClick = { retry++ })
         } }
         detail?.let { data ->
+            if (data.pdfs.isNotEmpty()) {
+                Title("PDF attachments")
+                Section {
+                    data.pdfs.forEach { pdf -> PageItem(title = pdf.name,
+                        description = if (openingPdf == pdf.url) "Opening PDF…" else "Open PDF",
+                        icon = painterResource(R.drawable.ic_docs), onClick = {
+                            if (openingPdf == null) pdfScope.launch {
+                                openingPdf = pdf.url; pdfError = null
+                                try { pdfFile = repo.openPdf(item, pdf); pdfName = pdf.name }
+                                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                                catch (e: Exception) {
+                                    pdfError = e.message ?: "Could not open the PDF. Try again."
+                                    if (e is LemidaSessionExpired) { error = pdfError; requiresSignIn = true }
+                                } finally { openingPdf = null }
+                            }
+                        }) }
+                    pdfError?.let { message -> Item { Text(message, color = MaterialTheme.colorScheme.error) } }
+                }
+            }
             if (data.notices.isNotEmpty()) {
                 Title("Activity notices")
                 Section { data.notices.forEach { notice -> Item { Text(notice, style = MaterialTheme.typography.bodyMedium) } } }
