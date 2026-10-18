@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.api.platforms.INBAR_SMS_WAIT_TIMEOUT_MS
 import com.google.android.gms.auth.api.phone.SmsRetriever
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -21,7 +22,7 @@ fun HiddenInbarLogin(
     onSmsRequested: suspend (InbarPlatform) -> Unit,
     onResult: suspend (InbarPlatform?, String?) -> Unit,
     reuseSavedSession: suspend () -> InbarPlatform? = { null },
-    timeoutMs: Long = 90_000,
+    timeoutMs: Long = INBAR_SMS_WAIT_TIMEOUT_MS,
 ) {
     val context = LocalContext.current
     val saveAccount by rememberUpdatedState(onSmsRequested)

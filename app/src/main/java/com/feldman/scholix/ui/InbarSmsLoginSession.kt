@@ -38,6 +38,7 @@ internal class InbarSmsLoginSession {
     suspend fun signIn(context: Context, account: InbarPlatform, useDirect: Boolean,
         saveAccount: suspend (InbarPlatform) -> Unit, reuseSession: suspend () -> InbarPlatform?,
         timeoutMs: Long): InbarPlatform = inbarSmsLoginMutex.withLock {
+        Log.d("InbarLogin", "Checking saved session")
         reuseSession()?.let { return@withLock it }
         val appContext = context.applicationContext
         val requestedAt = AtomicLong(0L)
@@ -78,6 +79,7 @@ internal class InbarSmsLoginSession {
                 if (!started) throw IOException("SMS verification is unavailable. Please allow SMS access and try again.")
             }
             withContext(Dispatchers.IO) {
+                Log.d("InbarLogin", "Requesting SMS")
                 account.requestSms(account.getUsername(), account.mobile) {
                     reserveInbarSmsRequest(context, account.getUsername(), account.mobile)
                     retainForCooldown = true
@@ -86,13 +88,17 @@ internal class InbarSmsLoginSession {
             }
             Log.d("InbarLogin", "SMS request completed in ${SystemClock.elapsedRealtime() - requestedAt.get()} ms")
             saveAccount(account)
+            Log.d("InbarLogin", "Waiting for SMS")
             try { verifyInbarSmsCandidates(codes,
                 timeoutMs = (timeoutMs - (SystemClock.elapsedRealtime() - requestedAt.get())).coerceAtLeast(1)) { code ->
                 Log.d("InbarLogin", "SMS candidate received after ${SystemClock.elapsedRealtime() - requestedAt.get()} ms")
                 withContext(Dispatchers.IO) { account.verifySms(code) }
-            } } catch (e: InbarGradeLayoutChanged) {
-                // A reader error must not discard successful authentication and send another SMS.
-                if (account.isLoggedIn()) saveAccount(account)
+            } } catch (e: IOException) {
+                // A later grade-load failure must not discard already verified cookies.
+                if (account.isLoggedIn()) {
+                    saveAccount(account)
+                    retainForCooldown = false
+                }
                 throw e
             }
             saveAccount(account) // Save verified cookies even when the requesting page has closed.
