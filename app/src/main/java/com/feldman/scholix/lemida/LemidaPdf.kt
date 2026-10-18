@@ -5,6 +5,12 @@ import java.io.File
 import java.io.IOException
 
 data class LemidaPdf(val name: String, val url: String) {
+    fun downloadName(): String {
+        val base = name.substringAfterLast('/').substringAfterLast('\\')
+            .filter { !it.isISOControl() && Character.getType(it) != Character.FORMAT.toInt() }
+            .trim().trim('.').take(160).ifBlank { "Homework" }
+        return if (base.endsWith(".pdf", true)) base else "$base.pdf"
+    }
     companion object {
         const val MAX_BYTES = 20 * 1024 * 1024
         fun from(name: String, raw: String, pdfHint: Boolean = true): LemidaPdf? = runCatching {

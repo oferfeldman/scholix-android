@@ -6,6 +6,13 @@ import java.io.File
 import java.io.IOException
 
 class LemidaPdfTest {
+    @Test fun downloadedFilenamesPreserveHebrewAndAlwaysUsePdfExtension() {
+        assertEquals("תרגיל 1.pdf", LemidaPdf("תרגיל 1", "").downloadName())
+        assertEquals("Answers.PDF", LemidaPdf("Answers.PDF", "").downloadName())
+        assertEquals("Questions.pdf", LemidaPdf("../../Questions", "").downloadName())
+        assertEquals("Homework.pdf", LemidaPdf("..\n", "").downloadName())
+        assertEquals("file.pdf", LemidaPdf("file\u202e", "").downloadName())
+    }
     private fun page(body: String) = "<body><main id='region-main'>$body</main></body>"
     @Test fun linkedAndEmbeddedPdfsSurviveParsingAndCacheRestart() {
         val url = "${LemidaParser.BASE}/pluginfile.php/1/mod_assign/intro/תרגיל.PDF"
