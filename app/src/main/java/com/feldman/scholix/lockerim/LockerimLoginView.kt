@@ -66,7 +66,7 @@ fun LockerimLoginView(
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("לוקרים", style = MaterialTheme.typography.headlineSmall)
         Text(if (otpToken.isBlank()) "Sign in with the mobile number registered with Lockerim."
-            else "Enter the SMS code sent to $phone.")
+            else "Lockerim accepted the code request for $phone. If no SMS arrives, use Resend code or check the number.")
         OutlinedTextField(phone, { phone = it.filter(Char::isDigit).take(10) },
             label = { Text("Mobile number") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
             singleLine = true, enabled = !busy && otpToken.isBlank(), modifier = Modifier.fillMaxWidth())
@@ -97,8 +97,8 @@ fun LockerimLoginView(
                     try {
                         withContext(Dispatchers.IO) {
                             when (operation) {
-                                "send" -> otpToken = api.sendCode(phone, captcha).getString("otpToken")
-                                "resend" -> otpToken = api.resendCode(otpToken, captcha).getString("otpToken")
+                                "send" -> otpToken = api.sendCode(phone, captcha)
+                                "resend" -> otpToken = api.resendCode(otpToken, captcha)
                                 "verify" -> {
                                     draft.phone = phone
                                     draft.acceptSession(api.verifyCode(otpToken, code, captcha))

@@ -40,11 +40,18 @@ class LockerimApi(
         }
     }
 
-    fun sendCode(phone: String, captcha: String): JSONObject = request("Account/Login", body = JSONObject()
-        .put("phoneNumber", phone).put("RecaptchaKey", captcha)) as JSONObject
+    fun sendCode(phone: String, captcha: String): String = otpChallenge(request("Account/Login", body = JSONObject()
+        .put("phoneNumber", phone).put("RecaptchaKey", captcha)))
 
-    fun resendCode(otpToken: String, captcha: String): JSONObject = request("Account/ResendLoginOtp", body = JSONObject()
-        .put("otpToken", otpToken).put("RecaptchaKey", captcha)) as JSONObject
+    fun resendCode(otpToken: String, captcha: String): String = otpChallenge(request("Account/ResendLoginOtp", body = JSONObject()
+        .put("otpToken", otpToken).put("RecaptchaKey", captcha)))
+
+    private fun otpChallenge(content: Any): String {
+        // Android's getString coerces JSONObject.NULL to the nonempty string "null".
+        return ((content as? JSONObject)?.opt("otpToken") as? String)
+            ?.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) }
+            ?: throw IOException("Lockerim did not return a valid SMS verification request. Try again.")
+    }
 
     fun verifyCode(otpToken: String, code: String, captcha: String): JSONObject = request("Account/ValidateLoginOtp", body = JSONObject()
         .put("otpToken", otpToken).put("otp", code).put("RecaptchaKey", captcha)) as JSONObject

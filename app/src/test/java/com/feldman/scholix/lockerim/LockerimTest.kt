@@ -17,8 +17,8 @@ class LockerimTest {
         val api = api(requests, """{"content":{"otpToken":"challenge"}}""",
             """{"content":{"otpToken":"resent"}}""",
             """{"content":{"token":"access","refreshToken":"refresh"}}""")
-        assertEquals("challenge", api.sendCode("0500000000", "captcha-send").getString("otpToken"))
-        assertEquals("resent", api.resendCode("challenge", "captcha-resend").getString("otpToken"))
+        assertEquals("challenge", api.sendCode("0500000000", "captcha-send"))
+        assertEquals("resent", api.resendCode("challenge", "captcha-resend"))
         assertEquals("access", api.verifyCode("resent", "0012", "captcha-verify").getString("token"))
         assertEquals(listOf("/Account/Login", "/Account/ResendLoginOtp", "/Account/ValidateLoginOtp"), requests.map { it.url.encodedPath })
         assertEquals("0500000000", body(requests[0]).getString("phoneNumber"))
@@ -58,6 +58,20 @@ class LockerimTest {
             api.sendCode("", "")
         }.message)
         assertFalse(LockerimPlatform().isLoggedIn())
+    }
+
+    @Test fun invalidSmsChallengesNeverAdvanceToCodeEntry() {
+        for (content in listOf("{}", "{\"otpToken\":null}", "{\"otpToken\":\"null\"}",
+            "{\"otpToken\":\"\"}", "{\"otpToken\":\"   \"}", "{\"otpToken\":123}")) {
+            val api = api(mutableListOf(), """{"isSucceeded":true,"content":$content}""",
+                """{"isSucceeded":true,"content":$content}""")
+            assertThrows("Login accepted an invalid challenge: $content", java.io.IOException::class.java) {
+                api.sendCode("0500000000", "captcha")
+            }
+            assertThrows("Resend accepted an invalid challenge: $content", java.io.IOException::class.java) {
+                api.resendCode("old-challenge", "captcha")
+            }
+        }
     }
 
     @Test fun bluetoothUnlockMatchesIndependentAesReferenceVector() {

@@ -37,6 +37,13 @@ sent for verification. reCAPTCHA uses the official app's public site key,
 `https://localhost:3000/` WebView origin, and empty action, and must succeed before
 each SMS request/verification. Sessions use Scholix's existing provider storage.
 
+SMS request and resend responses must contain a nonempty JSON string
+`otpToken`; missing, null, blank, numeric, and literal `"null"` tokens are
+rejected before showing code entry. Android's `JSONObject.getString` coerces
+JSON null to the text `"null"`, so it must not be used to validate a challenge.
+A returned challenge confirms only that Lockerim accepted the request, not
+that an SMS reached the handset; the UI describes that distinction explicitly.
+
 ## PEM Bluetooth interoperability
 
 Service UUID: `6e406060-b5a3-f393-e0a9-e50e24dcca9e`.
@@ -54,7 +61,7 @@ Scanning and GATT connections close on success, failure, timeout, or cancellatio
 
 ## Verification and limits
 
-Focused JVM tests cover SMS request payloads, error envelopes, refresh/retry with
+Focused JVM tests cover SMS request payloads, invalid challenge responses, error envelopes, refresh/retry with
 rotated tokens, saved session/subscription data, and a Bluetooth encryption vector
 calculated independently with Node's crypto implementation. Real SMS delivery,
 authenticated subscription responses, initial physical enrollment, and physical
