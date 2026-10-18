@@ -23,6 +23,16 @@ The filename case covers Hebrew, extensions, paths and control characters. These
 are host tests with a controlled MediaStore provider; actual device storage/UI
 behavior remains to be checked.
 
+The main APK and combined phone APK also compile with the download action, using
+the isolated Motion source described below. The combined build starts from freshly
+pulled `integration/phone-build` `21ad5e3`, applies the download change as `c40be45`,
+and finishes 244 app unit tests with zero failures and one skipped case. Its
+development package and signing certificate are unchanged. The user's phone is
+disconnected; a different connected tablet was left untouched. No installation or
+live authenticated PDF/storage test was performed. The updated APK was packaged
+in a ZIP for Drive's upload size limit; decompression reproduces the original APK
+SHA-256 `c348974d642ebe099b7883d70b878b2cfa1103c134c09a4028516f510b0afdb7`.
+
 Files use the existing authenticated Lemida WebView session, after verifying the
 saved Moodle account. Only university HTTPS file/resource endpoints are accepted;
 external/login links, credentials in URLs and path traversal are rejected.
