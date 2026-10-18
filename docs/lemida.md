@@ -35,6 +35,14 @@ blocked by an unrelated unresolved `lockerapp.ui.theme.AppTheme` import in
 `InbarOnDemandUiTest`. No phone is connected, so actual PDF rendering, live
 authenticated file access and installation remain pending.
 
+The separate combined phone build applies this PDF change on top of freshly
+pulled `integration/phone-build` at `36d86de`, preserving its Inbar/Drive and other
+phone integrations. Its APK and unit suite build successfully with the same
+isolated Motion source: 243 tests, zero failures, one skipped. APK verification
+confirmed the existing development signing certificate, allowing a data-preserving
+update of `com.feldman.scholix.inbar.dev`. This is compile/host-test evidence;
+the disconnected phone was not updated or used for a live PDF test.
+
 Open **More → Homework** in Scholix and allow notifications. A remembered
 Microsoft account is selected by tapping its matching email tile automatically,
 before considering an email-entry field. In the direct-SMS development build,
