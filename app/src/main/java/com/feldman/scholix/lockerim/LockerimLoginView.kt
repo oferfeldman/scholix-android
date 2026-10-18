@@ -12,6 +12,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +42,7 @@ fun LockerimLoginView(
     var code by rememberSaveable { mutableStateOf("") }
     var pending by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    val armSmsAutofill = rememberLockerimSmsAutofill(busy || otpToken.isNotBlank()) { code = it }
     var error by remember { mutableStateOf<String?>(null) }
     var resendAt by remember { mutableLongStateOf(0) }
     var resendSeconds by remember { mutableIntStateOf(0) }
@@ -61,7 +65,13 @@ fun LockerimLoginView(
         }
         error = null
         busy = true
-        pending = operation
+        scope.launch {
+            if (operation != "verify") {
+                code = ""
+                armSmsAutofill()
+            }
+            pending = operation
+        }
     }
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("לוקרים", style = MaterialTheme.typography.headlineSmall)
@@ -73,7 +83,8 @@ fun LockerimLoginView(
         if (otpToken.isNotBlank()) {
             OutlinedTextField(code, { code = it.filter(Char::isDigit).take(6) },
                 label = { Text("SMS code") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                singleLine = true, enabled = !busy, modifier = Modifier.fillMaxWidth())
+                singleLine = true, enabled = !busy,
+                modifier = Modifier.fillMaxWidth().semantics { contentType = ContentType.SmsOtpCode })
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())

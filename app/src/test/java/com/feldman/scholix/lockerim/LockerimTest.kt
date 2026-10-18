@@ -12,6 +12,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LockerimTest {
+    @Test fun smsAutofillOnlyAcceptsAnUnambiguousLockerimCode() {
+        assertEquals("0012", lockerimSmsCode("Your verification code is 0012", "Lockerim"))
+        assertEquals("1234", lockerimSmsCode("קוד האימות שלך בלוקרים הוא 1234", "123"))
+        assertEquals("123456", lockerimSmsCode("Lockerim code: 123456", "123"))
+        assertNull(lockerimSmsCode("Your code is 1234", "OtherService"))
+        assertNull(lockerimSmsCode("Lockerim codes 1234 and 5678", "Lockerim"))
+        assertNull(lockerimSmsCode("Lockerim phone 0500000000", "Lockerim"))
+        assertEquals("0012", lockerimSmsCode("Verification code: 0012")) // Explicit one-message consent.
+    }
+
     @Test fun smsFlowMatchesRecoveredPayloadsAndRetainsOtpAsText() {
         val requests = mutableListOf<Request>()
         val api = api(requests, """{"content":{"otpToken":"challenge"}}""",

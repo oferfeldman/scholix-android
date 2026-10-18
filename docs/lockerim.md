@@ -8,6 +8,12 @@ Stand near the locker, enable Bluetooth, and wake the lock before operating it.
 Reconnect is available on the page and in provider settings. Rental checkout
 opens the official Lockerim website.
 
+SMS code entry supports Android keyboard autofill and fresh-message reception
+while signing in. With SMS permission, only Lockerim messages containing one
+unambiguous code fill the field. Without permission, Android can offer access to
+one selected message. Reception starts before send/resend; old inbox or spam
+messages are not read. Review the filled code and tap Connect to finish.
+
 ## Reverse-engineering evidence
 
 Inspected the public Android package `com.lockerimrb`, version **5.1.0.2354**
