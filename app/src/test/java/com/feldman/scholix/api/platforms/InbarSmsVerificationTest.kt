@@ -5,11 +5,52 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
 
 class InbarSmsVerificationTest {
+    @Test fun smsArrivingAfterTheOldNinetySecondLimitIsStillAccepted() = runTest {
+        val codes = Channel<String>(Channel.BUFFERED)
+        val delivery = launch { delay(95_000); codes.send("01234") }
+        var verified: String? = null
+        verifyInbarSmsCandidates(codes, INBAR_SMS_WAIT_TIMEOUT_MS) { verified = it }
+        assertEquals("01234", verified)
+        delivery.join()
+        codes.cancel()
+    }
+    @Test fun receivedCodeCanFinishVerificationAfterTheDeliveryDeadline() = runBlocking<Unit> {
+        val codes = Channel<String>(Channel.BUFFERED)
+        codes.send("01234")
+        var verified = false
+        verifyInbarSmsCandidates(codes, 100) {
+            delay(150)
+            verified = true
+        }
+        assertTrue(verified)
+        codes.cancel()
+    }
+
+    @Test fun aSlowVerificationDoesNotWaitForAnotherCodeAfterRejection() = runBlocking<Unit> {
+        val codes = Channel<String>(Channel.BUFFERED)
+        codes.send("01234")
+        var attempts = 0
+        val error = assertThrows(IOException::class.java) {
+            runBlocking {
+                verifyInbarSmsCandidates(codes, 100) {
+                    attempts++
+                    delay(150)
+                    throw InbarSmsCodeRejected()
+                }
+            }
+        }
+        assertEquals(1, attempts)
+        assertTrue(error is InbarSmsCodeRejected)
+        codes.cancel()
+    }
     @Test fun delayedCodeThenCurrentCodeCompletesWithoutAnotherSmsRequest() = runBlocking<Unit> {
         val codes = Channel<String>(Channel.BUFFERED)
         codes.send("11111")

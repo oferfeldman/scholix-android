@@ -13,12 +13,15 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 internal class InbarSessionExpired : IOException("Inbar session expired. Sign in again with an SMS code.")
 internal class InbarSmsCodeRejected : IOException("The SMS code was not accepted. Please sign in again.")
 internal class InbarSmsRestricted : IOException("Inbar has temporarily blocked sending SMS codes and verifying them. Please try again later.")
+internal class InbarNetworkTimeout(cause: InterruptedIOException) :
+    IOException("Inbar took too long to respond. Please retry; this does not mean your SMS code was rejected.", cause)
 internal class InbarGradeLayoutChanged(val year: Int, val years: List<Int>, val layout: String) :
     IOException("Signed in to Inbar, but its grade table could not be read.")
 
@@ -56,7 +59,10 @@ internal class InbarHttp(
 ) {
     private val client = (transport ?: SHARED_CLIENT).newBuilder()
         .cookieJar(cookieJar).followRedirects(false).followSslRedirects(false)
-        .callTimeout(45, TimeUnit.SECONDS).build()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(90, TimeUnit.SECONDS).build()
     private var challenge: InbarPage? = null
     private var gradePage: InbarPage? = null
     private var gradeYear: Int? = null
@@ -72,6 +78,8 @@ internal class InbarHttp(
             }
             val response = try { client.newCall(request).execute() } catch (error: UnknownHostException) {
                 throw IOException("Cannot reach In-bar. Check your connection or try another network, then retry.", error)
+            } catch (error: InterruptedIOException) {
+                throw InbarNetworkTimeout(error)
             }
             response.use { response ->
                 if (!response.isSuccessful && response.code !in listOf(301, 302, 303, 307, 308)) {
@@ -89,7 +97,10 @@ internal class InbarHttp(
                     if (response.code == 303 || (response.code in listOf(301, 302) && request.method == "POST")) builder.get()
                     request = builder.build()
                 } else {
-                    return InbarPage(response.request.url, response.body.string())
+                    val html = try { response.body.string() } catch (error: InterruptedIOException) {
+                        throw InbarNetworkTimeout(error)
+                    }
+                    return InbarPage(response.request.url, html)
                 }
             }
         }

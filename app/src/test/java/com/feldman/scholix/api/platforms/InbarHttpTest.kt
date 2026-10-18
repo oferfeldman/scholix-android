@@ -13,9 +13,37 @@ import org.junit.Test
 import java.io.IOException
 import java.net.URLDecoder
 import java.net.UnknownHostException
+import java.net.SocketTimeoutException
+import java.util.concurrent.TimeUnit
 
 /** Synthetic fixtures; no student identity, cookie, OTP or real grades are committed. */
 class InbarHttpTest {
+    @Test fun loginWaitsForSlowPortalResponsesWithoutRepeatingTheSmsPost() {
+        val requests = mutableListOf<Request>()
+        val client = OkHttpClient.Builder().addInterceptor {
+            assertEquals(60_000, it.readTimeoutMillis())
+            assertEquals(TimeUnit.SECONDS.toNanos(90), it.call().timeout().timeoutNanos())
+            it.proceed(it.request())
+        }.addInterceptor(transport(requests, login, challenge()).interceptors.single()).build()
+        InbarHttp(transport = client).requestSms("synthetic-id", "synthetic-phone")
+        assertEquals(1, requests.count { it.method == "POST" })
+    }
+
+    @Test fun timedOutSmsResponseIsReportedAsNetworkFailureAndNotResubmitted() {
+        val requests = mutableListOf<Request>()
+        val client = OkHttpClient.Builder().addInterceptor {
+            requests += it.request()
+            if (it.request().method == "POST") throw SocketTimeoutException("timeout")
+            Response.Builder().request(it.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(login.toResponseBody()).build()
+        }.build()
+        val error = assertThrows(InbarNetworkTimeout::class.java) {
+            InbarHttp(transport = client).requestSms("synthetic-id", "synthetic-phone")
+        }
+        assertTrue(error.message!!.contains("does not mean your SMS code was rejected"))
+        assertEquals(1, requests.count { it.method == "POST" })
+    }
+
     @Test fun dnsFailureBeforeLoginSubmissionDoesNotReserveAnSmsWindow() {
         val requests = mutableListOf<Request>()
         var fail = true
