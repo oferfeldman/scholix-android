@@ -276,7 +276,8 @@ fun DriveMaterialsPage(searchQuery: String = "") {
 }
 
 @Composable
-private fun DrivePdfReader(file: File, modifier: Modifier = Modifier) {
+internal fun DrivePdfReader(file: File, modifier: Modifier = Modifier,
+    errorMessage: String = "This PDF cannot be displayed here. Try opening it in Google Drive.") {
     var page by remember(file) { mutableIntStateOf(0) }
     var count by remember(file) { mutableIntStateOf(0) }
     var bitmap by remember(file) { mutableStateOf<Bitmap?>(null) }
@@ -313,7 +314,7 @@ private fun DrivePdfReader(file: File, modifier: Modifier = Modifier) {
         } catch (e: Exception) {
             rendered?.recycle()
             if (e is CancellationException) throw e
-            error = "This PDF cannot be displayed here. Try opening it in Google Drive."
+            error = errorMessage
         }
     }
     DisposableEffect(bitmap) { val current = bitmap; onDispose { current?.recycle() } }

@@ -1,5 +1,40 @@
 # Lemida homework on the phone
 
+## PDF attachments
+
+Homework details now show a **PDF attachments** section. Tap a file to open it
+inside Scholix with page navigation and pinch zoom; Back returns to the same
+homework. Linked and embedded PDF files are retained in the saved detail model,
+including older cache compatibility. Moodle resource links labelled as PDFs are
+also supported when they redirect to a PDF or contain one unambiguous embedded PDF.
+
+Files use the existing authenticated Lemida WebView session, after verifying the
+saved Moodle account. Only university HTTPS file/resource endpoints are accepted;
+external/login links, credentials in URLs and path traversal are rejected.
+The PDF fetch uses same-origin credentials, bounds the binary response to 20 MB,
+and moves it across the WebView bridge in 32 KB chunks. HTML sign-in responses,
+interrupted transfers and invalid PDF headers are not sent to the reader. Failed
+attempts remove the temporary download and retain cached instructions. Previews
+live only in private cache and are removed when closed; interrupted-process
+leftovers are bounded on subsequent opens. No university cookies are passed to
+an external PDF app.
+
+2026-10-18 checks: all 102 focused Android cases and 87 core cases passed
+(overlapping suites). Four new parser/file cases cover linked/embedded/resource
+PDFs, cache restart, unsafe URLs and invalid files. Seven controlled Robolectric
+cases execute the production repository and native chunk writer for account
+mismatch, expiry, interrupted download, binary reconstruction and cleanup.
+`tools/lemida/verify_pdf_requests.py` runs the actual production scripts in Chromium
+with intercepted traffic: multi-chunk binary integrity, Moodle resource wrappers,
+HTML login, size limit, navigation, origin and cancellation. No real PDF/session
+was accessed. The app APK compiled using isolated upstream Motion `c97004a`
+(beta57 source) through a local composite substitution; the checked-in beta56
+dependency was preserved. The full app suite ran 255 cases with one Webtop failure
+and one skipped case; the PDF cases passed. Instrumentation APK compilation is
+blocked by an unrelated unresolved `lockerapp.ui.theme.AppTheme` import in
+`InbarOnDemandUiTest`. No phone is connected, so actual PDF rendering, live
+authenticated file access and installation remain pending.
+
 Open **More → Homework** in Scholix and allow notifications. A remembered
 Microsoft account is selected by tapping its matching email tile automatically,
 before considering an email-entry field. In the direct-SMS development build,

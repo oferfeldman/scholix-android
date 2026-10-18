@@ -12,12 +12,12 @@ kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_11) } }
 sourceSets {
     main {
         kotlin.srcDir("../../../app/src/main/java")
-        kotlin.include(listOf("LemidaParser", "LemidaSms", "LemidaMfaState", "LemidaSmsConsentState",
+        kotlin.include(listOf("LemidaParser", "LemidaPdf", "LemidaPdfScript", "LemidaSms", "LemidaMfaState", "LemidaSmsConsentState",
             "LemidaLoginProbe", "LemidaMfaPoll", "LemidaCredentialPoll", "LemidaCredentialScript", "LemidaRequestScript", "LemidaSession").map { "com/feldman/scholix/lemida/$it.kt" })
     }
     test {
         kotlin.srcDir("../../../app/src/test/java")
-        kotlin.include(listOf("LemidaParserTest", "LemidaSmsTest", "LemidaMfaStateTest",
+        kotlin.include(listOf("LemidaParserTest", "LemidaPdfTest", "LemidaSmsTest", "LemidaMfaStateTest",
             "LemidaSmsConsentStateTest", "LemidaLoginProbeTest", "LemidaMfaPollTest", "LemidaCredentialPollTest").map { "com/feldman/scholix/lemida/$it.kt" })
     }
 }
