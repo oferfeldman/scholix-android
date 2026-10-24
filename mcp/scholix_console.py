@@ -18,7 +18,8 @@ def connection_html(service, prefix, token):
     for key, account in service.connections.items():
         key_html = escape(key)
         state = "Connected" if account.get("verified") else "Verify SMS" if account.get("pending_sms") else "Finish sign-in"
-        card = f'<motion-card class="connection-card"><span class="service-icon symbol" aria-hidden=true>school</span><div class=heading-copy><bdi>{escape(account["title"])}</bdi><span class=status>{escape(PROVIDERS[account["provider"]]["title"])} · {state}</span></div><form method=post action="{prefix}/admin/scholix/disconnect">{hidden}<input type=hidden name=connection_id value="{key_html}"><button class="danger icon-button" data-icon=link_off aria-label="Disconnect {escape(account["title"])}">Disconnect</button></form></motion-card>'
+        status_class = "connected" if account.get("verified") else "needs-sign-in"
+        card = f'<motion-card class="connection-card"><span class="service-icon symbol" aria-hidden=true>school</span><div class=heading-copy><bdi>{escape(account["title"])}</bdi><span class=status>{escape(PROVIDERS[account["provider"]]["title"])} · <span class="connection-auth {status_class}">{state}</span></span></div><form method=post action="{prefix}/admin/scholix/disconnect">{hidden}<input type=hidden name=connection_id value="{key_html}"><button class="danger icon-button" data-icon=link_off aria-label="Disconnect {escape(account["title"])}">Disconnect</button></form></motion-card>'
         if account.get("pending_sms"):
             card += f'<form class=account-form method=post action="{prefix}/admin/scholix/sms">{hidden}<input type=hidden name=connection_id value="{key_html}"><label>SMS code<input type=password inputmode=numeric name=code autocomplete=one-time-code required></label><button data-icon=verified>Verify code</button></form>'
         if account.get("browser"):
