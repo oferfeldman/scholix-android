@@ -7,6 +7,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.LocalAutofillHighlightColor
@@ -125,7 +127,7 @@ fun LoginPage(
     ) {
 
         AnimatedVisibility(visible = !showLoginPage, enter = fadeIn(), exit = fadeOut()) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = "Choose Your Platform",
                     style = MaterialTheme.typography.headlineMedium,
@@ -136,6 +138,7 @@ fun LoginPage(
 
                 ProviderPickerList(
                     providers = platformOptions,
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     onSelect = { option ->
                         selectedPlatform = option
                         if (option.name != "Google Classroom") {
@@ -204,6 +207,13 @@ fun LoginPage(
 
                     if (platform.name == "לוקרים") {
                         com.feldman.scholix.lockerim.LockerimLoginView(onSuccess = { created ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
+                                onLoginSuccess()
+                            }
+                        }, onCancel = { selectedPlatform = null })
+                    } else if (platform.name == "Schooly") {
+                        SchoolyLoginView(showTitle = false, onSuccess = { created ->
                             scope.launch {
                                 withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
                                 onLoginSuccess()

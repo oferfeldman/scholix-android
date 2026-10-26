@@ -24,6 +24,7 @@ import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.api.platforms.ShahafPlatform
+import com.feldman.scholix.api.platforms.SchoolyPlatform
 import java.util.Locale
 
 data class PlatformInfo(
@@ -50,6 +51,7 @@ val platformOptions = listOf(
     PlatformInfo("Mashov", R.drawable.ic_mashov) { MashovPlatform() as Platform },
     PlatformInfo("Education Portal", R.drawable.ic_moe) { StudentsPortalPlatform() as Platform },
     PlatformInfo("Shahaf", R.drawable.ic_moe, iconSymbol = MotionSymbols.ic_school) { ShahafPlatform() },
+    PlatformInfo("Schooly", R.drawable.ic_schooly) { SchoolyPlatform() },
     PlatformInfo(
         "Demo",
         R.drawable.ic_account_circle,
@@ -69,6 +71,7 @@ fun Platform.providerName(): String = when (this) {
     is MashovPlatform -> "Mashov"
     is StudentsPortalPlatform -> "Education Portal"
     is ShahafPlatform -> "Shahaf"
+    is SchoolyPlatform -> "Schooly"
     is DemoPlatform -> "Demo"
     else -> platformDisplayName
 }
