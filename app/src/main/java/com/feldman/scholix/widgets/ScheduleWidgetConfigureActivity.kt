@@ -22,6 +22,7 @@ import com.feldman.scholix.api.PlatformStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 
 class ScheduleWidgetConfigureActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,6 +46,7 @@ class ScheduleWidgetConfigureActivity : ComponentActivity() {
                         Text("Choose a provider", style = MaterialTheme.typography.titleMedium)
                         if (platforms == null) Text("Loading providers…")
                         if (platforms?.isEmpty() == true) Text("Add a schedule provider in Scholix first.")
+                        if (saving) Text("Loading schedule…")
                         platforms.orEmpty().forEach { provider ->
                             MotionButton(onClick = {
                                 saving = true
@@ -55,6 +57,17 @@ class ScheduleWidgetConfigureActivity : ComponentActivity() {
                                         it.remove(scheduleDaysKey)
                                         it.remove(scheduleUpdatedKey)
                                         it.remove(scheduleErrorKey)
+                                    }
+                                    try {
+                                        val days = withContext(Dispatchers.IO) { fetchScheduleWidgetDays(provider, java.time.LocalDate.now()) }
+                                        updateAppWidgetState(this@ScheduleWidgetConfigureActivity, id) {
+                                            it[scheduleDaysKey] = days.toString()
+                                            it[scheduleUpdatedKey] = System.currentTimeMillis().toString()
+                                        }
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (_: Exception) {
+                                        // Background work retries without requiring the main app to open.
                                     }
                                     ScheduleWidget().update(this@ScheduleWidgetConfigureActivity, id)
                                     ScheduleWidgetWorker.schedule(this@ScheduleWidgetConfigureActivity)

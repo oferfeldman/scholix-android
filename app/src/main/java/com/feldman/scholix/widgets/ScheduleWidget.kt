@@ -35,8 +35,6 @@ import com.feldman.scholix.ui.components.subjectIconName
 import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalTime
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 
 class ScheduleWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget = ScheduleWidget()
@@ -66,7 +64,7 @@ class ScheduleWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             GlanceTheme {
-                ScheduleWidgetContent(context, id, currentState())
+                ScheduleWidgetContent(context, currentState())
             }
         }
     }
@@ -79,7 +77,7 @@ class RefreshScheduleAction : ActionCallback {
 }
 
 @Composable
-private fun ScheduleWidgetContent(context: Context, id: GlanceId, prefs: Preferences) {
+private fun ScheduleWidgetContent(context: Context, prefs: Preferences) {
     val provider = PlatformStorage.loadPlatforms(context).firstOrNull { it.id == prefs[scheduleProviderKey] }
     val windows = provider?.let { PlatformStorage.loadWindowSubjects(context, it.id) }.orEmpty()
     val days = JSONObject(prefs[scheduleDaysKey] ?: "{}")
@@ -94,29 +92,15 @@ private fun ScheduleWidgetContent(context: Context, id: GlanceId, prefs: Prefere
         synthesizeGaps = provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false &&
             provider !is com.feldman.scholix.api.platforms.ShahafPlatform,
     ).flatten()
-    val configure = Intent(context, ScheduleWidgetConfigureActivity::class.java).putExtra(
-        AppWidgetManager.EXTRA_APPWIDGET_ID, GlanceAppWidgetManager(context).getAppWidgetId(id),
-    )
     val open = actionStartActivity(Intent(context, MainActivity::class.java).apply {
         putExtra("open_schedule", true)
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
     })
-    Column(GlanceModifier.fillMaxSize().background(GlanceTheme.colors.background).cornerRadius(24.dp).padding(16.dp)) {
-        Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(GlanceModifier.defaultWeight().clickable(open)) {
-                Text(context.getString(R.string.schedule), style = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.Bold, color = GlanceTheme.colors.onBackground))
-                Text(provider?.platformDisplayName ?: "Choose a provider", style = TextStyle(fontSize = 12.sp, color = GlanceTheme.colors.onSurfaceVariant), maxLines = 1)
+    Box(GlanceModifier.fillMaxSize().background(GlanceTheme.colors.background).cornerRadius(24.dp).clickable(open).padding(4.dp)) {
+        LazyColumn(GlanceModifier.fillMaxSize()) {
+            if (!days.has(date.toString())) {
+                item { Text(prefs[scheduleErrorKey] ?: "Loading schedule…", GlanceModifier.padding(12.dp), style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant)) }
             }
-            Text("↻", GlanceModifier.padding(12.dp).clickable(actionRunCallback<RefreshScheduleAction>()), style = TextStyle(fontSize = 24.sp, color = GlanceTheme.colors.primary))
-            Text("⚙", GlanceModifier.padding(12.dp).clickable(actionStartActivity(configure)), style = TextStyle(fontSize = 20.sp, color = GlanceTheme.colors.onSurfaceVariant))
-        }
-        val dayLabel = date.format(DateTimeFormatter.ofPattern("EEEE · d MMM"))
-        Text(dayLabel, GlanceModifier.padding(vertical = 10.dp), style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold, color = GlanceTheme.colors.primary))
-        val error = prefs[scheduleErrorKey]
-        if (error != null || !days.has(date.toString())) {
-            Text(error ?: "Loading schedule…", GlanceModifier.padding(bottom = 8.dp).clickable(open), style = TextStyle(fontSize = 12.sp, color = GlanceTheme.colors.onSurfaceVariant))
-        }
-        LazyColumn(GlanceModifier.fillMaxWidth().defaultWeight()) {
             if (rows.isEmpty() && days.has(date.toString())) {
                 item { Text("No lessons scheduled", GlanceModifier.padding(16.dp), style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant)) }
             }
@@ -127,10 +111,10 @@ private fun ScheduleWidgetContent(context: Context, id: GlanceId, prefs: Prefere
                 val muted = free || item.optString("colorClass") == "cancel-cell"
                 val colors = scheduleColor(subject)
                 val foreground = if (muted) GlanceTheme.colors.onSurfaceVariant else ColorProvider(colors.onColor)
-                Row(GlanceModifier.fillMaxWidth().padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(GlanceModifier.fillMaxWidth().clickable(open).padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Row(
                         GlanceModifier.defaultWeight().background(if (muted) GlanceTheme.colors.surfaceVariant else ColorProvider(colors.color))
-                            .cornerRadius(20.dp).clickable(open).padding(12.dp),
+                            .cornerRadius(20.dp).padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(GlanceModifier.defaultWeight()) {
@@ -154,10 +138,12 @@ private fun ScheduleWidgetContent(context: Context, id: GlanceId, prefs: Prefere
                     }
                 }
             }
+            item { Spacer(GlanceModifier.height(32.dp)) }
         }
-        prefs[scheduleUpdatedKey]?.toLongOrNull()?.let {
-            val time = java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalTime()
-            Text("Updated ${time.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))}", GlanceModifier.padding(top = 6.dp), style = TextStyle(fontSize = 10.sp, color = GlanceTheme.colors.onSurfaceVariant))
+        Box(GlanceModifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+            Text("↻", GlanceModifier.background(GlanceTheme.colors.background).cornerRadius(20.dp)
+                .clickable(actionRunCallback<RefreshScheduleAction>()).padding(horizontal = 12.dp, vertical = 8.dp),
+                style = TextStyle(fontSize = 18.sp, color = GlanceTheme.colors.onSurfaceVariant))
         }
     }
 }

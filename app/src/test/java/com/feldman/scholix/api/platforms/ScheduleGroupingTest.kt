@@ -9,6 +9,32 @@ import org.junit.Test
 class ScheduleGroupingTest {
     private fun lesson(hour: Int, subject: String) = JSONObject().put("hour", hour).put("subject", subject)
 
+    @Test fun widgetLoadsWithAnExpiredSessionWithoutOpeningTheApp() {
+        var renewed = false
+        var renewals = 0
+        val requestedDays = mutableListOf<Int>()
+        val provider = object : com.feldman.scholix.api.Platform by DemoPlatform() {
+            override fun getInfo() = JSONObject().put("scheduleSelection", "9|6")
+            override fun refreshCookies(): Boolean {
+                renewals++
+                renewed = true
+                return true
+            }
+            override fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
+                assertEquals("9|6", selectedValue)
+                requestedDays += dayIndex
+                return if (!renewed) JSONObject().put("error", "login_failed")
+                    else JSONObject().put("1", lesson(1, "Math"))
+            }
+        }
+        val today = java.time.LocalDate.of(2026, 10, 26)
+        val days = com.feldman.scholix.widgets.fetchScheduleWidgetDays(provider, today)
+        assertEquals(1, renewals)
+        assertEquals(listOf(1, 1, 2), requestedDays)
+        assertEquals("Math", days.getJSONArray(today.toString()).getJSONObject(0).getString("subject"))
+        assertEquals(1, days.getJSONArray(today.plusDays(1).toString()).length())
+    }
+
     @Test fun widgetStaysOnTodayUntilTheLastActiveLessonEnds() {
         val today = java.time.LocalDate.of(2026, 10, 26)
         val lessons = listOf(lesson(1, "Math").put("time", "08:00 - 08:45"),

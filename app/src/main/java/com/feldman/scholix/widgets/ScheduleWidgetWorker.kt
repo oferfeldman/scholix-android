@@ -9,6 +9,7 @@ import androidx.glance.appwidget.updateAll
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.work.*
 import com.feldman.scholix.api.PlatformStorage
+import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.platforms.ShahafPlatform
 import com.feldman.scholix.pages.shahafWidgetLessons
 import kotlinx.coroutines.CancellationException
@@ -28,6 +29,26 @@ internal val scheduleDaysKey = stringPreferencesKey("schedule_days")
 internal val scheduleUpdatedKey = stringPreferencesKey("schedule_updated")
 internal val scheduleErrorKey = stringPreferencesKey("schedule_error")
 
+internal fun fetchScheduleWidgetDays(platform: Platform, today: LocalDate): JSONObject {
+    val info = platform.getInfo()
+    val published = (platform as? ShahafPlatform)?.getAppData()
+    return JSONObject().apply {
+        for (date in listOf(today, today.plusDays(1))) {
+            val day = date.dayOfWeek.value % 7
+            val lessons = if (published != null) shahafWidgetLessons(published, day) else {
+                var response = if (day == 6 && !info.optBoolean("supportsSaturdaySchedule")) JSONObject()
+                    else platform.getSchedule(day, null, info.optString("scheduleSelection").ifBlank { null })
+                if (response.optString("error") == "login_failed" && platform.refreshCookies()) {
+                    response = platform.getSchedule(day, null, info.optString("scheduleSelection").ifBlank { null })
+                }
+                check(!response.has("error")) { response.optString("error") }
+                response.keys().asSequence().map { response.getJSONObject(it) }.toList()
+            }
+            put(date.toString(), JSONArray(lessons))
+        }
+    }
+}
+
 class ScheduleWidgetWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val ids = GlanceAppWidgetManager(applicationContext).getGlanceIds(ScheduleWidget::class.java)
@@ -39,24 +60,14 @@ class ScheduleWidgetWorker(context: Context, params: WorkerParameters) : Corouti
         val platforms = PlatformStorage.loadPlatforms(applicationContext)
         val today = LocalDate.now()
         var nextUpdate = today.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()
+        var failed = false
         for (id in ids) {
             val prefs = getAppWidgetState(applicationContext, PreferencesGlanceStateDefinition, id)
+            if (prefs[scheduleProviderKey] == null) continue
             val platform = platforms.firstOrNull { it.id == prefs[scheduleProviderKey] }
             try {
                 check(platform != null) { "Choose a schedule provider" }
-                val info = platform.getInfo()
-                val days = JSONObject()
-                val published = (platform as? ShahafPlatform)?.getAppData()
-                for (date in listOf(today, today.plusDays(1))) {
-                    val day = date.dayOfWeek.value % 7
-                    val lessons = if (published != null) shahafWidgetLessons(published, day) else {
-                        val response = if (day == 6 && !info.optBoolean("supportsSaturdaySchedule")) JSONObject()
-                            else platform.getSchedule(day, null, info.optString("scheduleSelection").ifBlank { null })
-                        check(!response.has("error")) { "Open Scholix to reconnect, then refresh" }
-                        response.keys().asSequence().map { response.getJSONObject(it) }.toList()
-                    }
-                    days.put(date.toString(), JSONArray(lessons))
-                }
+                val days = fetchScheduleWidgetDays(platform, today)
                 val todayLessons = days.getJSONArray(today.toString()).let { array ->
                     (0 until array.length()).map { array.getJSONObject(it) }
                 }
@@ -77,9 +88,11 @@ class ScheduleWidgetWorker(context: Context, params: WorkerParameters) : Corouti
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
+                failed = failed || platform != null
                 updateAppWidgetState(applicationContext, id) {
-                    it[scheduleErrorKey] = if (platform == null) "Choose a schedule provider"
-                        else "Could not refresh · Open Scholix to reconnect"
+                    if (platform == null) it[scheduleErrorKey] = "Choose a schedule provider"
+                    else if (runAttemptCount >= 3) it[scheduleErrorKey] = "Could not refresh · tap ↻ to retry"
+                    else it.remove(scheduleErrorKey)
                 }
             }
             ScheduleWidget().update(applicationContext, id)
@@ -90,23 +103,24 @@ class ScheduleWidgetWorker(context: Context, params: WorkerParameters) : Corouti
                 .setInitialDelay(Duration.between(java.time.Instant.now(), nextUpdate).toMillis().coerceAtLeast(1000), TimeUnit.MILLISECONDS)
                 .build(),
         )
-        return Result.success()
+        return if (failed && runAttemptCount < 3) Result.retry() else Result.success()
     }
 
     companion object {
         private const val PERIODIC = "schedule-widget-periodic"
+        private val network = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
 
         fun schedule(context: Context) {
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 PERIODIC, ExistingPeriodicWorkPolicy.KEEP,
-                PeriodicWorkRequestBuilder<ScheduleWidgetWorker>(15, TimeUnit.MINUTES).build(),
+                PeriodicWorkRequestBuilder<ScheduleWidgetWorker>(15, TimeUnit.MINUTES).setConstraints(network).build(),
             )
         }
 
         fun refresh(context: Context) {
             WorkManager.getInstance(context).enqueueUniqueWork(
                 "schedule-widget-refresh", ExistingWorkPolicy.REPLACE,
-                OneTimeWorkRequestBuilder<ScheduleWidgetWorker>().build(),
+                OneTimeWorkRequestBuilder<ScheduleWidgetWorker>().setConstraints(network).build(),
             )
         }
     }
