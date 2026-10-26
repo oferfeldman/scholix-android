@@ -582,6 +582,7 @@ fun MainScreen(
         if (activity?.intent?.getBooleanExtra("open_crash_logs", false) == true) AppDest.CrashLogs
         else if (activity?.intent?.getBooleanExtra("open_messages", false) == true) AppDest.Messages
         else if (activity?.intent?.getBooleanExtra("open_homework", false) == true) AppDest.Homework
+        else if (activity?.intent?.getBooleanExtra("open_schedule", false) == true && hasSchedule) AppDest.Schedule
         else if (hasGrades) AppDest.Grades else AppDest.Tiktek
     }
 

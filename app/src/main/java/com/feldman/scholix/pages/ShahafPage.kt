@@ -613,6 +613,22 @@ private fun JSONObject.localizedDayLabel(
     return optString("t")
 }
 
+internal fun shahafWidgetLessons(data: JSONObject, day: Int): List<JSONObject> {
+    val views = data.optJSONArray("views").objects()
+    val view = views.firstOrNull { !isShahafChangesView(it) && !isShahafExamView(it) && !isShahafEventView(it) &&
+        it.optJSONObject("tb")?.optJSONArray("tb")?.length() in 6..7 } ?: error("No daily schedule published")
+    val tab = view.optJSONObject("tb")?.optJSONArray("tb")?.optJSONObject(day) ?: return emptyList()
+    val changes = views.firstOrNull(::isShahafChangesView)?.let { changesForTab(it, tab) }.orEmpty()
+    return blocksForTab(tab, view.optJSONArray("d").objects()).flatMap { block ->
+        block.optJSONArray("r").objects().mapNotNull { row ->
+            val headers = row.optJSONArray("h").objects().map { it.optString("t") }.filter { it.isNotBlank() }
+            val hour = headers.firstOrNull()?.toIntOrNull() ?: -1
+            (changes[hour]?.toScheduleItem() ?: row.toShahafScheduleItem())?.put("hour", hour)
+                ?.put("time", headers.filter { it.toIntOrNull() == null }.joinToString(" - "))
+        }
+    }
+}
+
 private fun blocksForTab(tab: JSONObject?, dataBlocks: List<JSONObject>): List<JSONObject> {
     if (tab == null) return emptyList()
     val keys = listOf(tab.optString("k"), tab.optString("id"))

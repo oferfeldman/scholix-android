@@ -99,6 +99,9 @@ fun SchedulePage(
     isActive: Boolean = true,
 ) {
     val context = LocalContext.current
+    LaunchedEffect(isActive, platforms) {
+        if (isActive) com.feldman.scholix.widgets.ScheduleWidgetWorker.refresh(context)
+    }
     var inbarRequestedByUser by remember { mutableStateOf(false) }
     val active by rememberUpdatedState(isActive)
     val navigationRequested by rememberUpdatedState(inbarAccessRequested)

@@ -169,4 +169,5 @@
     <string name="email">Email</string>
     <string name="school_code">School code</string>
     <string name="school_year">School year</string>
+    <string name="schedule_widget_description">Daily lessons with live schedule changes. Automatically shows tomorrow after the last lesson.</string>
 </resources>

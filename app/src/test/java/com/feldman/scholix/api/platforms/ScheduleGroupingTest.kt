@@ -9,6 +9,23 @@ import org.junit.Test
 class ScheduleGroupingTest {
     private fun lesson(hour: Int, subject: String) = JSONObject().put("hour", hour).put("subject", subject)
 
+    @Test fun widgetStaysOnTodayUntilTheLastActiveLessonEnds() {
+        val today = java.time.LocalDate.of(2026, 10, 26)
+        val lessons = listOf(lesson(1, "Math").put("time", "08:00 - 08:45"),
+            lesson(2, "English").put("time", "09:00 - 09:45"))
+        assertEquals(today, com.feldman.scholix.widgets.scheduleWidgetDate(today, java.time.LocalTime.of(9, 44), lessons, emptySet()))
+        assertEquals(today.plusDays(1), com.feldman.scholix.widgets.scheduleWidgetDate(today, java.time.LocalTime.of(9, 45), lessons, emptySet()))
+    }
+
+    @Test fun widgetIgnoresCancelledAndFreeLessonsWhenAdvancing() {
+        val today = java.time.LocalDate.of(2026, 12, 31)
+        val lessons = listOf(lesson(1, "Math").put("time", "08:00 - 08:45"),
+            lesson(2, "English").put("time", "09:00 - 09:45").put("colorClass", "cancel-cell"),
+            lesson(3, "History").put("time", "10:00 - 10:45"))
+        assertEquals(today.plusDays(1), com.feldman.scholix.widgets.scheduleWidgetDate(today, java.time.LocalTime.of(8, 45), lessons, setOf("History")))
+        assertEquals(today.plusDays(1), com.feldman.scholix.widgets.scheduleWidgetDate(today, java.time.LocalTime.MIDNIGHT, emptyList(), emptySet()))
+    }
+
     @Test fun clockTimesDoNotCreateHundredsOfInventedSchoolPeriods() {
         val groups = withFreePeriods(listOf(lesson(540, "Course A"), lesson(720, "Course B")),
             emptySet(), synthesizeGaps = false)
