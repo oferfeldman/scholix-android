@@ -9,6 +9,20 @@ import org.junit.Test
 class ScheduleGroupingTest {
     private fun lesson(hour: Int, subject: String) = JSONObject().put("hour", hour).put("subject", subject)
 
+    @Test fun widgetMarksCurrentOrNextLessonAndSkipsCancelledAndFreePeriods() {
+        val lessons = listOf(
+            lesson(1, "Math").put("time", "08:00 - 08:45"),
+            lesson(2, "English").put("time", "09:00 - 09:45").put("colorClass", "cancel-cell"),
+            lesson(3, "Free").put("time", "10:00 - 10:45").put(WINDOW_FLAG, true),
+            lesson(4, "History").put("time", "11:00 - 11:45"),
+        )
+        assertEquals(0, com.feldman.scholix.widgets.scheduleWidgetActiveIndex(lessons, java.time.LocalTime.of(8, 30), true))
+        assertEquals(3, com.feldman.scholix.widgets.scheduleWidgetActiveIndex(lessons, java.time.LocalTime.of(8, 45), true))
+        assertEquals(3, com.feldman.scholix.widgets.scheduleWidgetActiveIndex(lessons, java.time.LocalTime.of(11, 0), true))
+        assertEquals(-1, com.feldman.scholix.widgets.scheduleWidgetActiveIndex(lessons, java.time.LocalTime.of(11, 45), true))
+        assertEquals(0, com.feldman.scholix.widgets.scheduleWidgetActiveIndex(lessons, java.time.LocalTime.of(20, 0), false))
+    }
+
     @Test fun widgetLoadsWithAnExpiredSessionWithoutOpeningTheApp() {
         var renewed = false
         var renewals = 0

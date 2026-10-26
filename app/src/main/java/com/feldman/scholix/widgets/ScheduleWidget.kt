@@ -87,11 +87,14 @@ private fun ScheduleWidgetContent(context: Context, prefs: Preferences) {
         return (0 until array.length()).map { array.getJSONObject(it) }
     }
     val date = if (days.has(today.toString())) scheduleWidgetDate(today, LocalTime.now(), lessons(today), windows) else today
-    val rows = withFreePeriods(
+    val allRows = withFreePeriods(
         lessons(date), windows,
         synthesizeGaps = provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false &&
             provider !is com.feldman.scholix.api.platforms.ShahafPlatform,
     ).flatten()
+    val activeIndex = scheduleWidgetActiveIndex(allRows, LocalTime.now(), date == today)
+    val firstVisible = (activeIndex - 1).coerceAtLeast(0)
+    val rows = allRows.drop(firstVisible)
     val open = actionStartActivity(Intent(context, MainActivity::class.java).apply {
         putExtra("open_schedule", true)
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -126,14 +129,20 @@ private fun ScheduleWidgetContent(context: Context, prefs: Preferences) {
                             if (changes.isNotBlank()) Text(changes, style = TextStyle(fontSize = 14.sp, color = foreground), maxLines = 3)
                         }
                         if (!muted) Image(
-                            provider = ImageProvider(scheduleSubjectIcon(context, subject, colors.onColor, index, item.optString("exams"))),
+                            provider = ImageProvider(scheduleSubjectIcon(context, subject, colors.onColor, index + firstVisible, item.optString("exams"))),
                             contentDescription = null, modifier = GlanceModifier.padding(start = 8.dp).size(44.dp),
                         )
                     }
-                    Column(GlanceModifier.width(48.dp).padding(start = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false && hourOf(item) >= 0) Text(hourOf(item).toString(), style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium, color = GlanceTheme.colors.onSurfaceVariant))
-                        item.optString("time").split(Regex("\\s*[-–]\\s*|\\n")).filter { it.isNotBlank() }.forEach {
-                            Text(it, style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant), maxLines = 1)
+                    val highlighted = index + firstVisible == activeIndex
+                    val hourColor = if (highlighted) GlanceTheme.colors.onPrimary else GlanceTheme.colors.onSurfaceVariant
+                    Box(GlanceModifier.width(60.dp).padding(start = 4.dp), contentAlignment = Alignment.Center) {
+                        val badge = if (highlighted) GlanceModifier.size(56.dp).background(GlanceTheme.colors.primary).cornerRadius(28.dp)
+                            else GlanceModifier.width(56.dp)
+                        Column(badge, horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Alignment.CenterVertically) {
+                            if (provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false && hourOf(item) >= 0) Text(hourOf(item).toString(), style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium, color = hourColor))
+                            item.optString("time").split(Regex("\\s*[-–]\\s*|\\n")).filter { it.isNotBlank() }.forEach {
+                                Text(it, style = TextStyle(fontSize = 10.sp, color = hourColor), maxLines = 1)
+                            }
                         }
                     }
                 }

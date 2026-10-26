@@ -4,4 +4,6 @@ Add **Scholix → Schedule** from the launcher's widget picker, then choose a sa
 
 The widget shows only lessons and a small refresh arrow in the bottom corner. Tap the schedule to open the schedule page in Scholix. The lesson list scrolls and the widget can be resized down to one row. To choose another provider, use the launcher's widget reconfiguration action.
 
+The current lesson's hour and time appear in a primary-color circle. Between lessons, the next lesson is marked instead; tomorrow's view marks its first lesson. The widget starts one lesson before the marked lesson where possible. Earlier lessons remain available on the app's schedule page. The scroll indicator is hidden.
+
 Setup fetches the first schedule before completing. Background refresh runs every 15 minutes, with additional updates when the schedule screen opens, at the end of the school day, at midnight, and after clock or timezone changes. Android can defer background work to save battery; this is not a real-time push feed. Failed refreshes retry automatically and keep cached lessons visible. The refresh button also retries without opening the main app. Providers that require interactive sign-in still need that sign-in if their saved session can no longer be renewed.

@@ -19,8 +19,6 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.Duration
 import java.time.ZoneId
-import com.feldman.scholix.pages.hourOf
-import com.feldman.scholix.pages.parseLessonEndTimeMinutes
 import com.feldman.scholix.pages.WINDOW_FLAG
 import java.util.concurrent.TimeUnit
 
@@ -72,12 +70,14 @@ class ScheduleWidgetWorker(context: Context, params: WorkerParameters) : Corouti
                     (0 until array.length()).map { array.getJSONObject(it) }
                 }
                 val windows = PlatformStorage.loadWindowSubjects(applicationContext, platform.id)
-                val end = todayLessons.filter {
+                val minute = LocalTime.now().let { it.hour * 60 + it.minute }
+                val nextChange = todayLessons.filter {
                     !it.optBoolean(WINDOW_FLAG) && it.optString("colorClass") != "cancel-cell" &&
                         !PlatformStorage.isWindowSubject(it.optString("subject"), windows)
-                }.maxOfOrNull { parseLessonEndTimeMinutes(it.optString("time"), hourOf(it)) }
-                if (end != null && end in 0..1439 && LocalTime.now() < LocalTime.of(end / 60, end % 60)) {
-                    val boundary = today.atTime(end / 60, end % 60).atZone(ZoneId.systemDefault()).toInstant()
+                }.flatMap { scheduleWidgetLessonMinutes(it).let { range -> listOf(range.first, range.last + 1) } }
+                    .filter { it in 0..1439 && it > minute }.minOrNull()
+                if (nextChange != null) {
+                    val boundary = today.atTime(nextChange / 60, nextChange % 60).atZone(ZoneId.systemDefault()).toInstant()
                     if (boundary < nextUpdate) nextUpdate = boundary
                 }
                 updateAppWidgetState(applicationContext, id) {
