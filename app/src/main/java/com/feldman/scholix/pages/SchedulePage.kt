@@ -365,13 +365,14 @@ fun SchedulePage(
                         schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                     }
                 }
-                if (inbarRelogin != null) return@LaunchedEffect
+                if (inbarRelogin != null || webtopRelogin != null || errorMessages[page] != null) return@LaunchedEffect
                 // Update the state *after* the blocking call, back on the main thread (which LaunchedEffect runs on).
                 allSchedulesUpdated[page] = updated
 
                 // --- Original schedule ---
                 val original = if (!supportsOriginal) updated else withContext(Dispatchers.IO) {
                     val schedule = requestPlatform.getOriginalSchedule(page, null, selectedValue)
+                    check(!schedule.has("error")) { schedule.optString("error") }
                     schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                 }
                 allSchedulesOriginal[page] = original
@@ -381,18 +382,19 @@ fun SchedulePage(
                     val remainingDays = withContext(Dispatchers.IO) {
                         dayNames.indices
                             .filter { it != page }
-                            .associateWith { day ->
+                            .mapNotNull { day ->
                                 val updatedSchedule = requestPlatform.getSchedule(day, null, selectedValue)
                                 val originalSchedule = if (supportsOriginal) requestPlatform.getOriginalSchedule(day, null, selectedValue)
                                     else updatedSchedule
+                                if (updatedSchedule.has("error") || originalSchedule.has("error")) return@mapNotNull null
                                 val updatedItems = updatedSchedule.keys().asSequence()
                                     .map { updatedSchedule.getJSONObject(it) }
                                     .toList()
                                 val originalItems = originalSchedule.keys().asSequence()
                                     .map { originalSchedule.getJSONObject(it) }
                                     .toList()
-                                updatedItems to originalItems
-                            }
+                                day to (updatedItems to originalItems)
+                            }.toMap()
                     }
                     val newUpdated = remainingDays.mapValues { it.value.first }
                     val newOriginal = remainingDays.mapValues { it.value.second }
@@ -415,7 +417,11 @@ fun SchedulePage(
         } else {
             // 2. Handle all other unexpected errors
             Log.e("SchedulePage", "Error fetching schedule", e)
-            errorMessages[pagerState.currentPage] = "Unknown error occurred while loading schedule."
+            errorMessages[page] = when (e.message) {
+                "server_unreachable" -> "Cannot reach the server.\nCheck your internet connection."
+                "login_failed" -> "Login failed.\nPlease re-login."
+                else -> "Unknown error occurred while loading schedule."
+            }
         }
     } finally {
         // This finally block always executes, whether cancelled or not,
@@ -773,6 +779,14 @@ fun SchedulePage(
                                     if (canAccessInbar) inbarRelogin = inbar.forSmsLogin()
                                     else scheduleReloadTrigger++
                                 }) { Text(if (canAccessInbar) "Retry login" else "Load Inbar schedule") }
+                            } else {
+                                TextButton(onClick = {
+                                    allSchedulesUpdated.remove(page)
+                                    allSchedulesOriginal.remove(page)
+                                    errorMessages[page] = null
+                                    reloginAttempted = false
+                                    scheduleReloadTrigger++
+                                }) { Text("Retry") }
                             }
                             }
                         }

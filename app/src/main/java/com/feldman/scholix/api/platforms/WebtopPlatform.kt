@@ -24,6 +24,7 @@ import java.time.LocalDate
 import java.time.Year
 import java.time.format.DateTimeFormatter
 import java.util.*
+import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -73,7 +74,11 @@ class WebtopPlatform() : Platform {
     )
     @Volatile
     private var cachedPupilCardSettings: MutableMap<Int, PupilCardSettings> = mutableMapOf()
-    private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
+    private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient().newBuilder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(90, TimeUnit.SECONDS)
+        .build()
     internal val messageAttachments = WebtopAttachmentDownload(cookie = { _cookies.orEmpty() })
     val mailbox: WebtopMailbox = WebtopMailbox(
         cookie = { _cookies ?: "" },
@@ -628,6 +633,10 @@ class WebtopPlatform() : Platform {
 
 
     override fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
+        return getSchedule(dayIndex, institutionCode, selectedValue, retry = true)
+    }
+
+    private fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?, retry: Boolean): JSONObject {
         Log.d("WebtopPlatform", "override getSchedule(dayIndex: $dayIndex, institutionCode $institutionCode, selectedValue $selectedValue) called.")
 
         val institution = institutionCode ?: studentInstitution
@@ -662,16 +671,17 @@ class WebtopPlatform() : Platform {
                     val body = response.body.string()
                     Log.v("WebtopPlatform", "Schedule body (len=${body.length}): $body")
 
-                    if (response.code == 401 || response.code == 403 || body.isEmpty()) {
-                        Log.d("WebtopPlatform", "Schedule fetch unauthorized/empty → refreshing cookies")
-                        if (refreshCookies()) {
+                    if (response.code == 401 || response.code == 403) {
+                        Log.d("WebtopPlatform", "Schedule fetch unauthorized → refreshing cookies")
+                        if (retry && refreshCookies()) {
                             // Retry once with same parameters after refreshing cookies
-                            return getSchedule(dayIndex, institutionCode, classCode)
+                            return getSchedule(dayIndex, institutionCode, classCode, retry = false)
                         }
+                        loggedIn = false
                         return JSONObject().put("error", "login_failed")
                     }
 
-                    if (!response.isSuccessful) {
+                    if (!response.isSuccessful || body.isBlank()) {
                         return JSONObject().put("error", "server_unreachable")
                     }
 
@@ -993,6 +1003,10 @@ class WebtopPlatform() : Platform {
 
 
     override fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
+        return getOriginalSchedule(dayIndex, institutionCode, selectedValue, retry = true)
+    }
+
+    private fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?, retry: Boolean): JSONObject {
         val schedule = JSONObject()
         if (dayIndex < 0) return schedule
         val institution = institutionCode ?: studentInstitution
@@ -1023,15 +1037,16 @@ class WebtopPlatform() : Platform {
 
                 _client.newCall(request).execute().use { response ->
                     val body = response.body.string()
-                    if (response.code == 401 || response.code == 403 || body.isEmpty()) {
-                        Log.d("WebtopPlatform", "Original schedule fetch unauthorized/empty → refreshing cookies")
-                        if (refreshCookies()) {
-                            return getOriginalSchedule(dayIndex, institutionCode, classCode)
+                    if (response.code == 401 || response.code == 403) {
+                        Log.d("WebtopPlatform", "Original schedule fetch unauthorized → refreshing cookies")
+                        if (retry && refreshCookies()) {
+                            return getOriginalSchedule(dayIndex, institutionCode, classCode, retry = false)
                         }
+                        loggedIn = false
                         return JSONObject().put("error", "login_failed")
                     }
 
-                    if (!response.isSuccessful) {
+                    if (!response.isSuccessful || body.isBlank()) {
                         return JSONObject().put("error", "server_unreachable")
                     }
 

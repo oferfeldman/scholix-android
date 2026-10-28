@@ -318,6 +318,9 @@ object PlatformStorage {
             async {
                 // Inbar is checked when the user opens its grades or timetable.
                 if (p is InbarPlatform) return@async null
+                // These providers recover expired sessions when their data is requested.
+                // Eager sign-in can invalidate a session another page is still using.
+                if (p is LockerimPlatform || (p is WebtopPlatform && p.isLoggedIn())) return@async null
                 val success = try {
                     p.refreshCookies()
                 } catch (e: Exception) {
