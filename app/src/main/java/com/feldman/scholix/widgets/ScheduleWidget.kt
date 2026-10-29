@@ -1,5 +1,9 @@
 package com.feldman.scholix.widgets
 
+import android.app.PendingIntent
+import android.net.Uri
+import android.os.Build
+import android.widget.RemoteViews
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
@@ -7,9 +11,11 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.sp
 import androidx.core.content.res.ResourcesCompat
 import androidx.datastore.preferences.core.Preferences
@@ -19,7 +25,6 @@ import androidx.glance.appwidget.*
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
-import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.layout.*
 import androidx.glance.text.*
 import androidx.glance.unit.ColorProvider
@@ -32,9 +37,11 @@ import com.feldman.scholix.pages.hourOf
 import com.feldman.scholix.pages.scheduleColor
 import com.feldman.scholix.pages.withFreePeriods
 import com.feldman.scholix.ui.components.subjectIconName
+import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalTime
+import kotlinx.coroutines.runBlocking
 
 class ScheduleWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget = ScheduleWidget()
@@ -77,6 +84,7 @@ class RefreshScheduleAction : ActionCallback {
 }
 
 @Composable
+@OptIn(ExperimentalGlanceRemoteViewsApi::class)
 private fun ScheduleWidgetContent(context: Context, prefs: Preferences) {
     val provider = PlatformStorage.loadPlatforms(context).firstOrNull { it.id == prefs[scheduleProviderKey] }
     val windows = provider?.let { PlatformStorage.loadWindowSubjects(context, it.id) }.orEmpty()
@@ -94,65 +102,96 @@ private fun ScheduleWidgetContent(context: Context, prefs: Preferences) {
     ).flatten()
     val activeIndex = scheduleWidgetActiveIndex(allRows, LocalTime.now(), date == today)
     val firstVisible = (activeIndex - 1).coerceAtLeast(0)
-    val rows = allRows.drop(firstVisible)
-    val open = actionStartActivity(Intent(context, MainActivity::class.java).apply {
+    val rows = allRows
+    val numberedPeriods = provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false
+    val openIntent = Intent(context, MainActivity::class.java).apply {
         putExtra("open_schedule", true)
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-    })
+    }
+    val open = actionStartActivity(openIntent)
+    val widgetId = (LocalGlanceId.current as AppWidgetId).appWidgetId
     Box(GlanceModifier.fillMaxSize().background(GlanceTheme.colors.background).cornerRadius(24.dp).clickable(open).padding(4.dp)) {
-        LazyColumn(GlanceModifier.fillMaxSize()) {
-            if (!days.has(date.toString())) {
-                item { Text(prefs[scheduleErrorKey] ?: "Loading schedule…", GlanceModifier.padding(12.dp), style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant)) }
+        if (rows.isEmpty()) {
+            Text(if (days.has(date.toString())) "No lessons scheduled" else prefs[scheduleErrorKey] ?: "Loading schedule…",
+                GlanceModifier.padding(16.dp), style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant))
+        } else {
+            val adapter = Intent(context, ScheduleWidgetListService::class.java).apply {
+                putExtra("lessons", JSONArray(rows).toString())
+                putExtra("numberedPeriods", numberedPeriods)
+                putExtra("width", LocalSize.current.width.value)
+                data = Uri.parse("scholix://schedule-widget/$widgetId/$date/${prefs[scheduleUpdatedKey]}/${LocalSize.current.width.value}")
             }
-            if (rows.isEmpty() && days.has(date.toString())) {
-                item { Text("No lessons scheduled", GlanceModifier.padding(16.dp), style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant)) }
-            }
-            items(rows.size) { index ->
-                val item = rows[index]
-                val subject = item.optString("subject")
-                val free = item.optBoolean(WINDOW_FLAG)
-                val muted = free || item.optString("colorClass") == "cancel-cell"
-                val colors = scheduleColor(subject)
-                val foreground = if (muted) GlanceTheme.colors.onSurfaceVariant else ColorProvider(colors.onColor)
-                Row(GlanceModifier.fillMaxWidth().clickable(open).padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Row(
-                        GlanceModifier.defaultWeight().background(if (muted) GlanceTheme.colors.surfaceVariant else ColorProvider(colors.color))
-                            .cornerRadius(20.dp).padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(GlanceModifier.defaultWeight()) {
-                            Text(if (free) context.getString(R.string.free_period) else subject + item.optString("subjectLevel").takeIf { it.isNotBlank() && !subject.contains(it) }.let { it?.let { " · $it" }.orEmpty() },
-                                style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold, color = foreground), maxLines = 2)
-                            val details = listOf(item.optString("teacher"), item.optString("room").takeIf { it.isNotBlank() }?.let { context.getString(R.string.room) + ": " + it }.orEmpty()).filter { it.isNotBlank() }.joinToString(", ")
-                            if (!free && details.isNotBlank()) Text(details, style = TextStyle(fontSize = 14.sp, color = foreground), maxLines = 2)
-                            val changes = item.optString("changes").ifBlank { item.optString("exams") }
-                            if (changes.isNotBlank()) Text(changes, style = TextStyle(fontSize = 14.sp, color = foreground), maxLines = 3)
-                        }
-                        if (!muted) Image(
-                            provider = ImageProvider(scheduleSubjectIcon(context, subject, colors.onColor, index + firstVisible, item.optString("exams"))),
-                            contentDescription = null, modifier = GlanceModifier.padding(start = 8.dp).size(44.dp),
-                        )
-                    }
-                    val highlighted = index + firstVisible == activeIndex
-                    val hourColor = if (highlighted) GlanceTheme.colors.onPrimary else GlanceTheme.colors.onSurfaceVariant
-                    Box(GlanceModifier.width(60.dp).padding(start = 4.dp), contentAlignment = Alignment.Center) {
-                        val badge = if (highlighted) GlanceModifier.size(56.dp).background(GlanceTheme.colors.primary).cornerRadius(28.dp)
-                            else GlanceModifier.width(56.dp)
-                        Column(badge, horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Alignment.CenterVertically) {
-                            if (provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false && hourOf(item) >= 0) Text(hourOf(item).toString(), style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium, color = hourColor))
-                            item.optString("time").split(Regex("\\s*[-–]\\s*|\\n")).filter { it.isNotBlank() }.forEach {
-                                Text(it, style = TextStyle(fontSize = 10.sp, color = hourColor), maxLines = 1)
-                            }
-                        }
+            val size = LocalSize.current
+            val rendered = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) remember(rows.toString(), numberedPeriods, size) {
+                val renderer = GlanceRemoteViews()
+                runBlocking {
+                    rows.mapIndexed { index, item ->
+                        renderer.compose(context, DpSize(size.width, 100.dp)) {
+                            GlanceTheme { ScheduleWidgetLesson(context, item, index, numberedPeriods) }
+                        }.remoteViews.apply { setOnClickFillInIntent(android.R.id.background, Intent()) }
                     }
                 }
+            } else emptyList()
+            val list = RemoteViews(context.packageName, R.layout.schedule_widget_list).apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true)
+                        .setViewTypeCount(rendered.size.coerceAtLeast(1))
+                    rendered.forEachIndexed { index, row -> items.addItem(index.toLong(), row) }
+                    // The data change defers scrolling until ListView has laid out its first rows.
+                    setRemoteAdapter(R.id.schedule_widget_list, RemoteViews.RemoteCollectionItems.Builder()
+                        .setHasStableIds(true).setViewTypeCount(rendered.size.coerceAtLeast(1)).build())
+                    setRemoteAdapter(R.id.schedule_widget_list, items.build())
+                } else {
+                    setRemoteAdapter(R.id.schedule_widget_list, adapter)
+                }
+                setPendingIntentTemplate(R.id.schedule_widget_list, PendingIntent.getActivity(
+                    context, widgetId, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE))
+                setScrollPosition(R.id.schedule_widget_list, firstVisible)
             }
-            item { Spacer(GlanceModifier.height(32.dp)) }
+            AndroidRemoteViews(list, GlanceModifier.fillMaxSize())
         }
         Box(GlanceModifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
             Text("↻", GlanceModifier.background(GlanceTheme.colors.background).cornerRadius(20.dp)
                 .clickable(actionRunCallback<RefreshScheduleAction>()).padding(horizontal = 12.dp, vertical = 8.dp),
                 style = TextStyle(fontSize = 18.sp, color = GlanceTheme.colors.onSurfaceVariant))
+        }
+    }
+}
+
+@Composable
+internal fun ScheduleWidgetLesson(context: Context, item: JSONObject, index: Int, numberedPeriods: Boolean) {
+    val subject = item.optString("subject")
+    val free = item.optBoolean(WINDOW_FLAG)
+    val muted = free || item.optString("colorClass") == "cancel-cell"
+    val colors = scheduleColor(subject)
+    val foreground = if (muted) GlanceTheme.colors.onSurfaceVariant else ColorProvider(colors.onColor)
+    Row(GlanceModifier.fillMaxWidth().appWidgetBackground().padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            GlanceModifier.defaultWeight().background(if (muted) GlanceTheme.colors.surfaceVariant else ColorProvider(colors.color))
+                .cornerRadius(20.dp).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(GlanceModifier.defaultWeight()) {
+                Text(if (free) context.getString(R.string.free_period) else subject + item.optString("subjectLevel").takeIf { it.isNotBlank() && !subject.contains(it) }.let { it?.let { " · $it" }.orEmpty() },
+                    style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold, color = foreground), maxLines = 2)
+                val details = listOf(item.optString("teacher"), item.optString("room").takeIf { it.isNotBlank() }?.let { context.getString(R.string.room) + ": " + it }.orEmpty()).filter { it.isNotBlank() }.joinToString(", ")
+                if (!free && details.isNotBlank()) Text(details, style = TextStyle(fontSize = 14.sp, color = foreground), maxLines = 2)
+                val changes = item.optString("changes").ifBlank { item.optString("exams") }
+                if (changes.isNotBlank()) Text(changes, style = TextStyle(fontSize = 14.sp, color = foreground), maxLines = 3)
+            }
+            if (!muted) Image(
+                provider = ImageProvider(scheduleSubjectIcon(context, subject, colors.onColor, index, item.optString("exams"))),
+                contentDescription = null, modifier = GlanceModifier.padding(start = 8.dp).size(44.dp),
+            )
+        }
+        val hourColor = GlanceTheme.colors.onSurfaceVariant
+        Box(GlanceModifier.width(60.dp).padding(start = 4.dp), contentAlignment = Alignment.Center) {
+            Column(GlanceModifier.width(56.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalAlignment = Alignment.CenterVertically) {
+                if (numberedPeriods && hourOf(item) >= 0) Text(hourOf(item).toString(), style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium, color = hourColor))
+                item.optString("time").split(Regex("\\s*[-–]\\s*|\\n")).filter { it.isNotBlank() }.forEach {
+                    Text(it, style = TextStyle(fontSize = 10.sp, color = hourColor), maxLines = 1)
+                }
+            }
         }
     }
 }

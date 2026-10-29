@@ -11,6 +11,7 @@ import androidx.work.*
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.platforms.ShahafPlatform
+import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.pages.shahafWidgetLessons
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
@@ -65,7 +66,12 @@ class ScheduleWidgetWorker(context: Context, params: WorkerParameters) : Corouti
             val platform = platforms.firstOrNull { it.id == prefs[scheduleProviderKey] }
             try {
                 check(platform != null) { "Choose a schedule provider" }
-                val days = fetchScheduleWidgetDays(platform, today)
+                val previousCookies = (platform as? WebtopPlatform)?.cookies
+                val days = try {
+                    fetchScheduleWidgetDays(platform, today)
+                } finally {
+                    if (platform is WebtopPlatform) PlatformStorage.saveWebtopSession(applicationContext, platform, previousCookies)
+                }
                 val todayLessons = days.getJSONArray(today.toString()).let { array ->
                     (0 until array.length()).map { array.getJSONObject(it) }
                 }

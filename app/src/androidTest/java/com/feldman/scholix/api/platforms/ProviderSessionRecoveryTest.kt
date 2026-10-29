@@ -17,6 +17,33 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ProviderSessionRecoveryTest {
+    @Test fun webtopRenewalPersistsWithoutOverwritingAccountEditsOrNewerSignIns() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = context.getSharedPreferences("platform_prefs", Context.MODE_PRIVATE)
+        val original = prefs.getString(PlatformStorage.KEY_PLATFORMS, null)
+        fun account(cookie: String) = WebtopPlatform.fromJson(JSONObject()
+            .put("id", "webtop-renewal-fixture").put("cookies", cookie).put("loggedIn", true)
+            .put("username", "fixture").put("password", "fixture").put("loginMethod", "password"))
+        try {
+            val saved = account("old").apply { platformDisplayName = "Renamed account" }
+            PlatformStorage.savePlatforms(context, listOf(saved))
+            PlatformStorage.saveWebtopSession(context, account("renewed"), "old")
+            val renewed = PlatformStorage.loadPlatforms(context).single() as WebtopPlatform
+            assertEquals("renewed", renewed.cookies)
+            assertEquals("Renamed account", renewed.platformDisplayName)
+            PlatformStorage.savePlatforms(context, listOf(account("new-sign-in")))
+            PlatformStorage.saveWebtopSession(context, account("stale-renewal"), "renewed")
+            assertEquals("new-sign-in", (PlatformStorage.loadPlatforms(context).single() as WebtopPlatform).cookies)
+            PlatformStorage.savePlatforms(context, emptyList())
+            PlatformStorage.saveWebtopSession(context, account("renewed"), "old")
+            assertTrue(PlatformStorage.loadPlatforms(context).isEmpty())
+        } finally {
+            prefs.edit().apply {
+                if (original == null) remove(PlatformStorage.KEY_PLATFORMS) else putString(PlatformStorage.KEY_PLATFORMS, original)
+            }.commit()
+        }
+    }
+
     @Test fun mashovEditReadsFilledCredentialsByType() {
         val fields = MashovPlatform().getLoginFields().apply {
             setValue("School code", "123456")

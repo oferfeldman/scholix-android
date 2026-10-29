@@ -153,6 +153,18 @@ object PlatformStorage {
         }
     }
 
+    /** Persist renewed cookies without overwriting edits or a newer sign-in from another page. */
+    @Synchronized fun saveWebtopSession(context: Context, account: WebtopPlatform, previousCookies: String?) {
+        val platforms = loadPlatforms(context)
+        val index = platforms.indexOfFirst { it.id == account.id && it is WebtopPlatform }
+        val stored = platforms.getOrNull(index) as? WebtopPlatform ?: return
+        if (stored.cookies != previousCookies || stored.getUsername() != account.getUsername() ||
+            stored.getPassword() != account.getPassword()) return
+        platforms[index] = WebtopPlatform.fromJson(stored.toJson()
+            .put("cookies", account.cookies).put("loggedIn", account.loggedIn))
+        savePlatforms(context, platforms)
+    }
+
     /**
      * Loads and deserializes the full list of Platform objects using manual JSON parsing.
      */

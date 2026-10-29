@@ -62,6 +62,8 @@
                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
             </intent-filter>
         </activity>
+        <service android:name=".widgets.ScheduleWidgetListService"
+            android:permission="android.permission.BIND_REMOTEVIEWS" android:exported="false" />
         <receiver android:name=".widgets.ScheduleWidgetReceiver" android:exported="false" android:label="@string/schedule">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

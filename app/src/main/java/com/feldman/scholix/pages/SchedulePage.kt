@@ -316,7 +316,7 @@ fun SchedulePage(
             Log.d("SchedulePage", "Fetching schedule for $selectedValue and page $page")
 
             if (platform != null) {
-                val requestPlatform = if (platform is InbarPlatform) withContext(Dispatchers.IO) {
+                val requestPlatform = if (platform is InbarPlatform || platform is WebtopPlatform) withContext(Dispatchers.IO) {
                     PlatformStorage.loadPlatforms(context).firstOrNull { it.id == platform.id } ?: platform
                 } else platform
                 if (requestPlatform is InbarPlatform) recoveredProviders = recoveredProviders + (requestPlatform.id to requestPlatform)
@@ -333,7 +333,9 @@ fun SchedulePage(
                     // (e.g., using coroutineScope.ensureActive() inside the low-level logic,
                     // or using a cancellable HTTP client). Assuming the `platform.getSchedule` is blocking:
 
+                    val previousCookies = (requestPlatform as? WebtopPlatform)?.cookies
                     val schedule = requestPlatform.getSchedule(page, null, selectedValue)
+                    if (requestPlatform is WebtopPlatform) PlatformStorage.saveWebtopSession(context, requestPlatform, previousCookies)
 
                     // detect if an error object is returned
                     if (schedule.has("error")) {
@@ -345,7 +347,7 @@ fun SchedulePage(
                             inbarRelogin = inbar.forSmsLogin()
                             return@withContext emptyList()
                         }
-                        val webtop = platform as? WebtopPlatform
+                        val webtop = requestPlatform as? WebtopPlatform
                         if (errorCode == "login_failed" && webtop != null &&
                             webtop.needsInteractiveRelogin() && !reloginAttempted
                         ) {

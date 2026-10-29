@@ -59,7 +59,15 @@ class ScheduleWidgetConfigureActivity : ComponentActivity() {
                                         it.remove(scheduleErrorKey)
                                     }
                                     try {
-                                        val days = withContext(Dispatchers.IO) { fetchScheduleWidgetDays(provider, java.time.LocalDate.now()) }
+                                        val days = withContext(Dispatchers.IO) {
+                                            val previousCookies = (provider as? com.feldman.scholix.api.platforms.WebtopPlatform)?.cookies
+                                            try {
+                                                fetchScheduleWidgetDays(provider, java.time.LocalDate.now())
+                                            } finally {
+                                                if (provider is com.feldman.scholix.api.platforms.WebtopPlatform)
+                                                    PlatformStorage.saveWebtopSession(this@ScheduleWidgetConfigureActivity, provider, previousCookies)
+                                            }
+                                        }
                                         updateAppWidgetState(this@ScheduleWidgetConfigureActivity, id) {
                                             it[scheduleDaysKey] = days.toString()
                                             it[scheduleUpdatedKey] = System.currentTimeMillis().toString()
