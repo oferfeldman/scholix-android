@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
@@ -47,6 +48,7 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import com.feldman.scholix.ui.components.providerLabel
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platforms.DemoPlatform
 import com.feldman.scholix.services.GradeMonitorWorker
@@ -59,6 +61,7 @@ val Green = Color(0xFF4CAF50)
 val Red = Color(0xFFF44336)
 val Gray = Color(0xFF9E9E9E)
 
+internal val gradesProviderKey = stringPreferencesKey("grades_provider")
 internal val courseNameKey = stringPreferencesKey("course_name")
 
 fun gradeColorGlance(gradeStr: String): ColorProvider {
@@ -88,7 +91,7 @@ class GradesWidget : GlanceAppWidget() {
             GlanceTheme {
                 val prefs = currentState<Preferences>()
                 val courseName = prefs[courseNameKey] ?: "Choose a course"
-                GradesWidgetContent(context, id, courseName)
+                GradesWidgetContent(context, id, courseName, providerId = prefs[gradesProviderKey])
             }
         }
     }
@@ -125,8 +128,8 @@ class RefreshGradesAction : ActionCallback {
 }
 
 @Composable
-fun GradesWidgetContent(context: Context, glanceId: GlanceId?, courseName: String, previewGrades: JSONArray? = null) {
-    val state by produceState<Pair<String, JSONArray>?>(initialValue = null, courseName) {
+fun GradesWidgetContent(context: Context, glanceId: GlanceId?, courseName: String, previewGrades: JSONArray? = null, providerId: String? = null) {
+    val state by produceState<Pair<String, JSONArray>?>(initialValue = previewGrades?.let { Pair(courseName, it) }, courseName, providerId) {
         if (previewGrades != null) {
             value = Pair(courseName, previewGrades)
             return@produceState
@@ -138,6 +141,33 @@ fun GradesWidgetContent(context: Context, glanceId: GlanceId?, courseName: Strin
 
         withContext(Dispatchers.IO) {
             try {
+                if (providerId != null) {
+                    val platform = PlatformStorage.loadPlatforms(context).firstOrNull { it.id == providerId }
+                    check(platform != null) { "Choose a provider" }
+                    val cached = loadCachedGrades(context)
+                    val cachedKeys = cached?.keys()?.asSequence()?.filter { it.startsWith("$providerId|") }?.toList().orEmpty()
+                    val all = JSONArray()
+                    if (cachedKeys.isNotEmpty()) {
+                        cachedKeys.forEach { key ->
+                            val items = cached!!.getJSONArray(key)
+                            for (i in 0 until items.length()) all.put(items.getJSONObject(i))
+                        }
+                    } else {
+                        val previousCookies = (platform as? com.feldman.scholix.api.platforms.WebtopPlatform)?.cookies
+                        try {
+                            PlatformStorage.getProviderCourses(context, platform).forEach { course ->
+                                val items = course.optJSONArray("grades") ?: platform.getGrades(
+                                    course.optString("courseKey").ifBlank { course.optString("name") })
+                                for (i in 0 until items.length()) all.put(items.getJSONObject(i))
+                            }
+                        } finally {
+                            if (platform is com.feldman.scholix.api.platforms.WebtopPlatform)
+                                PlatformStorage.saveWebtopSession(context, platform, previousCookies)
+                        }
+                    }
+                    value = Pair(platform.providerLabel(), all)
+                    return@withContext
+                }
                 if (courseName == "Choose a course") {
                     value = Pair("Choose a course", JSONArray())
                     return@withContext
@@ -182,7 +212,8 @@ fun GradesWidgetContent(context: Context, glanceId: GlanceId?, courseName: Strin
     val baseModifier = GlanceModifier
         .fillMaxSize()
         .background(GlanceTheme.colors.background)
-        .padding(8.dp)
+        .cornerRadius(24.dp)
+        .padding(4.dp)
 
     val finalModifier = if (glanceId != null) {
         // 1. Get the integer ID for the intent
@@ -200,163 +231,56 @@ fun GradesWidgetContent(context: Context, glanceId: GlanceId?, courseName: Strin
         baseModifier
     }
 
-    Column(
-        modifier = finalModifier,
-        verticalAlignment = Alignment.Top,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-
+    androidx.glance.layout.Box(modifier = finalModifier) {
         when {
-            state == null -> {
-                Text(
-                    text = "Loading grades…",
-                    style = TextStyle(color = GlanceTheme.colors.onBackground)
-                )
-            }
-
-            state!!.first == "Choose a course" -> {
-                Text(
-                    text = "Tap to configure",
-                    style = TextStyle(color = GlanceTheme.colors.onBackground)
-                )
-            }
-
-            state!!.second.length() == 0 -> {
-                Text(
-                    text = "No grades available for ${state!!.first}",
-                    style = TextStyle(color = GlanceTheme.colors.onBackground)
-                )
-            }
-
+            state == null -> Text("Loading grades\u2026", GlanceModifier.padding(16.dp),
+                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant))
+            state!!.first == "Choose a course" -> Text("Tap to configure", GlanceModifier.padding(16.dp),
+                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant))
+            state!!.second.length() == 0 -> Text("No grades available", GlanceModifier.padding(16.dp),
+                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant))
             else -> {
-                val (courseName, gradesArray) = state!!
-                val (grades, average, finalGrade) = processGrades(gradesArray)
-
-                Row(
-                    modifier = GlanceModifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-
-                    Text(
-                        text = courseName,
-                        modifier = GlanceModifier.defaultWeight(),
-                        style = TextStyle(
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = GlanceTheme.colors.onBackground
-                        )
-                    )
-
-                    Button(
-                        text = "Refresh",
-                        onClick = actionRunCallback<RefreshGradesAction>()
-                    )
-                }
-
-
-                Spacer(GlanceModifier.height(8.dp))
-
-                Row(
-                    modifier = GlanceModifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Average: ", style = TextStyle(fontWeight = FontWeight.Bold, color = GlanceTheme.colors.onBackground))
-                    Text(
-                        String.format("%.1f", average),
-                        style = TextStyle(color = gradeColorGlance(average.toString()))
-                    )
-                }
-
-                finalGrade?.let {
-                    Row(
-                        modifier = GlanceModifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Final Grade: ", style = TextStyle(fontWeight = FontWeight.Bold, color = GlanceTheme.colors.onBackground))
-                        Text(
-                            it.optString("grade"),
-                            style = TextStyle(color = gradeColorGlance(it.optString("grade")))
-                        )
+                val (grades, average, finalGrade) = com.feldman.scholix.pages.processGrades(state!!.second)
+                val width = (androidx.glance.LocalSize.current.width.value - 8f).coerceAtLeast(1f)
+                val primary = GlanceTheme.colors.primary.getColor(context)
+                val secondary = GlanceTheme.colors.secondary.getColor(context)
+                val foreground = GlanceTheme.colors.onSurface.getColor(context).toArgb()
+                val supporting = GlanceTheme.colors.onSurfaceVariant.getColor(context).toArgb()
+                val surface = GlanceTheme.colors.surfaceVariant.getColor(context).toArgb()
+                val onPrimary = GlanceTheme.colors.onPrimary.getColor(context).toArgb()
+                val iconBackground = GlanceTheme.colors.tertiaryContainer.getColor(context).toArgb()
+                val iconForeground = GlanceTheme.colors.onTertiaryContainer.getColor(context).toArgb()
+                LazyColumn(GlanceModifier.fillMaxSize()) {
+                    if (grades.isNotEmpty()) item {
+                        val label = context.getString(com.feldman.scholix.R.string.average)
+                        val value = String.format("%.1f", average)
+                        val bitmap = gradeWidgetSummary(context, label, value, width, primary.toArgb(), onPrimary)
+                        androidx.glance.Image(androidx.glance.ImageProvider(bitmap), "$label $value",
+                            GlanceModifier.fillMaxWidth().height((bitmap.height * width / bitmap.width + 4f).dp).padding(bottom = 4.dp))
+                    }
+                    finalGrade?.let { grade -> item {
+                        val label = context.getString(com.feldman.scholix.R.string.final_grade)
+                        val value = grade.optString("grade")
+                        val bitmap = gradeWidgetSummary(context, label, value, width, primary.toArgb(), onPrimary)
+                        androidx.glance.Image(androidx.glance.ImageProvider(bitmap), "$label $value",
+                            GlanceModifier.fillMaxWidth().height((bitmap.height * width / bitmap.width + 4f).dp).padding(bottom = 4.dp))
+                    } }
+                    items(grades.size) { index ->
+                        val grade = grades[index]
+                        val fraction = ((grade.optString("grade").toFloatOrNull() ?: 100f) / 100f).coerceIn(0f, 1f)
+                        val bitmap = gradeWidgetRow(context, grade, width, index, grades.size, surface, foreground,
+                            supporting, iconBackground, iconForeground, androidx.compose.ui.graphics.lerp(secondary, primary, fraction).toArgb())
+                        androidx.glance.Image(androidx.glance.ImageProvider(bitmap),
+                            "${grade.optString("name")} ${grade.optString("subject")} ${grade.optString("grade")}",
+                            GlanceModifier.fillMaxWidth().height((bitmap.height * width / bitmap.width + 2f).dp).padding(bottom = 2.dp))
                     }
                 }
-
-                Spacer(GlanceModifier.height(8.dp))
-                LazyColumn(
-                    modifier = GlanceModifier
-                        .fillMaxWidth()
-                        .cornerRadius(12.dp)
-                ) {
-                    items(grades.size) { it ->
-                        val grade = grades[it]
-
-                        Column(
-                            modifier = GlanceModifier
-                                .fillMaxWidth()
-//                                .padding(horizontal = 6.dp)
-                                .padding(
-                                    top = if (it == 0) 0.dp else 1.dp,
-                                    bottom = if (it == grades.lastIndex) 0.dp else 1.dp
-                                )
-                        ) {
-                            Column(
-                                modifier = GlanceModifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                                    .background(
-                                        GlanceTheme.colors.surfaceVariant
-                                    )
-                                    .cornerRadius(2.dp)
-                                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                            ) {
-                                Row(
-                                    modifier = GlanceModifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(
-                                        modifier = GlanceModifier.defaultWeight()
-                                    ) {
-                                        // Subject
-                                        Text(
-                                            text = grade.optString("subject", "Unknown"),
-                                            style = TextStyle(
-                                                fontWeight = FontWeight.Medium,
-                                                fontSize = 14.sp,
-                                                color = GlanceTheme.colors.onBackground
-                                            )
-                                        )
-
-                                        // Assignment name
-                                        val assignmentName = grade.optString("name")
-                                        if (assignmentName.isNotBlank()) {
-                                            Text(
-                                                text = assignmentName,
-                                                style = TextStyle(
-                                                    fontSize = 12.sp,
-                                                    color = GlanceTheme.colors.onSurfaceVariant
-                                                )
-                                            )
-                                        }
-                                    }
-
-                                    Text(
-                                        text = grade.optString("grade", "-"),
-                                        style = TextStyle(
-                                            fontSize = 28.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = GlanceTheme.colors.primary
-                                        )
-                                    )
-                                }
-
-                            }
-                        }
-
-                    }
-                }
-
             }
+        }
+        androidx.glance.layout.Box(GlanceModifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+            Text("\u21bb", GlanceModifier.background(GlanceTheme.colors.background).cornerRadius(20.dp)
+                .clickable(actionRunCallback<RefreshGradesAction>()).padding(horizontal = 12.dp, vertical = 8.dp),
+                style = TextStyle(fontSize = 18.sp, color = GlanceTheme.colors.onSurfaceVariant))
         }
     }
 }

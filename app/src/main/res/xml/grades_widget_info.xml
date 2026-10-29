@@ -6,5 +6,6 @@
     android:initialLayout="@layout/grades_widget_initial_layout"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
+    android:widgetFeatures="reconfigurable"
     android:configure="com.feldman.scholix.widgets.GradesWidgetConfigureActivity">
 </appwidget-provider>
