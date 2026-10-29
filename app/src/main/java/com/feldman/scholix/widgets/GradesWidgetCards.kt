@@ -26,16 +26,17 @@ internal fun gradeWidgetSummary(context: Context, label: String, value: String, 
     val density = context.resources.displayMetrics.density
     val scale = (widthDp / 300f).coerceIn(0.65f, 1f)
     val width = (widthDp * density).toInt().coerceAtLeast(1)
-    val height = (96f * scale * density).toInt()
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), 28f * density, 28f * density, Paint().apply { color = background; isAntiAlias = true })
     val labelPaint = gradeWidgetPaint(context, foreground, 32f * scale, 500)
     val valuePaint = gradeWidgetPaint(context, foreground, 48f * scale, 900)
-    val padding = 16f * scale * density
+    val padding = 12f * density
+    val height = (valuePaint.descent() - valuePaint.ascent() + padding * 2).toInt()
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), 16f * density, 16f * density, Paint().apply { color = background; isAntiAlias = true })
     val rtl = isRtlText(label)
     val valueWidth = valuePaint.measureText(value)
     val labelWidth = (width - padding * 3 - valueWidth).toInt().coerceAtLeast(1)
+    while (labelPaint.measureText(label) > labelWidth && labelPaint.textSize > 12f * density) labelPaint.textSize -= density
     val title = StaticLayout.Builder.obtain(label, 0, label.length, labelPaint, labelWidth)
         .setIncludePad(false).setMaxLines(1).setEllipsize(TextUtils.TruncateAt.END)
         .setAlignment(Layout.Alignment.ALIGN_NORMAL).build()
@@ -48,12 +49,12 @@ internal fun gradeWidgetSummary(context: Context, label: String, value: String, 
     return bitmap
 }
 
-internal fun gradeWidgetRow(context: Context, grade: JSONObject, widthDp: Float, index: Int, count: Int,
+internal fun gradeWidgetRow(context: Context, grade: JSONObject, widthDp: Float, count: Int,
     background: Int, foreground: Int, secondary: Int, iconBackground: Int, iconForeground: Int, gradeColor: Int): Bitmap {
     val density = context.resources.displayMetrics.density
     val scale = (widthDp / 300f).coerceIn(0.65f, 1f)
     val width = (widthDp * density).toInt().coerceAtLeast(1)
-    val padding = 16f * scale * density
+    val padding = 12f * density
     val iconSize = 56f * scale * density
     val gap = 12f * scale * density
     val gradeWidth = 64f * scale * density
@@ -70,17 +71,14 @@ internal fun gradeWidgetRow(context: Context, grade: JSONObject, widthDp: Float,
     val title = layout(titleText, 22f, foreground, 2)
     val subtitle = subtitleText.takeIf { it.isNotBlank() }?.let { layout(it, 16f, secondary, 1) }
     val textHeight = title.height + (subtitle?.height ?: 0)
-    val height = (maxOf(iconSize, textHeight.toFloat()) + 24f * scale * density).toInt()
+    val height = (maxOf(iconSize, textHeight.toFloat()) + padding * 2).toInt()
     // Keep the collection below Android's widget bitmap limit, including large grade histories.
     val renderScale = kotlin.math.sqrt((4_000_000f / count.coerceAtLeast(1) / (width.toFloat() * height * 4f)).coerceAtMost(1f))
     val bitmap = Bitmap.createBitmap((width * renderScale).toInt().coerceAtLeast(1),
         (height * renderScale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap).apply { scale(renderScale, renderScale) }
-    val top = (if (index == 0) 28f else 4f) * density
-    val bottom = (if (index == count - 1) 28f else 4f) * density
-    val card = Path().apply { addRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()),
-        floatArrayOf(top, top, top, top, bottom, bottom, bottom, bottom), Path.Direction.CW) }
-    canvas.drawPath(card, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = background })
+    canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), 16f * density, 16f * density,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = background })
     val iconX = if (rtl) width - padding - iconSize else padding
     val iconY = (height - iconSize) / 2f
     val shape = subjectShape(subject).toPath()

@@ -213,7 +213,7 @@ fun GradesWidgetContent(context: Context, glanceId: GlanceId?, courseName: Strin
         .fillMaxSize()
         .background(GlanceTheme.colors.background)
         .cornerRadius(24.dp)
-        .padding(4.dp)
+        .padding(8.dp)
 
     val finalModifier = if (glanceId != null) {
         // 1. Get the integer ID for the intent
@@ -241,7 +241,7 @@ fun GradesWidgetContent(context: Context, glanceId: GlanceId?, courseName: Strin
                 style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant))
             else -> {
                 val (grades, average, finalGrade) = com.feldman.scholix.pages.processGrades(state!!.second)
-                val width = (androidx.glance.LocalSize.current.width.value - 8f).coerceAtLeast(1f)
+                val width = (androidx.glance.LocalSize.current.width.value - 16f).coerceAtLeast(1f)
                 val primary = GlanceTheme.colors.primary.getColor(context)
                 val secondary = GlanceTheme.colors.secondary.getColor(context)
                 val foreground = GlanceTheme.colors.onSurface.getColor(context).toArgb()
@@ -255,24 +255,30 @@ fun GradesWidgetContent(context: Context, glanceId: GlanceId?, courseName: Strin
                         val label = context.getString(com.feldman.scholix.R.string.average)
                         val value = String.format("%.1f", average)
                         val bitmap = gradeWidgetSummary(context, label, value, width, primary.toArgb(), onPrimary)
-                        androidx.glance.Image(androidx.glance.ImageProvider(bitmap), "$label $value",
-                            GlanceModifier.fillMaxWidth().height((bitmap.height * width / bitmap.width + 4f).dp).padding(bottom = 4.dp))
+                        Column(GlanceModifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                            androidx.glance.Image(androidx.glance.ImageProvider(bitmap), "$label $value",
+                                GlanceModifier.fillMaxWidth().height((bitmap.height * width / bitmap.width).dp))
+                        }
                     }
                     finalGrade?.let { grade -> item {
                         val label = context.getString(com.feldman.scholix.R.string.final_grade)
                         val value = grade.optString("grade")
                         val bitmap = gradeWidgetSummary(context, label, value, width, primary.toArgb(), onPrimary)
-                        androidx.glance.Image(androidx.glance.ImageProvider(bitmap), "$label $value",
-                            GlanceModifier.fillMaxWidth().height((bitmap.height * width / bitmap.width + 4f).dp).padding(bottom = 4.dp))
+                        Column(GlanceModifier.fillMaxWidth().padding(bottom = if (grades.isEmpty()) 0.dp else 8.dp)) {
+                            androidx.glance.Image(androidx.glance.ImageProvider(bitmap), "$label $value",
+                                GlanceModifier.fillMaxWidth().height((bitmap.height * width / bitmap.width).dp))
+                        }
                     } }
                     items(grades.size) { index ->
                         val grade = grades[index]
                         val fraction = ((grade.optString("grade").toFloatOrNull() ?: 100f) / 100f).coerceIn(0f, 1f)
-                        val bitmap = gradeWidgetRow(context, grade, width, index, grades.size, surface, foreground,
+                        val bitmap = gradeWidgetRow(context, grade, width, grades.size, surface, foreground,
                             supporting, iconBackground, iconForeground, androidx.compose.ui.graphics.lerp(secondary, primary, fraction).toArgb())
-                        androidx.glance.Image(androidx.glance.ImageProvider(bitmap),
-                            "${grade.optString("name")} ${grade.optString("subject")} ${grade.optString("grade")}",
-                            GlanceModifier.fillMaxWidth().height((bitmap.height * width / bitmap.width + 2f).dp).padding(bottom = 2.dp))
+                        Column(GlanceModifier.fillMaxWidth().padding(bottom = if (index == grades.lastIndex) 0.dp else 8.dp)) {
+                            androidx.glance.Image(androidx.glance.ImageProvider(bitmap),
+                                "${grade.optString("name")} ${grade.optString("subject")} ${grade.optString("grade")}",
+                                GlanceModifier.fillMaxWidth().height((bitmap.height * width / bitmap.width).dp))
+                        }
                     }
                 }
             }
