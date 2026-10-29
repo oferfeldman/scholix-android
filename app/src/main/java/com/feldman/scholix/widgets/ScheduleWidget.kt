@@ -16,7 +16,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
@@ -27,8 +26,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.glance.*
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.*
-import androidx.glance.appwidget.action.ActionCallback
-import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.layout.*
 import androidx.glance.text.*
@@ -46,120 +43,150 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalTime
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 
-class ScheduleWidgetReceiver : GlanceAppWidgetReceiver() {
-    override val glanceAppWidget = ScheduleWidget()
-
+class ScheduleWidgetReceiver : android.appwidget.AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action in listOf(Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED)) {
+        if (intent.action in listOf(ACTION_REFRESH, Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED)) {
             ScheduleWidgetWorker.refresh(context)
         }
     }
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
-        super.onUpdate(context, manager, ids)
+        render(context, ids)
         ScheduleWidgetWorker.schedule(context)
         ScheduleWidgetWorker.refresh(context)
     }
 
-    override fun onDisabled(context: Context) {
-        super.onDisabled(context)
-        ScheduleWidgetWorker.refresh(context)
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: android.os.Bundle) {
+        render(context, intArrayOf(id))
     }
-}
 
-class ScheduleWidget : GlanceAppWidget() {
-    override val sizeMode = SizeMode.Exact
-
-    override suspend fun provideGlance(context: Context, id: GlanceId) {
-        provideContent {
-            GlanceTheme {
-                ScheduleWidgetContent(context, currentState())
-            }
+    private fun render(context: Context, ids: IntArray) {
+        val pending = goAsync()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            try {
+                ids.forEach { ScheduleWidget().update(context, AppWidgetId(it)) }
+            } finally { pending.finish() }
         }
     }
-}
 
-class RefreshScheduleAction : ActionCallback {
-    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: androidx.glance.action.ActionParameters) {
+    override fun onDeleted(context: Context, ids: IntArray) {
+        val pending = goAsync()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            try {
+                ids.forEach { id ->
+                    androidx.glance.appwidget.state.updateAppWidgetState(context, AppWidgetId(id)) { it.clear() }
+                }
+            } finally { pending.finish() }
+        }
+    }
+
+    override fun onDisabled(context: Context) {
         ScheduleWidgetWorker.refresh(context)
     }
+
+    companion object {
+        internal const val ACTION_REFRESH = "com.feldman.scholix.REFRESH_SCHEDULE_WIDGET"
+    }
 }
 
-@Composable
-@OptIn(ExperimentalGlanceRemoteViewsApi::class)
-private fun ScheduleWidgetContent(context: Context, prefs: Preferences) {
-    val provider = PlatformStorage.loadPlatforms(context).firstOrNull { it.id == prefs[scheduleProviderKey] }
-    val windows = provider?.let { PlatformStorage.loadWindowSubjects(context, it.id) }.orEmpty()
-    val days = JSONObject(prefs[scheduleDaysKey] ?: "{}")
-    val today = LocalDate.now()
-    fun lessons(date: LocalDate): List<JSONObject> {
-        val array = days.optJSONArray(date.toString()) ?: return emptyList()
-        return (0 until array.length()).map { array.getJSONObject(it) }
+internal fun scheduleWidgetIds(context: Context): List<AppWidgetId> =
+    AppWidgetManager.getInstance(context).getAppWidgetIds(
+        android.content.ComponentName(context, ScheduleWidgetReceiver::class.java)
+    ).map { AppWidgetId(it) }
+
+class ScheduleWidget {
+    suspend fun update(context: Context, id: AppWidgetId) {
+        val manager = AppWidgetManager.getInstance(context)
+        val prefs = androidx.glance.appwidget.state.getAppWidgetState(context, androidx.glance.state.PreferencesGlanceStateDefinition, id)
+        val options = manager.getAppWidgetOptions(id.appWidgetId)
+        val sizes = if (Build.VERSION.SDK_INT >= 31) options.getParcelableArrayList<android.util.SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES) else null
+        val views = if (Build.VERSION.SDK_INT >= 31 && !sizes.isNullOrEmpty()) {
+            RemoteViews(sizes.associateWith { compose(context, DpSize(it.width.dp, it.height.dp), prefs, id.appWidgetId) })
+        } else compose(context, DpSize(
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 300).dp,
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 220).dp,
+        ), prefs, id.appWidgetId)
+        manager.updateAppWidget(id.appWidgetId, views)
     }
-    val date = if (days.has(today.toString())) scheduleWidgetDate(today, LocalTime.now(), lessons(today), windows) else today
-    val allRows = withFreePeriods(
-        lessons(date), windows,
-        synthesizeGaps = provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false &&
-            provider !is com.feldman.scholix.api.platforms.ShahafPlatform,
-    ).flatten()
-    val activeIndex = scheduleWidgetActiveIndex(allRows, LocalTime.now(), date == today)
-    val firstVisible = (activeIndex - 1).coerceAtLeast(0)
-    val rows = allRows
-    val numberedPeriods = provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false
-    val openIntent = Intent(context, MainActivity::class.java).apply {
-        putExtra("open_schedule", true)
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-    }
-    val open = actionStartActivity(openIntent)
-    val widgetId = (LocalGlanceId.current as AppWidgetId).appWidgetId
-    Box(GlanceModifier.fillMaxSize().background(GlanceTheme.colors.background).cornerRadius(24.dp).clickable(open).padding(4.dp)) {
-        if (rows.isEmpty()) {
-            Text(if (days.has(date.toString())) "No lessons scheduled" else prefs[scheduleErrorKey] ?: "Loading schedule…",
-                GlanceModifier.padding(16.dp), style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant))
-        } else {
-            val adapter = Intent(context, ScheduleWidgetListService::class.java).apply {
-                putExtra("lessons", JSONArray(rows).toString())
-                putExtra("numberedPeriods", numberedPeriods)
-                putExtra("width", LocalSize.current.width.value)
-                data = Uri.parse("scholix://schedule-widget/$widgetId/$date/${prefs[scheduleUpdatedKey]}/${LocalSize.current.width.value}")
-            }
-            val size = LocalSize.current
-            val rendered = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) remember(rows.toString(), numberedPeriods, size) {
-                val renderer = GlanceRemoteViews()
-                runBlocking {
-                    rows.mapIndexed { index, item ->
-                        renderer.compose(context, DpSize(size.width, 100.dp)) {
-                            GlanceTheme { ScheduleWidgetLesson(context, item, index, numberedPeriods) }
-                        }.remoteViews.apply { setOnClickFillInIntent(android.R.id.background, Intent()) }
+
+    @OptIn(ExperimentalGlanceRemoteViewsApi::class)
+    internal suspend fun compose(context: Context, size: DpSize, state: Preferences, widgetId: Int = 0): RemoteViews {
+        val prefs = state
+        val provider = PlatformStorage.loadPlatforms(context).firstOrNull { it.id == prefs[scheduleProviderKey] }
+        val windows = provider?.let { PlatformStorage.loadWindowSubjects(context, it.id) }.orEmpty()
+        val days = JSONObject(prefs[scheduleDaysKey] ?: "{}")
+        val today = LocalDate.now()
+        fun lessons(date: LocalDate): List<JSONObject> {
+            val array = days.optJSONArray(date.toString()) ?: return emptyList()
+            return (0 until array.length()).map { array.getJSONObject(it) }
+        }
+        val date = if (days.has(today.toString())) scheduleWidgetDate(today, LocalTime.now(), lessons(today), windows) else today
+        val allRows = withFreePeriods(
+            lessons(date), windows,
+            synthesizeGaps = provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false &&
+                provider !is com.feldman.scholix.api.platforms.ShahafPlatform,
+        ).flatten()
+        val activeIndex = scheduleWidgetActiveIndex(allRows, LocalTime.now(), date == today)
+        val firstVisible = (activeIndex - 1).coerceAtLeast(0)
+        val rows = allRows
+        val numberedPeriods = provider?.getInfo()?.optBoolean("numberedLessonPeriods", true) != false
+        val openIntent = Intent(context, MainActivity::class.java).apply {
+            putExtra("open_schedule", true)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val open = actionStartActivity(openIntent)
+        val renderer = GlanceRemoteViews()
+        val rendered = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) rows.mapIndexed { index, item ->
+            renderer.compose(context, DpSize(size.width, 100.dp)) {
+                GlanceTheme { ScheduleWidgetLesson(context, item, index, numberedPeriods) }
+            }.remoteViews.apply { setOnClickFillInIntent(android.R.id.background, Intent()) }
+        } else emptyList()
+        val views = renderer.compose(context, size) {
+            GlanceTheme {
+                Box(GlanceModifier.fillMaxSize().background(GlanceTheme.colors.background).cornerRadius(24.dp).clickable(open).padding(4.dp)) {
+                    if (rows.isEmpty()) {
+                        Text(if (days.has(date.toString())) "No lessons scheduled" else prefs[scheduleErrorKey] ?: "Loading schedule\u2026",
+                            GlanceModifier.padding(16.dp), style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant))
+                    } else {
+                        AndroidRemoteViews(RemoteViews(context.packageName, R.layout.schedule_widget_list), GlanceModifier.fillMaxSize())
+                    }
+                    Box(GlanceModifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
+                        Text("\u21bb", GlanceModifier.background(GlanceTheme.colors.background).cornerRadius(20.dp)
+                            .clickable(androidx.glance.appwidget.action.actionSendBroadcast(
+                                Intent(context, ScheduleWidgetReceiver::class.java).setAction(ScheduleWidgetReceiver.ACTION_REFRESH)))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = TextStyle(fontSize = 18.sp, color = GlanceTheme.colors.onSurfaceVariant))
                     }
                 }
-            } else emptyList()
-            val list = RemoteViews(context.packageName, R.layout.schedule_widget_list).apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true)
-                        .setViewTypeCount(rendered.size.coerceAtLeast(1))
-                    rendered.forEachIndexed { index, row -> items.addItem(index.toLong(), row) }
-                    // The data change defers scrolling until ListView has laid out its first rows.
-                    setRemoteAdapter(R.id.schedule_widget_list, RemoteViews.RemoteCollectionItems.Builder()
-                        .setHasStableIds(true).setViewTypeCount(rendered.size.coerceAtLeast(1)).build())
-                    setRemoteAdapter(R.id.schedule_widget_list, items.build())
-                } else {
-                    setRemoteAdapter(R.id.schedule_widget_list, adapter)
-                }
-                setPendingIntentTemplate(R.id.schedule_widget_list, PendingIntent.getActivity(
-                    context, widgetId, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE))
-                setScrollPosition(R.id.schedule_widget_list, firstVisible)
             }
-            AndroidRemoteViews(list, GlanceModifier.fillMaxSize())
+        }.remoteViews
+        if (rows.isNotEmpty()) {
+            // Adapter actions must belong to the root RemoteViews. Async launcher inflation
+            // passes a nested view's container as rootParent, which Android rejects as a widget host.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true)
+                    .setViewTypeCount(rendered.size.coerceAtLeast(1))
+                rendered.forEachIndexed { index, row -> items.addItem(index.toLong(), row) }
+                views.setRemoteAdapter(R.id.schedule_widget_list, RemoteViews.RemoteCollectionItems.Builder()
+                    .setHasStableIds(true).setViewTypeCount(rendered.size.coerceAtLeast(1)).build())
+                views.setRemoteAdapter(R.id.schedule_widget_list, items.build())
+            } else {
+                val adapter = Intent(context, ScheduleWidgetListService::class.java).apply {
+                    putExtra("lessons", JSONArray(rows).toString())
+                    putExtra("numberedPeriods", numberedPeriods)
+                    putExtra("width", size.width.value)
+                    data = Uri.parse("scholix://schedule-widget/$widgetId/$date/${prefs[scheduleUpdatedKey]}/${size.width.value}")
+                }
+                views.setRemoteAdapter(R.id.schedule_widget_list, adapter)
+            }
+            views.setPendingIntentTemplate(R.id.schedule_widget_list, PendingIntent.getActivity(
+                context, widgetId, openIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE))
+            views.setScrollPosition(R.id.schedule_widget_list, firstVisible)
         }
-        Box(GlanceModifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
-            Text("↻", GlanceModifier.background(GlanceTheme.colors.background).cornerRadius(20.dp)
-                .clickable(actionRunCallback<RefreshScheduleAction>()).padding(horizontal = 12.dp, vertical = 8.dp),
-                style = TextStyle(fontSize = 18.sp, color = GlanceTheme.colors.onSurfaceVariant))
-        }
+        return views
     }
 }
 

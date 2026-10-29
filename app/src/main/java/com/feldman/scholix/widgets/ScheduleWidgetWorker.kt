@@ -2,10 +2,8 @@ package com.feldman.scholix.widgets
 
 import android.content.Context
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.appwidget.state.updateAppWidgetState
-import androidx.glance.appwidget.updateAll
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.work.*
 import com.feldman.scholix.api.PlatformStorage
@@ -50,7 +48,7 @@ internal fun fetchScheduleWidgetDays(platform: Platform, today: LocalDate): JSON
 
 class ScheduleWidgetWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val ids = GlanceAppWidgetManager(applicationContext).getGlanceIds(ScheduleWidget::class.java)
+        val ids = scheduleWidgetIds(applicationContext)
         if (ids.isEmpty()) {
             WorkManager.getInstance(applicationContext).cancelUniqueWork(PERIODIC)
             WorkManager.getInstance(applicationContext).cancelUniqueWork("schedule-widget-boundary")
@@ -134,7 +132,7 @@ class ScheduleWidgetWorker(context: Context, params: WorkerParameters) : Corouti
 
 class ScheduleWidgetBoundaryWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        ScheduleWidget().updateAll(applicationContext)
+        scheduleWidgetIds(applicationContext).forEach { ScheduleWidget().update(applicationContext, it) }
         ScheduleWidgetWorker.refresh(applicationContext)
         return Result.success()
     }

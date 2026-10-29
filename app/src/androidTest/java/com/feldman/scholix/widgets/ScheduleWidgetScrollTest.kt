@@ -11,7 +11,6 @@ import android.view.ViewGroup
 import androidx.core.view.descendants
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.glance.appwidget.compose
 import androidx.glance.GlanceTheme
 import androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
 import androidx.glance.appwidget.GlanceRemoteViews
@@ -80,14 +79,24 @@ class ScheduleWidgetScrollTest {
                 val info = AppWidgetManager.getInstance(context).installedProviders.first {
                     it.provider.className == ScheduleWidgetReceiver::class.java.name
                 }
-                val view = AppWidgetHostView(activity).apply { setAppWidget(0, info) }
+                val view = AppWidgetHostView(activity).apply {
+                    setExecutor(java.util.concurrent.Executors.newSingleThreadExecutor())
+                    setAppWidget(0, info)
+                }
                 widget = view
                 val container = FrameLayout(activity)
                 container.addView(view, FrameLayout.LayoutParams(-1, (220 * context.resources.displayMetrics.density).toInt()))
                 activity.setContentView(container)
             }
             val views = ScheduleWidget().compose(context, size = DpSize(300.dp, 220.dp), state = state)
-            scenario.onActivity { widget.updateAppWidget(views) }
+            // A launcher receives a parcelled copy in a different process.
+            val parcel = android.os.Parcel.obtain()
+            val delivered = try {
+                views.writeToParcel(parcel, 0)
+                parcel.setDataPosition(0)
+                android.widget.RemoteViews.CREATOR.createFromParcel(parcel)
+            } finally { parcel.recycle() }
+            scenario.onActivity { widget.updateAppWidget(delivered) }
             fun waitFor(condition: () -> Boolean) {
                 val end = SystemClock.uptimeMillis() + 20_000
                 var ready = false
@@ -112,6 +121,11 @@ class ScheduleWidgetScrollTest {
             scenario.onActivity { list!!.setSelection(0) }
             waitFor { list?.firstVisiblePosition == 0 }
             assertEquals(8, list!!.adapter.count)
+            // Launchers reuse the host for refreshes and resize updates too.
+            scenario.onActivity { widget.updateAppWidget(delivered) }
+            waitFor { list?.adapter?.count == 8 }
+            scenario.onActivity { list!!.setSelection(0) }
+            waitFor { list?.firstVisiblePosition == 0 }
         }
     }
     private fun clock(minute: Int) = "%02d:%02d".format(minute / 60, minute % 60)

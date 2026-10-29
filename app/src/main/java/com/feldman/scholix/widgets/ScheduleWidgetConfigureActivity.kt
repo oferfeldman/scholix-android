@@ -12,7 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.AppWidgetId
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.lifecycle.lifecycleScope
 import com.feldman.motion.MotionButton
@@ -51,7 +51,7 @@ class ScheduleWidgetConfigureActivity : ComponentActivity() {
                             MotionButton(onClick = {
                                 saving = true
                                 lifecycleScope.launch {
-                                    val id = GlanceAppWidgetManager(this@ScheduleWidgetConfigureActivity).getGlanceIdBy(widgetId)
+                                    val id = AppWidgetId(widgetId)
                                     updateAppWidgetState(this@ScheduleWidgetConfigureActivity, id) {
                                         it[scheduleProviderKey] = provider.id
                                         it.remove(scheduleDaysKey)

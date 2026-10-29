@@ -32,6 +32,7 @@ import com.feldman.motion.MotionButton
 import com.feldman.motion.MotionButtonDefaults
 import com.feldman.motion.MotionButtonState
 import com.feldman.motion.MotionDropdown
+import com.feldman.motion.MotionDropdownAnimation
 import com.feldman.motion.MotionDropdownDefaults
 import com.feldman.motion.MotionDropdownDirection
 import com.feldman.motion.MotionDropdownMenuAlignment
@@ -181,7 +182,7 @@ fun <T> PickerBar(
             shapes = MotionDropdownDefaults.shapes(anchor = RoundedCornerShape(28.dp), menu = RoundedCornerShape(28.dp), menuItem = RoundedCornerShape(24.dp)),
             sizes = MotionDropdownDefaults.sizes(borderWidth = 0.dp, minHeight = 64.dp, menuMaxHeight = 420.dp, menuMinWidth = 112.dp.coerceAtMost(menuWidth), menuMaxWidth = menuWidth),
             text = MotionDropdownDefaults.text(value = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
-            menu = MotionDropdownDefaults.menu(matchAnchorWidth = false, alignment = MotionDropdownMenuAlignment.Center)
+            menu = MotionDropdownDefaults.menu(animation = MotionDropdownAnimation.Standard, matchAnchorWidth = false, alignment = MotionDropdownMenuAlignment.Center)
         )
 
         MotionButton(
