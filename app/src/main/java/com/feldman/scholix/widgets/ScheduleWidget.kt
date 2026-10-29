@@ -148,7 +148,7 @@ class ScheduleWidget {
             GlanceTheme {
                 Box(GlanceModifier.fillMaxSize().background(GlanceTheme.colors.background).cornerRadius(24.dp).clickable(open).padding(4.dp)) {
                     if (rows.isEmpty() && days.has(date.toString())) {
-                        ScheduleWidgetEmptyState(context, size, if (date == today) context.getString(R.string.noSchedule)
+                        WidgetEmptyState(context, size, if (date == today) context.getString(R.string.noSchedule)
                             else context.getString(R.string.noScheduleForDay,
                                 date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE", context.resources.configuration.locales[0]))))
                     } else if (rows.isEmpty()) {
@@ -196,7 +196,7 @@ class ScheduleWidget {
 
 @Composable
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
-private fun ScheduleWidgetEmptyState(context: Context, size: DpSize, message: String) {
+internal fun WidgetEmptyState(context: Context, size: DpSize, message: String, icon: String = "schedule") {
     val metrics = context.resources.displayMetrics
     val density = metrics.density
     val compact = size.height < 220.dp
@@ -229,7 +229,7 @@ private fun ScheduleWidgetEmptyState(context: Context, size: DpSize, message: St
         textAlign = Paint.Align.CENTER
         typeface = ResourcesCompat.getFont(context, com.feldman.motion.R.font.material_symbols_rounded)
     }
-    canvas.drawText("schedule", iconX + iconSize / 2f,
+    canvas.drawText(icon, iconX + iconSize / 2f,
         iconY + iconSize / 2f - (iconPaint.ascent() + iconPaint.descent()) / 2f, iconPaint)
     canvas.save()
     canvas.translate(if (compact) iconSize + gap else 0f,

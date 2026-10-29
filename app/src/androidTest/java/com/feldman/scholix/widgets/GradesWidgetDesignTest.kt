@@ -26,6 +26,20 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class GradesWidgetDesignTest {
     @OptIn(ExperimentalGlanceRemoteViewsApi::class)
+    @Test fun placeholderGradesShowTheEmptyState() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val placeholder = JSONArray().put(JSONObject().put("grade", "null"))
+        val views = GlanceRemoteViews().compose(context, DpSize(300.dp, 500.dp)) {
+            GlanceTheme { GradesWidgetContent(context, null, "Webtop", placeholder) }
+        }.remoteViews
+        instrumentation.runOnMainSync {
+            val root = views.apply(context, FrameLayout(context)) as ViewGroup
+            assertTrue(root.descendants.any { it.contentDescription == "No grades yet" })
+        }
+    }
+
+    @OptIn(ExperimentalGlanceRemoteViewsApi::class)
     @Test fun averageAndGradeCardsRenderInAnAsyncWidgetHost() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -36,7 +50,7 @@ class GradesWidgetDesignTest {
             GlanceTheme { GradesWidgetContent(context, null, "Webtop", grades) }
         }.remoteViews
         val parcel = android.os.Parcel.obtain()
-        val delivered = try { views.writeToParcel(parcel, 0); parcel.setDataPosition(0)
+        val delivered = try { views.writeToParcel(parcel, 0); assertTrue("Font images must not be embedded in the widget parcel", parcel.dataSize() < 128_000); parcel.setDataPosition(0)
             android.widget.RemoteViews.CREATOR.createFromParcel(parcel)
         } finally { parcel.recycle() }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->

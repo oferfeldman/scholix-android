@@ -49,9 +49,14 @@ class GradesWidgetConfigureActivity : ComponentActivity() {
                         lifecycleScope.launch {
                             val id = AppWidgetId(widgetId)
                             updateAppWidgetState(this@GradesWidgetConfigureActivity, id) {
+                                if (it[gradesProviderKey] != provider.id) {
+                                    it.remove(gradesDataKey)
+                                    it.remove(gradesErrorKey)
+                                }
                                 it[gradesProviderKey] = provider.id
                                 it.remove(courseNameKey)
                             }
+                            refreshGradesWidgetState(this@GradesWidgetConfigureActivity, id)
                             GradesWidget().update(this@GradesWidgetConfigureActivity, id)
                             setResult(RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
                             finish()
