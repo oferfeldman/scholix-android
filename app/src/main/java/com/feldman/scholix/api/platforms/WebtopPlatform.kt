@@ -29,7 +29,13 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-class WebtopPlatform() : Platform {
+class WebtopPlatform(
+    private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient().newBuilder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(90, TimeUnit.SECONDS)
+        .build()
+) : Platform {
     override var platformDisplayName: String = "WebtopPlatform"
 
     private val loginFields = LoginFields()
@@ -74,11 +80,6 @@ class WebtopPlatform() : Platform {
     )
     @Volatile
     private var cachedPupilCardSettings: MutableMap<Int, PupilCardSettings> = mutableMapOf()
-    private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient().newBuilder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .callTimeout(90, TimeUnit.SECONDS)
-        .build()
     internal val messageAttachments = WebtopAttachmentDownload(cookie = { _cookies.orEmpty() })
     val mailbox: WebtopMailbox = WebtopMailbox(
         cookie = { _cookies ?: "" },
@@ -686,7 +687,11 @@ class WebtopPlatform() : Platform {
                     }
 
                     val json = JSONObject(body)
-                    val fetchedDays = json.optJSONArray("data") ?: JSONArray()
+                    val fetchedDays = json.optJSONArray("data")
+                    if (!json.optBoolean("status", true) || fetchedDays == null) {
+                        if (retry) return getSchedule(dayIndex, institutionCode, classCode, retry = false)
+                        return JSONObject().put("error", "server_unreachable")
+                    }
                     cachedShotefKey = cacheKey
                     cachedShotefDays = fetchedDays
                     cachedShotefTime = now
@@ -1051,7 +1056,11 @@ class WebtopPlatform() : Platform {
                     }
 
                     val json = JSONObject(body)
-                    val fetchedDays = json.optJSONArray("data") ?: JSONArray()
+                    val fetchedDays = json.optJSONArray("data")
+                    if (!json.optBoolean("status", true) || fetchedDays == null) {
+                        if (retry) return getOriginalSchedule(dayIndex, institutionCode, classCode, retry = false)
+                        return JSONObject().put("error", "server_unreachable")
+                    }
                     cachedShotefKey = cacheKey
                     cachedShotefDays = fetchedDays
                     cachedShotefTime = now

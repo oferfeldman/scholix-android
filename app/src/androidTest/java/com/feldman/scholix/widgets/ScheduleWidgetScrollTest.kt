@@ -5,9 +5,16 @@ import android.appwidget.AppWidgetManager
 import android.os.SystemClock
 import android.widget.FrameLayout
 import android.widget.ListView
+import android.widget.TextView
+import android.view.View
+import android.view.ViewGroup
+import androidx.core.view.descendants
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.glance.appwidget.compose
+import androidx.glance.GlanceTheme
+import androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
+import androidx.glance.appwidget.GlanceRemoteViews
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -25,6 +32,32 @@ import java.time.LocalTime
 
 @RunWith(AndroidJUnit4::class)
 class ScheduleWidgetScrollTest {
+    @OptIn(ExperimentalGlanceRemoteViewsApi::class)
+    @Test fun hebrewLessonTextIsRightAlignedAndReadsRightToLeft() = runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        for ((subject, direction) in listOf("מתמטיקה" to -1, "Math" to 1)) {
+            val item = JSONObject().put("hour", 1).put("subject", subject).put("subjectLevel", "5")
+                .put("teacher", if (direction == -1) "מורה לדוגמה" else "Example Teacher").put("room", "102")
+            val views = GlanceRemoteViews().compose(context, DpSize(300.dp, 100.dp)) {
+                GlanceTheme { ScheduleWidgetLesson(context, item, 0, true) }
+            }.remoteViews
+            instrumentation.runOnMainSync {
+                val root = views.apply(context, FrameLayout(context)) as ViewGroup
+                root.measure(View.MeasureSpec.makeMeasureSpec(900, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                root.layout(0, 0, root.measuredWidth, root.measuredHeight)
+                val texts = root.descendants.filterIsInstance<TextView>()
+                    .filter { it.text.contains(subject) || it.text.contains("102") }.toList()
+                assertEquals(2, texts.size)
+                texts.forEach {
+                    assertEquals(View.TEXT_ALIGNMENT_TEXT_START, it.textAlignment)
+                    assertEquals(direction, it.layout.getParagraphDirection(0))
+                }
+            }
+        }
+    }
+
     @Test fun startsOneLessonBeforeNowAndCanScrollBackToTheMorning() = runBlocking {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext

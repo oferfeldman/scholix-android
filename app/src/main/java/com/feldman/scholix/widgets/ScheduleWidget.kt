@@ -4,6 +4,11 @@ import android.app.PendingIntent
 import android.net.Uri
 import android.os.Build
 import android.widget.RemoteViews
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.StyleSpan
+import android.graphics.Typeface
+import android.util.TypedValue
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
@@ -162,6 +167,7 @@ private fun ScheduleWidgetContent(context: Context, prefs: Preferences) {
 internal fun ScheduleWidgetLesson(context: Context, item: JSONObject, index: Int, numberedPeriods: Boolean) {
     val subject = item.optString("subject")
     val free = item.optBoolean(WINDOW_FLAG)
+    val title = if (free) context.getString(R.string.free_period) else subject + item.optString("subjectLevel").takeIf { it.isNotBlank() && !subject.contains(it) }.let { it?.let { " · $it" }.orEmpty() }
     val muted = free || item.optString("colorClass") == "cancel-cell"
     val colors = scheduleColor(subject)
     val foreground = if (muted) GlanceTheme.colors.onSurfaceVariant else ColorProvider(colors.onColor)
@@ -172,12 +178,11 @@ internal fun ScheduleWidgetLesson(context: Context, item: JSONObject, index: Int
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(GlanceModifier.defaultWeight()) {
-                Text(if (free) context.getString(R.string.free_period) else subject + item.optString("subjectLevel").takeIf { it.isNotBlank() && !subject.contains(it) }.let { it?.let { " · $it" }.orEmpty() },
-                    style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold, color = foreground), maxLines = 2)
+                ScheduleWidgetText(context, title, 16f, foreground, 2, bold = true)
                 val details = listOf(item.optString("teacher"), item.optString("room").takeIf { it.isNotBlank() }?.let { context.getString(R.string.room) + ": " + it }.orEmpty()).filter { it.isNotBlank() }.joinToString(", ")
-                if (!free && details.isNotBlank()) Text(details, style = TextStyle(fontSize = 14.sp, color = foreground), maxLines = 2)
+                if (!free && details.isNotBlank()) ScheduleWidgetText(context, details, 14f, foreground, 2)
                 val changes = item.optString("changes").ifBlank { item.optString("exams") }
-                if (changes.isNotBlank()) Text(changes, style = TextStyle(fontSize = 14.sp, color = foreground), maxLines = 3)
+                if (changes.isNotBlank()) ScheduleWidgetText(context, changes, 14f, foreground, 3)
             }
             if (!muted) Image(
                 provider = ImageProvider(scheduleSubjectIcon(context, subject, colors.onColor, index, item.optString("exams"))),
@@ -194,6 +199,20 @@ internal fun ScheduleWidgetLesson(context: Context, item: JSONObject, index: Int
             }
         }
     }
+}
+
+@Composable
+private fun ScheduleWidgetText(context: Context, text: String, size: Float, color: ColorProvider, maxLines: Int, bold: Boolean = false) {
+    val content = SpannableString(text).apply {
+        if (bold) setSpan(StyleSpan(Typeface.BOLD), 0, length, Spanned.SPAN_INCLUSIVE_EXCLUSIVE)
+    }
+    val view = RemoteViews(context.packageName, R.layout.schedule_widget_text).apply {
+        setTextViewText(R.id.schedule_widget_text, content)
+        setTextViewTextSize(R.id.schedule_widget_text, TypedValue.COMPLEX_UNIT_SP, size)
+        setTextColor(R.id.schedule_widget_text, color.getColor(context).toArgb())
+        setInt(R.id.schedule_widget_text, "setMaxLines", maxLines)
+    }
+    AndroidRemoteViews(view, GlanceModifier.fillMaxWidth())
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)

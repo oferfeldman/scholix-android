@@ -8,6 +8,10 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.feldman.scholix.MainActivity
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.Type
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -17,6 +21,31 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ProviderSessionRecoveryTest {
+    @Test fun webtopScheduleFailuresAreRetriedAndNeverCachedAsEmptyDays() {
+        val valid = """{"status":true,"data":[{"dayIndex":1,"hoursData":[{"hour":1,"hourName":"08:00 - 08:45","scheduale":[{"subject":"Math"}]}]}]}"""
+        for (failure in listOf("""{"status":false,"data":[]}""", """{"status":true,"data":null}""")) {
+            for (original in listOf(false, true)) {
+                var calls = 0
+                val client = OkHttpClient.Builder().addInterceptor { chain ->
+                    calls++
+                    Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                        .body((if (calls <= 2) failure else valid).toResponseBody()).build()
+                }.build()
+                val platform = WebtopPlatform(client).apply {
+                    studentInstitution = "123456"
+                    studentClass = "9|6"
+                }
+                fun load() = if (original) platform.getOriginalSchedule(0, null, null) else platform.getSchedule(0, null, null)
+                assertEquals("server_unreachable", load().optString("error"))
+                assertEquals("Retry must be bounded", 2, calls)
+                assertEquals("Math", load().getJSONObject("1_0").getString("subject"))
+                assertEquals("Failed data must not be cached", 3, calls)
+                assertEquals("Math", load().getJSONObject("1_0").getString("subject"))
+                assertEquals("Successful data should still be cached", 3, calls)
+            }
+        }
+    }
+
     @Test fun webtopRenewalPersistsWithoutOverwritingAccountEditsOrNewerSignIns() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val prefs = context.getSharedPreferences("platform_prefs", Context.MODE_PRIVATE)
