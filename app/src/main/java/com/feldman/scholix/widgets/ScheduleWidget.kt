@@ -147,8 +147,12 @@ class ScheduleWidget {
         val views = renderer.compose(context, size) {
             GlanceTheme {
                 Box(GlanceModifier.fillMaxSize().background(GlanceTheme.colors.background).cornerRadius(24.dp).clickable(open).padding(4.dp)) {
-                    if (rows.isEmpty()) {
-                        Text(if (days.has(date.toString())) "No lessons scheduled" else prefs[scheduleErrorKey] ?: "Loading schedule\u2026",
+                    if (rows.isEmpty() && days.has(date.toString())) {
+                        ScheduleWidgetEmptyState(context, size, if (date == today) context.getString(R.string.noSchedule)
+                            else context.getString(R.string.noScheduleForDay,
+                                date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE", context.resources.configuration.locales[0]))))
+                    } else if (rows.isEmpty()) {
+                        Text(prefs[scheduleErrorKey] ?: "Loading schedule\u2026",
                             GlanceModifier.padding(16.dp), style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant))
                     } else {
                         AndroidRemoteViews(RemoteViews(context.packageName, R.layout.schedule_widget_list), GlanceModifier.fillMaxSize())
@@ -187,6 +191,53 @@ class ScheduleWidget {
             views.setScrollPosition(R.id.schedule_widget_list, firstVisible)
         }
         return views
+    }
+}
+
+@Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+private fun ScheduleWidgetEmptyState(context: Context, size: DpSize, message: String) {
+    val metrics = context.resources.displayMetrics
+    val density = metrics.density
+    val compact = size.height < 220.dp
+    val width = ((size.width.value - 40f) * density).toInt().coerceAtLeast(1)
+    val iconSize = (if (compact) 48f else 128f) * density
+    val gap = (if (compact) 12f else 20f) * density
+    val titlePaint = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = ResourcesCompat.getFont(context, com.feldman.motion.R.font.feldman_font)
+        fontVariationSettings = "'wght' 600, 'wdth' 140, 'ROND' 200"
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, if (compact) 20f else 28f, metrics)
+        color = GlanceTheme.colors.onSurface.getColor(context).toArgb()
+    }
+    val textWidth = (if (compact) width - iconSize - gap else width.toFloat()).toInt().coerceAtLeast(1)
+    val title = android.text.StaticLayout.Builder.obtain(message, 0, message.length, titlePaint, textWidth)
+        .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER).setIncludePad(false).build()
+    val height = (if (compact) maxOf(iconSize, title.height.toFloat()) else iconSize + gap + title.height).toInt()
+    // Bake the variable font into the image so every launcher preserves Feldman's rounded axes.
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val iconX = if (compact) 0f else (width - iconSize) / 2f
+    val iconY = if (compact) (height - iconSize) / 2f else 0f
+    val path = androidx.compose.material3.MaterialShapes.Cookie12Sided.toPath()
+    path.transform(android.graphics.Matrix().apply { setScale(iconSize, iconSize); postTranslate(iconX, iconY) })
+    canvas.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = GlanceTheme.colors.primary.getColor(context).toArgb()
+    })
+    val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = GlanceTheme.colors.onPrimary.getColor(context).toArgb()
+        textSize = iconSize * 68f / 128f
+        textAlign = Paint.Align.CENTER
+        typeface = ResourcesCompat.getFont(context, com.feldman.motion.R.font.material_symbols_rounded)
+    }
+    canvas.drawText("schedule", iconX + iconSize / 2f,
+        iconY + iconSize / 2f - (iconPaint.ascent() + iconPaint.descent()) / 2f, iconPaint)
+    canvas.save()
+    canvas.translate(if (compact) iconSize + gap else 0f,
+        if (compact) (height - title.height) / 2f else iconSize + gap)
+    title.draw(canvas)
+    canvas.restore()
+    Box(GlanceModifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Image(ImageProvider(bitmap), message, GlanceModifier.width((width / density).dp).height((height / density).dp))
     }
 }
 
