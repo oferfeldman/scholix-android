@@ -24,6 +24,15 @@ navigation or a reload at the same URL. The host fixture replaces the Main
 coroutine dispatcher with an unconfined dispatcher for these controlled callbacks.
 It does not render a browser, run the page JavaScript or contact Microsoft/Moodle.
 The library check passed all 83 unit cases plus these eight host cases (91 total).
+The 2026-10-18 PDF update passes 102 cases in this checker, including four
+production parser/file unit cases and seven new controlled repository/native
+chunk-writer cases. These use synthetic data and do not render PDF pages or
+access the account. The PDF request scripts are separately exercised in Chromium
+by `tools/lemida/verify_pdf_requests.py` with intercepted traffic only.
+The subsequent PDF download action passes 108 cases, adding one filename case
+and five controlled MediaStore-provider cases. The latter run the production
+save code for complete byte-preserving publication, storage/publication errors,
+cancellation cleanup and invalid content. They do not exercise real device storage.
 The two new reload cases reproduced the production failure before the fix and
 passed afterward; all eight also passed on the phone on 2026-10-04.
 
