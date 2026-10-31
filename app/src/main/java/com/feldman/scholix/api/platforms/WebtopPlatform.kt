@@ -20,18 +20,22 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.nio.charset.StandardCharsets
-import java.security.SecureRandom
 import java.time.LocalDate
 import java.time.Year
 import java.time.format.DateTimeFormatter
 import java.util.*
+import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
-import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.IvParameterSpec
-import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
-class WebtopPlatform() : Platform {
+class WebtopPlatform(
+    private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient().newBuilder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(90, TimeUnit.SECONDS)
+        .build()
+) : Platform {
     override var platformDisplayName: String = "WebtopPlatform"
 
     private val loginFields = LoginFields()
@@ -57,6 +61,8 @@ class WebtopPlatform() : Platform {
     var userType: Int? = null
     var schoolName: String? = null
     var loginMethod: String? = null
+    var loginError: String? = null
+        private set
 
     private var _cookies: String? = null
     val cookies: String? get() = _cookies
@@ -74,7 +80,6 @@ class WebtopPlatform() : Platform {
     )
     @Volatile
     private var cachedPupilCardSettings: MutableMap<Int, PupilCardSettings> = mutableMapOf()
-    private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient()
     internal val messageAttachments = WebtopAttachmentDownload(cookie = { _cookies.orEmpty() })
     val mailbox: WebtopMailbox = WebtopMailbox(
         cookie = { _cookies ?: "" },
@@ -185,23 +190,27 @@ class WebtopPlatform() : Platform {
 
     /** Perform login once, keep cookies */
     private fun login(username: String, password: String): Boolean {
+        loginError = null
         val u = username
         val p = password
         if (u.isNullOrBlank() || p.isNullOrBlank()) {
             Log.w("WebtopPlatform", "Cannot refresh cookies: credentials missing")
             loggedIn = false
+            loginError = "Enter your Webtop username and password. Ministry credentials use the Education Ministry sign-in option."
             return false
         }
 
         return try {
             val loginData = JSONObject()
                 .put("Data", encrypt(username + "0"))
-                .put("username", username)
+                .put("UserName", username)
                 .put("Password", password)
                 .put("deviceDataJson", "{\"isMobile\":true,\"os\":\"Android\",\"browser\":\"Chrome\",\"cookies\":true}")
 
             val request = Request.Builder()
                 .url("https://webtopserver.smartschool.co.il/server/api/user/LoginByUserNameAndPassword")
+                .header("language", "he")
+                .header("rememberMe", "0")
                 .post(loginData.toString()
                     .toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
@@ -209,24 +218,30 @@ class WebtopPlatform() : Platform {
             _client.newCall(request).execute().use { response ->
                 val body = response.body.string()
                 if (!response.isSuccessful || body.isEmpty()) {
+                    loginError = "Webtop sign-in is temporarily unavailable (HTTP ${response.code}). Try again later or sign in on the provider website."
                     Log.e("WebtopPlatform", "Login failed: HTTP ${response.code}, body=$body")
                     return false
                 }
                 val jsonResponse = JSONObject(body)
-                val data = jsonResponse.optJSONObject("data") ?: return false
+                if (!jsonResponse.optBoolean("status")) {
+                    loginError = "Webtop did not accept the sign-in. Check your Webtop credentials; Ministry credentials use the Education Ministry option. If verification is required, sign in on the provider website."
+                    return false
+                }
+                val data = jsonResponse.optJSONObject("data")
+                if (jsonResponse.optString("message") == "get2FA" || data?.optBoolean("mustChangePassword") == true) {
+                    loginError = "Webtop requires additional verification or a password update. Complete sign-in on the provider website."
+                    return false
+                }
+                if (data == null) {
+                    loginError = "Webtop returned an incomplete sign-in response. Complete sign-in on the provider website."
+                    return false
+                }
 
-                studentId = data.getString("userId")
-                studentClass = data.getString("classCode") + "|" + data.get("classNumber")
-                studentInstitution = data.getString("institutionCode")
-                studentName = "${data.getString("firstName")} ${data.getString("lastName")}"
-                userStudentId = data.optString("studentId").ifEmpty { null }
-                userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
-                schoolName = data.optString("institutionName").ifEmpty { null }
-                loginMethod = "password"
-                _cookies = response.headers("Set-Cookie").joinToString("; ")
-                true
+                adoptPasswordLoginData(data, response.headers("Set-Cookie").joinToString("; "))
             }
         } catch (e: Exception) {
+            loginError = if (e is IOException) "Could not reach Webtop. Try again later or sign in on the provider website."
+                else "Webtop returned an unexpected sign-in response. Complete sign-in on the provider website."
             Log.e("WebtopPlatform", "Login exception", e)
             false
         }
@@ -239,28 +254,39 @@ class WebtopPlatform() : Platform {
     override fun toString(): String =
         "WebtopPlatform(name=$studentName, institution=$studentInstitution, loggedIn=$loggedIn)"
 
-    private fun encrypt(data: String): String? {
-        val key = "01234567890000000150778345678901"
-        return try {
-            val salt = ByteArray(16).apply { SecureRandom().nextBytes(this) }
-            val iv = ByteArray(16).apply { SecureRandom().nextBytes(this) }
-
-            val spec = PBEKeySpec(key.toCharArray(), salt, 100, 256)
-            val secretKey = SecretKeySpec(
-                SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1")
-                    .generateSecret(spec).encoded, "AES"
-            )
-
-            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey, IvParameterSpec(iv))
-            val encrypted = cipher.doFinal(data.toByteArray(StandardCharsets.UTF_8))
-
-            val combined = salt + iv + encrypted
-            Base64.getEncoder().encodeToString(combined)
-        } catch (e: Exception) {
-            Log.e("WebtopPlatform", "Encryption failed", e)
-            null
+    internal fun adoptPasswordLoginData(data: JSONObject, cookieHeader: String): Boolean {
+        val userId = data.optString("userId")
+        if (userId.isBlank()) {
+            loginError = "Webtop sign-in response did not include a user ID."
+            return false
         }
+        // Android getString coerces numeric IDs; the JVM org.json implementation does not.
+        studentId = userId
+        val classCode = data.optString("classCode")
+        val classNumber = data.optString("classNumber")
+        studentClass = if (classCode.isNotBlank() && classNumber.isNotBlank()) "$classCode|$classNumber" else null
+        studentInstitution = data.optString("institutionCode").ifEmpty { null }
+        studentName = "${data.optString("firstName")} ${data.optString("lastName")}".trim()
+        userStudentId = data.optString("studentId").ifEmpty { null }
+        userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
+        schoolName = data.optString("institutionName").ifEmpty { null }
+        loginMethod = "password"
+        loginError = null
+        _cookies = cookieHeader
+        cachedShotefKey = null
+        cachedPupilCardSettings.clear()
+        cachedShotefDays = null
+        loggedIn = true
+        return true
+    }
+
+    internal fun encrypt(data: String): String {
+        val key = "01234567890000000150778345678901"
+        // Current website encryptStringToServer: JSON string, raw AES key and fixed IV.
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key.toByteArray(StandardCharsets.UTF_8), "AES"),
+            IvParameterSpec("6543210987654321".toByteArray(StandardCharsets.UTF_8)))
+        return Base64.getEncoder().encodeToString(cipher.doFinal(JSONObject.quote(data).toByteArray(StandardCharsets.UTF_8)))
     }
 
     /** Return the single Webtop course, fetch grades only once */
@@ -608,6 +634,10 @@ class WebtopPlatform() : Platform {
 
 
     override fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
+        return getSchedule(dayIndex, institutionCode, selectedValue, retry = true)
+    }
+
+    private fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?, retry: Boolean): JSONObject {
         Log.d("WebtopPlatform", "override getSchedule(dayIndex: $dayIndex, institutionCode $institutionCode, selectedValue $selectedValue) called.")
 
         val institution = institutionCode ?: studentInstitution
@@ -642,21 +672,26 @@ class WebtopPlatform() : Platform {
                     val body = response.body.string()
                     Log.v("WebtopPlatform", "Schedule body (len=${body.length}): $body")
 
-                    if (response.code == 401 || response.code == 403 || body.isEmpty()) {
-                        Log.d("WebtopPlatform", "Schedule fetch unauthorized/empty → refreshing cookies")
-                        if (refreshCookies()) {
+                    if (response.code == 401 || response.code == 403) {
+                        Log.d("WebtopPlatform", "Schedule fetch unauthorized → refreshing cookies")
+                        if (retry && refreshCookies()) {
                             // Retry once with same parameters after refreshing cookies
-                            return getSchedule(dayIndex, institutionCode, classCode)
+                            return getSchedule(dayIndex, institutionCode, classCode, retry = false)
                         }
+                        loggedIn = false
                         return JSONObject().put("error", "login_failed")
                     }
 
-                    if (!response.isSuccessful) {
+                    if (!response.isSuccessful || body.isBlank()) {
                         return JSONObject().put("error", "server_unreachable")
                     }
 
                     val json = JSONObject(body)
-                    val fetchedDays = json.optJSONArray("data") ?: JSONArray()
+                    val fetchedDays = json.optJSONArray("data")
+                    if (!json.optBoolean("status", true) || fetchedDays == null) {
+                        if (retry) return getSchedule(dayIndex, institutionCode, classCode, retry = false)
+                        return JSONObject().put("error", "server_unreachable")
+                    }
                     cachedShotefKey = cacheKey
                     cachedShotefDays = fetchedDays
                     cachedShotefTime = now
@@ -973,6 +1008,10 @@ class WebtopPlatform() : Platform {
 
 
     override fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?): JSONObject {
+        return getOriginalSchedule(dayIndex, institutionCode, selectedValue, retry = true)
+    }
+
+    private fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?, retry: Boolean): JSONObject {
         val schedule = JSONObject()
         if (dayIndex < 0) return schedule
         val institution = institutionCode ?: studentInstitution
@@ -1003,20 +1042,25 @@ class WebtopPlatform() : Platform {
 
                 _client.newCall(request).execute().use { response ->
                     val body = response.body.string()
-                    if (response.code == 401 || response.code == 403 || body.isEmpty()) {
-                        Log.d("WebtopPlatform", "Original schedule fetch unauthorized/empty → refreshing cookies")
-                        if (refreshCookies()) {
-                            return getOriginalSchedule(dayIndex, institutionCode, classCode)
+                    if (response.code == 401 || response.code == 403) {
+                        Log.d("WebtopPlatform", "Original schedule fetch unauthorized → refreshing cookies")
+                        if (retry && refreshCookies()) {
+                            return getOriginalSchedule(dayIndex, institutionCode, classCode, retry = false)
                         }
+                        loggedIn = false
                         return JSONObject().put("error", "login_failed")
                     }
 
-                    if (!response.isSuccessful) {
+                    if (!response.isSuccessful || body.isBlank()) {
                         return JSONObject().put("error", "server_unreachable")
                     }
 
                     val json = JSONObject(body)
-                    val fetchedDays = json.optJSONArray("data") ?: JSONArray()
+                    val fetchedDays = json.optJSONArray("data")
+                    if (!json.optBoolean("status", true) || fetchedDays == null) {
+                        if (retry) return getOriginalSchedule(dayIndex, institutionCode, classCode, retry = false)
+                        return JSONObject().put("error", "server_unreachable")
+                    }
                     cachedShotefKey = cacheKey
                     cachedShotefDays = fetchedDays
                     cachedShotefTime = now
@@ -1085,30 +1129,23 @@ class WebtopPlatform() : Platform {
         return try {
             val loginData = JSONObject()
                 .put("Data", encrypt(username + "0"))
-                .put("username", username)
+                .put("UserName", username)
                 .put("Password", password)
                 .put("deviceDataJson", "{\"isMobile\":true,\"os\":\"Android\",\"browser\":\"Chrome\",\"cookies\":true}")
 
             val request = Request.Builder()
                 .url("https://webtopserver.smartschool.co.il/server/api/user/LoginByUserNameAndPassword")
+                .header("language", "he")
+                .header("rememberMe", "0")
                 .post(loginData.toString()
                     .toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
 
             _client.newCall(request).execute().use { response ->
                 val jsonResponse = JSONObject(response.body.string())
+                if (!jsonResponse.optBoolean("status") || jsonResponse.optString("message") == "get2FA") return false
                 val data = jsonResponse.optJSONObject("data") ?: return false
-                studentId = data.getString("userId")
-                studentClass = data.getString("classCode") + "|" + data.get("classNumber")
-                studentInstitution = data.getString("institutionCode")
-                userStudentId = data.optString("studentId").ifEmpty { null }
-                userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
-                schoolName = data.optString("institutionName").ifEmpty { null }
-                _cookies = response.headers("Set-Cookie").joinToString("; ")
-                cachedShotefKey = null
-                cachedShotefDays = null
-                loggedIn = true
-                true
+                adoptPasswordLoginData(data, response.headers("Set-Cookie").joinToString("; "))
             }
         } catch (e: Exception) {
             Log.e("WebtopPlatform", "Failed to refresh cookies", e)

@@ -198,7 +198,7 @@ private val subjectShapes = listOf(
 )
 
 /** Deterministically picks a Material 3 shape for [subject] so the same subject always gets the same shape. */
-private fun subjectShape(subject: String): RoundedPolygon {
+internal fun subjectShape(subject: String): RoundedPolygon {
     val parsed = subject.filter(Char::isLetterOrDigit)
     val index = Math.floorMod(parsed.hashCode(), subjectShapes.size)
     return subjectShapes[index]

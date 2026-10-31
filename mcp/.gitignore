@@ -1,0 +1,6 @@
+native/build/
+native/providers/
+native/providers-test/
+native/.gradle/
+*.tar.gz
+__pycache__/

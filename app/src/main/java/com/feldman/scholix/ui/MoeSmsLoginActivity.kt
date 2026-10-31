@@ -110,9 +110,9 @@ class MoeSmsLoginActivity : ComponentActivity() {
         // flow a short chance, then expose the real page automatically so the user
         // can finish instead of being trapped behind a spinner.
         LaunchedEffect(phase) {
-            if (phase != "connecting") return@LaunchedEffect
+            if (phase != "connecting" && phase != "sending") return@LaunchedEffect
             delay(12_000)
-            if (phase == "connecting" && !browser) {
+            if ((phase == "connecting" || phase == "sending") && !browser) {
                 error = slowFallback
                 manualBrowser = true
                 browser = true

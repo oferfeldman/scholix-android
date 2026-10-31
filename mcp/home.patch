@@ -1,0 +1,279 @@
+--- a/gateway/app.py
++++ b/gateway/app.py
+@@ -34,6 +34,9 @@
+ from gateway.hazi import HaziConnections
+ from gateway.sally import SallyConnections, SallyError
+ from gateway.openu import OpenUService
++from gateway.openu_downloads import install as install_openu_downloads
++from gateway.scholix import ScholixService
++from gateway.scholix_console import connection_html, install as install_scholix_console
+ from gateway.oauth import OwnerOAuth, SCOPES
+ from gateway.proxy import ProxyService
+ from gateway.store import Store, digest
+@@ -49,7 +52,7 @@
+     rail = f'''<aside class="rail">{brand}<nav aria-label="Main navigation">
+ <a href="#connections"><span class="symbol" aria-hidden="true">link</span>Connections</a>
+ <a href="#sally"><span class="symbol" aria-hidden="true">list_alt</span>Sally</a>
+-<a href="#openu"><span class="symbol" aria-hidden="true">school</span>OpenU</a>
++<a href="#scholix"><span class="symbol" aria-hidden="true">school</span>Scholix</a>
+ <a href="#mcp"><span class="symbol" aria-hidden="true">hub</span>MCP</a></nav></aside>''' if dashboard else ""
+     heading = f'<header class="page-header"><div><h1>{html.escape(title)}</h1></div><a class="button" href="#add-sally"><span class="symbol" aria-hidden="true">add</span>Add Sally</a></header>' if dashboard else brand + f'<h1>{html.escape(title)}</h1>'
+     return HTMLResponse(f"""<!doctype html><html lang=en><head><meta charset=utf-8>
+@@ -73,6 +76,7 @@
+     oauth = OwnerOAuth(store, public_url)
+     # OpenU is deployed on the shared endpoint; retain it when deploying console changes.
+     services = {"hazi-hinam": HaziConnections(store), "sally": SallyConnections(store), "openu": OpenUService(store)}
++    services["scholix"] = ScholixService(store, services["openu"])
+     config_path = store.directory / "mcps.json"
+     configs = additional_mcps if additional_mcps is not None else json.loads(config_path.read_text()) if config_path.exists() else {}
+     for slug, config in configs.items():
+@@ -95,6 +99,7 @@
+             try:
+                 yield
+             finally:
++                await services["scholix"].close()
+                 await services["openu"].close()
+         store.db.close()
+ 
+@@ -102,6 +107,7 @@
+         docs_url=prefix + "/docs", openapi_url=prefix + "/openapi.json", redoc_url=None)
+     app.mount(prefix + "/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+     app.state.store, app.state.oauth, app.state.services = store, oauth, services
++    install_openu_downloads(app, services["openu"], prefix, public_url)
+     attempts = defaultdict(deque)
+ 
+     @app.post(prefix + "/revoke", include_in_schema=False)
+@@ -129,8 +135,9 @@
+         except ValueError:
+             return JSONResponse({"error": "invalid_content_length"}, status_code=400)
+         upload_paths = {prefix + "/api/sally/upload_product_image", prefix + "/sally/mcp", prefix + "/combined/mcp",
+-                        prefix + "/api/openu/upload_file", prefix + "/openu/mcp", prefix + "/api/openu/call/upload_file"}
+-        limit = 16 * 1024 * 1024 if request.url.path in upload_paths else 1024 * 1024
++                        prefix + "/api/openu/upload_file", prefix + "/openu/mcp", prefix + "/api/openu/call/upload_file",
++                        prefix + "/api/openu/service_request_upload", prefix + "/api/openu/call/service_request_upload"}
++        limit = 16 * 1024 * 1024 if request.url.path in upload_paths or request.url.path == prefix + "/scholix/mcp" or request.url.path.startswith(prefix + "/api/scholix/") else 1024 * 1024
+         if length > limit:
+             return JSONResponse({"error": "request_too_large"}, status_code=413)
+         if request.url.path == prefix + "/token" and request.method == "POST":
+@@ -178,6 +185,8 @@
+             raise HTTPException(401, "Sign in to the owner console first")
+         return token
+ 
++    install_scholix_console(app, services["scholix"], prefix, public_url, render_page, owner_session, check_form_origin, csrf)
++
+     @app.get(prefix + "/health")
+     async def health():
+         return {"status": "ok", "service": "feldman-mcp-hub"}
+@@ -205,7 +214,7 @@
+         session = request.cookies.get("feldman_owner", "")
+         if not store.get("owner_session", session):
+             nonce = secrets.token_urlsafe(32)
+-            response = render_page("Welcome back", f"""<p>Sign in to manage your grocery connections.</p>
++            response = render_page("Welcome back", f"""<p>Sign in to manage your connections.</p>
+ <form method=post action="{prefix}/admin/login"><input type=hidden name=csrf value="{nonce}">
+ <label>Owner password<input type=password name=password autocomplete=current-password required></label><button data-icon=login>Sign in</button></form>""")
+             response.set_cookie("feldman_login_csrf", nonce, secure=True, httponly=True, samesite="strict", max_age=600, path=prefix or "/")
+@@ -252,8 +261,8 @@
+ <button data-icon=add>Add account</button></form></details></section>
+ <section id=sally class=connection-section><div class=section-heading><h2>Sally</h2><small>{len(sally['connections'])} {'connection' if len(sally['connections']) == 1 else 'connections'}</small></div>
+ <div class=connection-stack>{''.join(sally_cards)}</div>{list_error}</section>
+-<section id=openu class=connection-section><div class=section-heading><h2>Open University</h2></div>
+-<motion-card class="connection-card service-card"><motion-shape class="connection-shape" shape="sunny" morph-shape="clover4" aria-hidden=true><span class=symbol>school</span></motion-shape>
++<section id=scholix class=connection-section><div class=section-heading><h2>Scholix</h2></div>
++<motion-card id=openu class="connection-card service-card"><motion-shape class="connection-shape" shape="sunny" morph-shape="clover4" aria-hidden=true><span class=symbol>school</span></motion-shape>
+ <div class=heading-copy><bdi dir=auto>OpenU</bdi><span class="status {'connected' if openu['connected'] else ''}">{'Connected' if openu['connected'] else 'Not connected'}</span></div>
+ {f'<form method=post action="{prefix}/admin/openu/disconnect"><input type=hidden name=csrf value="{action_token}"><button class="danger icon-button" data-icon=link_off aria-label="Disconnect OpenU" title="Disconnect account">Disconnect</button></form>' if openu['connected'] else ''}</motion-card>
+ <details class=add-account><summary>{'Reconnect account' if openu['connected'] else 'Connect account'}</summary>
+@@ -263,6 +272,7 @@
+ <label>ID number<input name=student_id inputmode=numeric autocomplete=off required></label>
+ <small>Encrypted session. Login details are not saved.</small>
+ <button data-icon=link>Connect OpenU</button></form></details>
++{connection_html(services['scholix'], prefix, action_token)}
+ </section></div>
+ <section id=add-sally class=add-panel><h2>Add Sally</h2><p>Paste your link from Sally's WhatsApp.</p>
+ <form method=post action="{prefix}/admin/sally" data-busy="Connecting…"><input type=hidden name=csrf value="{action_token}">
+@@ -470,7 +480,7 @@
+         return handler
+ 
+     # Native routes have complete schemas in Swagger/OpenAPI. Proxy MCPs use /call below.
+-    for slug in ("hazi-hinam", "sally", "openu"):
++    for slug in ("hazi-hinam", "sally", "openu", "scholix"):
+         for operation, info in services[slug].operations.items():
+             app.add_api_route(prefix + "/api/" + slug + "/" + operation, operation_handler(slug, operation),
+                 methods=["POST"], name=slug.replace("-", "_") + "__" + operation, description=info["description"],
+@@ -496,7 +506,7 @@
+         async def call_tool(context, params):
+             entry = tool_map().get(params.name)
+             if entry is None:
+-                return types.CallToolResult(content=[types.TextContent(type="text", text="Unknown tool")], isError=True)
++                return types.CallToolResult(content=[types.TextContent(type="text", text="Unknown tool. Call tools/list and use the exact published name, including its service/provider prefix. Scholix uses scholix__; existing OpenU aliases use openu__.")], isError=True)
+             token = get_access_token()
+             if token is None:
+                 return types.CallToolResult(content=[types.TextContent(type="text", text="Authentication required")], isError=True)
+@@ -510,7 +520,7 @@
+             return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))], structuredContent=structured)
+ 
+         server = Server("Feldman MCP Hub" if only_slug is None else services[only_slug].title, version="1.0.0",
+-            instructions="Private owner-authorized tools. Cart quantities are absolute. CancelActiveDraftOrder exits editing; it does not confirm order cancellation. Support cancellation is a request. Sally is a shared shopping-list and price-comparison service: finish_shopping saves a trip, not a retailer order. Sally subscribe may charge; cancel_subscription cancels Sally membership. Respect server deadlines. Never retry ambiguous purchases/messages automatically. Connect accounts in the HTTPS owner console. Hazi Hinam session_status lists account connectionIds; always select one explicitly when multiple accounts are connected; do not ask for passwords or personal Sally sign-in links in chat. Unverified upstream operations remain unverified.",
++            instructions="Private owner-authorized tools. Cart quantities are absolute. CancelActiveDraftOrder exits editing; it does not confirm order cancellation. Support cancellation is a request. Sally is a shared shopping-list and price-comparison service: finish_shopping saves a trip, not a retailer order. Sally subscribe may charge; cancel_subscription cancels Sally membership. Respect server deadlines. Never retry ambiguous purchases/messages automatically. Connect accounts in the HTTPS owner console. Hazi Hinam session_status lists account connectionIds; always select one explicitly when multiple accounts are connected; do not ask for passwords or personal Sally sign-in links in chat. Unverified upstream operations remain unverified. Scholix: call scholix__providers and scholix__accounts first, then use the exact tools/list names and connection_id. OpenU specialized actions use scholix__openu_* (the existing openu__* aliases remain available). Read request catalog/form requirements before composing a service request; do not submit requests, send messages, start exams/quizzes or register for courses without the user requesting that specific action.",
+             on_list_tools=list_tools, on_call_tool=call_tool,
+             get_tool_input_schema=lambda name: tool_map().get(name, (None, None, {}))[2].get("inputSchema"))
+         http_app = server.streamable_http_app(stateless_http=True, json_response=True,
+--- a/gateway/openu.py
++++ b/gateway/openu.py
+@@ -83,7 +83,7 @@
+ native("activity", "Read a course activity, rich text, embedded media and available controls. Does not submit quiz answers.", {**COURSE, "module": STR, "cmid": STR}, ("course_id", "semester", "module", "cmid"))
+ native("forum", "Read forum topics with pagination. Viewing may update the site's read markers.", {**COURSE, "forum_id": STR, "page": {"type": "integer", "minimum": 0}}, ("course_id", "semester", "forum_id"))
+ native("forum_discussion", "Read a forum discussion and its posts. Use browser tools to compose or reply under control authorization.", {**COURSE, "discussion_id": STR}, ("course_id", "semester", "discussion_id"))
+-native("assessment_document", "Download an exam/assessment questionnaire, personal scanned questionnaire, or checked notebook as base64 (up to 10 MiB).", {**COURSE, "assignment_no": STR, "artifact": {"enum": ["questionnaire", "notebook"]}, "kind": {"enum": ["exam", "personal"]}}, ("course_id", "semester", "assignment_no", "artifact"))
++native("assessment_document", "Download an exam/assessment questionnaire, personal scanned questionnaire, or checked notebook (up to 10 MiB). Returns a private PDF download_url valid for 15 minutes by default: fetch/open that URL directly; no browser export or login is needed. assignment_no is the exact assignment number from assignments, not its exam date. Set output=base64 only when raw file bytes are required.", {**COURSE, "assignment_no": STR, "artifact": {"enum": ["questionnaire", "notebook"]}, "kind": {"enum": ["exam", "personal"]}, "output": {"enum": ["download", "base64"]}}, ("course_id", "semester", "assignment_no", "artifact"))
+ native("assessment_appeal", "Resolve the available assessment appeal link without submitting an appeal.", {**COURSE, "assignment_no": STR}, ("course_id", "semester", "assignment_no"))
+ native("recording_collection", "Read recordings in a discovered collection.", {"cmid": STR, "title": STR}, ("cmid",))
+ native("recording_stream", "Resolve a course recording's available HLS playback URL. Links may expire; this does not download an entire video.", {**COURSE, "title": STR, "hints": {"type": "object", "properties": {key: STR for key in ("cmid", "playlistId", "contextId", "mid", "courseDbId")}, "additionalProperties": False}}, ("course_id", "semester", "title"))
+@@ -98,6 +98,9 @@
+ 
+ for name in ("courses", "grades", "account_info", "exams", "calendar", "course_page", "assignments", "recording_collections", "forums", "notifications", "read_page"):
+     OPERATIONS[name]["verification"] = "authenticated read verified 2026-10-17; account/course availability varies"
++
++from gateway import openu_portal
++openu_portal.register(operation)
+ 
+ 
+ def allowed_url(url):
+@@ -122,7 +125,7 @@
+         return parts.join(' > ');
+     };
+     return {
+-        text: root.innerText,
++        text: root.innerText || '',
+         elements: [...root.querySelectorAll('a,button,input,select,textarea,[contenteditable=true],[role=button]')]
+             .filter(el => visible(el) && !['hidden','password'].includes(el.type))
+             .map(el => ({selector: selector(el), tag: el.localName, type: el.type,
+@@ -141,6 +144,8 @@
+     slug = "openu"
+     title = "OpenU"
+     operations = OPERATIONS
++    home_url = HOME
++    validate_url = staticmethod(allowed_url)
+ 
+     def __init__(self, store):
+         self.store = store
+@@ -162,13 +167,13 @@
+ 
+         if self.browser is None:
+             self.playwright = await async_playwright().start()
+-            self.browser = await self.playwright.chromium.launch(channel="chromium", headless=True, args=["--disable-dev-shm-usage"])
++            self.browser = await self.playwright.chromium.launch(channel="chromium", headless=True, args=["--disable-dev-shm-usage", "--renderer-process-limit=4"])
+         context = await self.browser.new_context(storage_state=state, accept_downloads=True,
+             locale="he-IL", timezone_id="Asia/Jerusalem", viewport={"width": 1280, "height": 900})
+         # Apply the same boundary to redirects, popups, subresources and browser-side requests.
+         async def route(request_route):
+             try:
+-                allowed_url(request_route.request.url)
++                self.validate_url(request_route.request.url)
+             except ValueError:
+                 await request_route.abort()
+             else:
+@@ -207,7 +212,7 @@
+             self.context = await self._context(self.saved["storage_state"])
+             self.context.on("page", self._track)
+             page = await self.context.new_page()
+-            await page.goto(HOME, wait_until="domcontentloaded")
++            await page.goto(self.home_url, wait_until="domcontentloaded")
+ 
+     async def login(self, username, password, student_id):
+         async with self.lock:
+@@ -257,6 +262,9 @@
+         self.store.put("account", self.slug, self.saved)
+         if "error" in response:
+             raise ValueError(response["error"])
++        if operation == "assessment_document" and arguments.get("output", "download") == "download":
++            from gateway.openu_downloads import document_link
++            return document_link(self, response["result"], arguments)
+         return response["result"]
+ 
+     async def disconnect(self):
+@@ -300,6 +308,8 @@
+                 return await self._native(operation, arguments)
+             await self._ensure()
+             try:
++                if operation in openu_portal.OPERATIONS:
++                    return await openu_portal.invoke(self, operation, arguments)
+                 return await self._invoke(operation, arguments)
+             finally:
+                 # Preserve rotated SSO cookies even when a website operation fails.
+@@ -330,13 +340,13 @@
+                 raise ValueError("Download failed or exceeds 10 MiB")
+             return {"filename": download.suggested_filename, "base64": base64.b64encode(Path(path).read_bytes()).decode()}
+         if operation == "download_file":
+-            url = allowed_url(args["url"])
++            url = self.validate_url(args["url"])
+             # Disable redirects in the API client; validate every hop before sending a request.
+             for _ in range(6):
+                 response = await self.context.request.get(url, max_redirects=0, timeout=60000)
+                 if response.status in (301, 302, 303, 307, 308):
+                     from urllib.parse import urljoin
+-                    url = allowed_url(urljoin(url, response.headers["location"]))
++                    url = self.validate_url(urljoin(url, response.headers["location"]))
+                     await response.dispose()
+                     continue
+                 try:
+@@ -350,7 +360,7 @@
+                     await response.dispose()
+             raise ValueError("Too many file redirects")
+         if operation == "open_page":
+-            url = allowed_url(args["url"])
++            url = self.validate_url(args["url"])
+             page = self._page(args) if "page_id" in args else await self.context.new_page()
+             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+             return await self._pages()
+@@ -378,12 +388,12 @@
+         if frame_id >= len(page.frames):
+             raise ValueError("Unknown frame; use pages")
+         frame = page.frames[frame_id]
+-        allowed_url(frame.url)
++        self.validate_url(frame.url)
+         if operation == "wait_for":
+             await frame.locator(args["selector"]).wait_for(state=args.get("state", "visible"), timeout=15000)
+             return await self._pages()
+         if operation == "read_page":
+-            root = frame.locator(args.get("selector", "body"))
++            root = frame.locator(args.get("selector", "html"))
+             result = await root.evaluate(SNAPSHOT)
+             offset, limit = args.get("offset", 0), args.get("limit", 20000)
+             text = result["text"]
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -2,7 +2,7 @@
+ FROM node:24-bookworm-slim
+ COPY --from=https /usr/bin/caddy /usr/local/bin/caddy
+ RUN install -m 755 /usr/local/bin/caddy /usr/local/bin/caddy-plain && mv /usr/local/bin/caddy-plain /usr/local/bin/caddy
+-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates haproxy \
++RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates haproxy openjdk-17-jre-headless \
+     && rm -rf /var/lib/apt/lists/* \
+     && python3 -m venv /opt/venv \
+     && groupadd --gid 10001 gateway && useradd --uid 10001 --gid 10001 --create-home gateway
+--- a/requirements-server.txt
++++ b/requirements-server.txt
+@@ -4,3 +4,4 @@
+ cryptography==46.0.5
+ httpx2==2.13.1
+ playwright==1.64.0
++beautifulsoup4==4.13.5
+--- a/compose.yaml
++++ b/compose.yaml
+@@ -20,6 +20,6 @@
+       - /tmp:rw,noexec,nosuid,size=128m
+     cap_drop: [ALL]
+     security_opt: [no-new-privileges:true]
+-    pids_limit: 256
++    pids_limit: 512
+     mem_limit: 1g
+     cpus: 2
+--- a/gateway/static/hub.css
++++ b/gateway/static/hub.css
+@@ -11,3 +11,4 @@
+ .page-header>.button{flex-shrink:0;font-size:16px;white-space:nowrap}
+ @media(max-width:480px){.page-header{flex-wrap:wrap;gap:16px}.page-header>.button{min-height:44px;padding:10px 18px}}
+ 
++#scholix select,#scholix textarea,.standalone select,.standalone textarea{font:inherit;display:block;width:100%;margin-top:8px;padding:12px;border:1px solid var(--md-sys-color-outline);border-radius:16px;color:inherit;background:var(--md-sys-color-surface)}#scholix textarea,.standalone textarea{min-height:120px}.standalone li{overflow-wrap:anywhere}

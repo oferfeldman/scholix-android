@@ -1,6 +1,19 @@
 package com.feldman.scholix
 
+import com.feldman.scholix.ui.HiddenMoeLogin
+import com.feldman.scholix.ui.HiddenMashovSmsLogin
+import com.feldman.scholix.api.providerName
+import com.feldman.scholix.api.platforms.StudentsPortalPlatform
+import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.api.platforms.MashovPlatform
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.sp
+import com.feldman.motion.MotionButtonDefaults
+import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionSnackbar
+import com.feldman.motion.MotionSnackbarHost
 import androidx.compose.ui.res.stringResource
+
 import android.Manifest
 import android.content.Intent
 import android.content.res.Configuration
@@ -13,7 +26,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -28,18 +40,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FloatingActionButtonMenu
-import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.ToggleFloatingActionButtonDefaults
-import androidx.compose.material3.ToggleFloatingActionButtonDefaults.animateIcon
 import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -48,6 +54,7 @@ import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -69,6 +76,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.unit.LayoutDirection
@@ -89,29 +97,25 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.room.Room
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.material3.animateFloatingActionButton
 import androidx.compose.ui.draw.alpha
-import com.feldman.motion.MotionFloatingToolbarDefaults
-import com.feldman.motion.MotionSymbols
-import com.feldman.motion.motionFloatingContainer
-import com.feldman.motion.rememberSymbolPainter
-import com.feldman.motion.MotionDropdown
-import com.feldman.motion.MotionDropdownDefaults
-import com.feldman.motion.MotionDropdownDirection
-import com.feldman.motion.MotionDropdownMenuAlignment
 import com.feldman.motion.MotionBottomBarHost
 import com.feldman.motion.MotionFabConfig
 import com.feldman.motion.MotionDest
 import com.feldman.motion.MotionLevel
 import com.feldman.motion.MotionNavigationBar
 import com.feldman.motion.MotionNavigationBarDefaults
-import com.feldman.motion.MotionNavigationAxis
 import com.feldman.motion.MotionNavHost
+import com.feldman.motion.MotionNavFlow
+import com.feldman.motion.MotionNavFlowAutomaticNavigation
 import com.feldman.motion.MotionThemeRepository
+import com.feldman.motion.MotionTheme
 import com.feldman.motion.rememberMotionDestBackStack
 import com.feldman.motion.rememberMotionNavigationState
 import com.feldman.motion.rememberMotionBlurState
 import com.feldman.motion.MotionBlurBackdrop
 import com.feldman.motion.LocalMotionBlurState
+import com.feldman.motion.LocalMotionBottomBarGeometry
 import com.feldman.motion.rememberMotionBlur
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
@@ -126,33 +130,14 @@ import com.feldman.scholix.services.GradeMonitorWorker
 import com.feldman.scholix.services.MessageMonitorWorker
 import com.feldman.scholix.storage.OrientationMode
 import com.feldman.scholix.storage.orientationModeFlow
+import com.feldman.scholix.storage.defaultNavigationOrder
+import com.feldman.scholix.storage.navigationOrderFlow
 import com.feldman.scholix.widgets.GradesWidgetReceiver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import com.feldman.scholix.ui.HiddenMoeLogin
-import com.feldman.scholix.ui.HiddenMashovSmsLogin
-import com.feldman.scholix.api.providerName
-import com.feldman.scholix.api.platforms.StudentsPortalPlatform
-import com.feldman.scholix.api.platforms.OpenAUPlatform
-import com.feldman.scholix.api.platforms.MashovPlatform
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.ui.unit.sp
-import com.feldman.motion.MotionButtonDefaults
-import com.feldman.motion.MotionButton
-import com.feldman.motion.MotionSnackbar
-import com.feldman.motion.MotionSnackbarHost
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.ui.layout.onSizeChanged
-import com.feldman.motion.MotionNavFlow
-import com.feldman.motion.MotionTheme
-import com.feldman.motion.LocalMotionBottomBarGeometry
-import com.feldman.scholix.storage.defaultNavigationOrder
-import com.feldman.scholix.storage.navigationOrderFlow
-
-
 
 @Composable
 fun TopBarSpacing(): Dp {
@@ -365,6 +350,7 @@ class MainActivity : ComponentActivity() {
                 mashovRelogin?.let { mashov ->
                     HiddenMashovSmsLogin(
                         account = mashov,
+                        requestSmsPermission = false,
                         onSmsRequested = { account ->
                             withContext(Dispatchers.IO) {
                                 PlatformStorage.addPlatforms(context, listOf(account))
@@ -559,6 +545,7 @@ fun MainScreen(
             AppDest.TiktekBook(bookId = "", bookName = "", subjectId = ""),
             AppDest.TiktekSolution(imageUrl = ""),
             AppDest.Locker,
+            AppDest.Lockerim,
             AppDest.Homework,
             AppDest.Materials,
             AppDest.Settings,
@@ -588,16 +575,14 @@ fun MainScreen(
         .collectAsState(initial = defaultNavigationOrder)
     val navigationPages = remember(destinations, navigationOrder) {
         destinations.filter { it.label in navigationOrder }.sortedBy { navigationOrder.indexOf(it.label) }
-
     }
-
-    val bottomBarDestinations = navigationPages.take(4)
 
     val startDestination = rememberSaveable {
         val activity = context as? android.app.Activity
         if (activity?.intent?.getBooleanExtra("open_crash_logs", false) == true) AppDest.CrashLogs
         else if (activity?.intent?.getBooleanExtra("open_messages", false) == true) AppDest.Messages
         else if (activity?.intent?.getBooleanExtra("open_homework", false) == true) AppDest.Homework
+        else if (activity?.intent?.getBooleanExtra("open_schedule", false) == true && hasSchedule) AppDest.Schedule
         else if (hasGrades) AppDest.Grades else AppDest.Tiktek
     }
 
@@ -628,52 +613,13 @@ fun MainScreen(
     val activeNavigationPage = backStack.backStack.asReversed().firstNotNullOfOrNull { screen ->
         generateSequence<MotionDest>(screen) { it.parent }.firstOrNull { it in navigationPages }
     }
-    val visibleNavbarDestinations = if (activeNavigationPage != null && activeNavigationPage !in bottomBarDestinations) {
-        bottomBarDestinations.take(3) + activeNavigationPage
-    } else bottomBarDestinations
-
     val motionThemeRepository = remember(context) { MotionThemeRepository(context) }
     val motionLevel by motionThemeRepository.motionLevel
         .collectAsState(initial = MotionLevel.MEDIUM)
 
-    val expressiveDesign by motionThemeRepository.expressiveDesign.collectAsState(initial = true)
-    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-    val navigationState = rememberMotionNavigationState(
-        backStack = backStack.backStack,
-        topLevelDestinations = bottomBarDestinations,
-        motionLevel = motionLevel,
-        axis = if (isLandscape) {
-            MotionNavigationAxis.Vertical
-        } else {
-            MotionNavigationAxis.Horizontal
-        },
-        showsBottomBar = { it.showNavigation }
-    )
-
     val selectedNavbarDest = activeNavigationPage ?: currentScreen
-    val overflowPagesList = remember(navigationPages, visibleNavbarDestinations) {
-        navigationPages.filter { it !in visibleNavbarDestinations }
-    }
-    val moreFab = remember(overflowPagesList, selectedNavbarDest) {
-        MotionFabConfig(
-            visible = true,
-            content = {
-                OverflowMenuFab(
-                    overflowPages = overflowPagesList,
-                    selectedDest = selectedNavbarDest,
-                    onNavigate = { dest -> navigateFromUser(dest) }
-                )
-            }
-        )
-    }
-    val navigationBackdrop = rememberMotionBlurState()
-
+    var overflowPagesList by remember { mutableStateOf<List<AppDest>>(emptyList()) }
     val navigationBlurred = rememberMotionBlur()
-    var bottomBarHeight by remember { mutableStateOf(0.dp) }
-    var overflowFabSlot by remember { mutableStateOf<Rect?>(null) }
-    var navigationOrigin by remember { mutableStateOf(Offset.Zero) }
-    val showNavigationRail = isLandscape && currentScreen.showNavigation
 
     val lockerViewModel: LockerViewModel = viewModel(
         factory = LockerViewModelFactory(repository)
@@ -682,7 +628,6 @@ fun MainScreen(
     LaunchedEffect(platforms) { messagesViewModel.configure(platforms) }
 
     val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, overflowPagesList, homeworkOpenRequest, userOpenedPages, currentScreen) {
-
         AppState(
             preloadedCourses = preloadedCourses,
             repository = repository,
@@ -700,270 +645,30 @@ fun MainScreen(
         )
     }
 
-    Box(modifier = Modifier.fillMaxSize().onGloballyPositioned {
-        navigationOrigin = it.positionInWindow()
-    }) {
-        MotionBlurBackdrop(state = navigationBackdrop, modifier = Modifier.fillMaxSize()) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                if (showNavigationRail) {
-                    NavigationRail(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        header = { moreFab.content?.invoke() }
-                    ) {
-                        Spacer(Modifier.weight(1f))
-                        visibleNavbarDestinations.forEach { destination ->
-                            val selected = selectedNavbarDest == destination
-                            NavigationRailItem(
-                                selected = selected,
-                                onClick = { navigateFromUser(destination, topLevel = true) },
-                                icon = {
-                                    Icon(
-                                        painter = painterResource(
-                                            if (selected) destination.filledIcon else destination.outlineIcon
-                                        ),
-                                        contentDescription = destination.label
-                                    )
-                                },
-                                label = { Text(destination.label) },
-                                colors = NavigationRailItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                                    indicatorColor = MaterialTheme.colorScheme.primary,
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            )
-                        }
-                        Spacer(Modifier.weight(1f))
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                ) {
-                    CompositionLocalProvider(LocalAppState provides appState) {
-                        MotionNavHost(
-                            backStack = backStack,
-                            destinations = destinations,
-                            navigationState = navigationState,
-                            modifier = Modifier.fillMaxSize(),
-                            onNavigate = { dest -> navigateFromUser(dest) },
-                            onRootBack = {}
-                        )
-                    }
-                }
-            }
-        }
-
-        if (!isLandscape && expressiveDesign) {
-            CompositionLocalProvider(LocalMotionBlurState provides navigationBackdrop) {
-                MotionBottomBarHost(
-                    navigationState = navigationState,
-                    visible = currentScreen.showNavigation,
-                    bottomBarHeight = bottomBarHeight,
-                    backdropState = navigationBackdrop,
+    CompositionLocalProvider(LocalAppState provides appState) {
+        // Motion owns the shell: bar, rail, the bar's slide and predictive back, and the overflow
+        // menu on the bar's button slot. The app keeps the back stack for its deep links.
+        MotionNavFlow(
+            startDestination = startDestination,
+            destinations = destinations,
+            modifier = Modifier.fillMaxSize(),
+            backStack = backStack,
+            motionLevel = motionLevel,
+            navigationDestinations = navigationPages,
+            theme = null,
+            navigation = { content ->
+                MotionNavFlowAutomaticNavigation(
+                    content = content,
+                    snackbarHost = snackbarHost,
+                    navigationDestinations = navigationPages,
+                    selectedDestination = selectedNavbarDest,
+                    pinnedEndDestination = AppDest.Settings,
+                    replacePinnedEndWhenFull = true,
+                    onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = true) },
                     contrastBlurEnabled = navigationBlurred,
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                ) {
-                    MotionNavigationBar(
-                        visible = true,
-                        currentDest = currentScreen,
-                        selectedDest = selectedNavbarDest,
-                        destinations = visibleNavbarDestinations,
-                        onNavigate = { dest -> navigateFromUser(dest, topLevel = true) },
-                        onHeightChanged = { bottomBarHeight = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        floatingActionButton = if (overflowPagesList.isNotEmpty()) {
-                            {
-                                // Reserve the same button slot as the gallery's overlay menu.
-                                Box(Modifier.size(56.dp).onGloballyPositioned {
-                                    overflowFabSlot = it.boundsInWindow()
-                                })
-                            }
-                        } else null,
-                        fab = MotionNavigationBarDefaults.fab(morphEnabled = false),
-                        colors = MotionNavigationBarDefaults.colors().let { colors ->
-                            colors.copy(container = colors.container.copy(alpha = if (navigationBlurred) 0.84f else 1f))
-                        },
-                        contrast = MotionNavigationBarDefaults.contrast(enabled = false)
-                    )
-                }
-            }
-            // Material's menu grows above the bar, but its toggle covers the reserved slot.
-            val slot = overflowFabSlot
-            if (slot != null && overflowPagesList.isNotEmpty() &&
-                currentScreen.showNavigation && navigationState.bottomBarVisible
-            ) {
-                CompositionLocalProvider(LocalMotionBlurState provides navigationBackdrop) {
-                    Layout(
-                        content = {
-                            OverflowFabMenu(
-                                overflowPages = overflowPagesList,
-                                onNavigate = { dest -> navigateFromUser(dest) }
-                            )
-                        },
-                        modifier = Modifier.matchParentSize()
-                    ) { measurables, constraints ->
-                        val menu = measurables.single().measure(constraints.copy(minWidth = 0, minHeight = 0))
-                        layout(constraints.maxWidth, constraints.maxHeight) {
-                            // Material adds 16 dp around its button, as in Motion's overlay host.
-                            val inset = 16.dp.toPx()
-                            val x = if (layoutDirection == LayoutDirection.Rtl) {
-                                slot.left - navigationOrigin.x - inset
-                            } else {
-                                slot.right - navigationOrigin.x + inset - menu.width
-                            }
-                            val y = slot.bottom - navigationOrigin.y + inset - menu.height
-                            menu.place(x.roundToInt(), y.roundToInt())
-                        }
-                    }
-                }
-            }
-        } else if (!isLandscape && currentScreen.showNavigation) {
-            NavigationBar(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-            ) {
-                visibleNavbarDestinations.forEach { destination ->
-                    val selected = selectedNavbarDest == destination
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = { navigateFromUser(destination, topLevel = true) },
-                        icon = {
-                            Icon(
-                                painter = painterResource(
-                                    if (selected) destination.filledIcon else destination.outlineIcon
-                                ),
-                                contentDescription = destination.label
-                            )
-                        },
-                        label = { Text(destination.label) }
-                    )
-                }
-                moreFab.content?.invoke()
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun OverflowFabMenu(
-    overflowPages: List<AppDest>,
-    onNavigate: (MotionDest) -> Unit
-) {
-    if (overflowPages.isEmpty()) return
-    var menuExpanded by rememberSaveable { mutableStateOf(false) }
-    BackHandler(menuExpanded) { menuExpanded = false }
-
-    // Material's own menu, like the gallery demo's native menu: the toggle is primary like
-    // every other button in the bar, and the items open from the default lighter container.
-    val toggleProgress by animateFloatAsState(
-        targetValue = if (menuExpanded) 1f else 0f,
-        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
-        label = "OverflowToggleProgress",
-    )
-    val toggleSize = ToggleFloatingActionButtonDefaults.containerSize()(toggleProgress)
-    val toggleCornerRadius = ToggleFloatingActionButtonDefaults.containerCornerRadius()(toggleProgress)
-    val toggleShape = RoundedCornerShape(toggleCornerRadius)
-    FloatingActionButtonMenu(
-        expanded = menuExpanded,
-        horizontalAlignment = Alignment.End,
-        button = {
-            // Keep the menu's button footprint fixed while its visible surface shrinks.
-            Box(Modifier.size(56.dp), contentAlignment = Alignment.TopEnd) {
-                FilledIconButton(
-                    onClick = { menuExpanded = !menuExpanded },
-                    shape = toggleShape,
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = Color.Transparent,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ),
-                    modifier = Modifier.size(toggleSize).clip(toggleShape)
-                        .motionFloatingContainer(toggleShape, MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(
-                        painter = rememberSymbolPainter(
-                            if (menuExpanded) MotionSymbols.ic_close else MotionSymbols.ic_menu
-                        ),
-                        contentDescription = if (menuExpanded) "Close more pages" else "More pages",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = with(ToggleFloatingActionButtonDefaults) {
-                            Modifier.animateIcon(
-                                checkedProgress = { toggleProgress },
-                                color = iconColor(MaterialTheme.colorScheme.onPrimary, MaterialTheme.colorScheme.onPrimary)
-                            )
-                        }
-                    )
-                }
-            }
-        }
-    ) {
-        overflowPages.forEach { page ->
-            FloatingActionButtonMenuItem(
-                onClick = {
-                    menuExpanded = false
-                    onNavigate(page)
-                },
-                icon = {
-                    if (page.filledIcon != 0) {
-                        Icon(
-                            painter = painterResource(page.filledIcon),
-                            contentDescription = null
-                        )
-                    }
-                },
-                text = { Text(page.label) }
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun OverflowMenuFab(
-    overflowPages: List<AppDest>,
-    selectedDest: MotionDest,
-    onNavigate: (MotionDest) -> Unit
-) {
-    MotionDropdown(
-        options = overflowPages,
-        selected = selectedDest as? AppDest,
-        onSelected = onNavigate,
-        items = MotionDropdownDefaults.items(
-            label = { it.label },
-            icon = { painterResource(it.filledIcon) },
-            key = { it }
-        ),
-        sizes = MotionDropdownDefaults.sizes(
-            menuMinWidth = 200.dp,
-            menuMaxWidth = 280.dp,
-            menuMaxHeight = 380.dp
-        ),
-        menu = MotionDropdownDefaults.menu(
-            alignment = MotionDropdownMenuAlignment.End,
-            matchAnchorWidth = false,
-            darkenBackground = true
-        ),
-        direction = MotionDropdownDirection.Auto,
-        contentDescription = "More pages",
-        anchorContent = { _, toggle ->
-            MotionFloatingToolbarDefaults.StandardFloatingActionButton(
-                onClick = toggle,
-                modifier = Modifier.size(56.dp),
-                // Same pair as the navigation bar itself: the button reads as part of the
-                // pill rather than a second accent. Both blur identically behind.
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_menu),
-                    contentDescription = "More pages"
+                    onOverflowChanged = { overflowPagesList = it.filterIsInstance<AppDest>() },
                 )
             }
-        }
-    )
+        )
+    }
 }

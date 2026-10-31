@@ -1,9 +1,14 @@
 package com.feldman.scholix.pages
 
+import androidx.compose.ui.res.stringResource
+import com.feldman.scholix.R
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.LocalAutofillHighlightColor
@@ -122,7 +127,7 @@ fun LoginPage(
     ) {
 
         AnimatedVisibility(visible = !showLoginPage, enter = fadeIn(), exit = fadeOut()) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = "Choose Your Platform",
                     style = MaterialTheme.typography.headlineMedium,
@@ -133,6 +138,7 @@ fun LoginPage(
 
                 ProviderPickerList(
                     providers = platformOptions,
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     onSelect = { option ->
                         selectedPlatform = option
                         if (option.name != "Google Classroom") {
@@ -199,7 +205,21 @@ fun LoginPage(
                         )
                     }
 
-                    if (platform.name == "Shahaf") {
+                    if (platform.name == "לוקרים") {
+                        com.feldman.scholix.lockerim.LockerimLoginView(onSuccess = { created ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
+                                onLoginSuccess()
+                            }
+                        }, onCancel = { selectedPlatform = null })
+                    } else if (platform.name == "Schooly") {
+                        SchoolyLoginView(showTitle = false, onSuccess = { created ->
+                            scope.launch {
+                                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
+                                onLoginSuccess()
+                            }
+                        }, onCancel = { selectedPlatform = null })
+                    } else if (platform.name == "Shahaf") {
                         ShahafLoginView(onSuccess = { created ->
                             scope.launch {
                                 withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
@@ -505,7 +525,7 @@ fun DynamicLoginFields(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         fields.getFields().forEach { field ->
-            var value by remember(field.id, field.value) { mutableStateOf(field.value ?: "") }
+            var value by remember(fields, field.id, field.value) { mutableStateOf(field.value ?: "") }
             var passwordVisible by remember { mutableStateOf(false) }
 
             val autofillContentType = when (field.type) {
@@ -524,7 +544,21 @@ fun DynamicLoginFields(
                         mutableFields.setValue(field.id, it)
                         onFieldsChanged(mutableFields)
                     },
-                    label = { Text(field.id.replaceFirstChar { c -> c.uppercase() }) },
+                    label = {
+                        Text(when (field.type) {
+                            Type.Username -> stringResource(R.string.username)
+                            Type.Id -> stringResource(R.string.id_number)
+                            Type.Password -> stringResource(R.string.password)
+                            Type.Email -> stringResource(R.string.email)
+                            is Type.Custom -> when (field.type.name) {
+                                "mobile" -> stringResource(R.string.mobile_number)
+                                "schoolCode" -> stringResource(R.string.school_code)
+                                "schoolYear" -> stringResource(R.string.school_year)
+                                else -> field.id.replaceFirstChar { c -> c.uppercase() }
+                            }
+                            else -> field.id.replaceFirstChar { c -> c.uppercase() }
+                        })
+                    },
                     leadingIcon = {
                         when (field.type) {
                             Type.Username, Type.Id -> Icon(Icons.Default.Person, null)
@@ -609,7 +643,7 @@ fun DynamicLoginFields(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(16.dp)
                         ) {
-                            Text("Cancel")
+                            Text(stringResource(R.string.cancel))
                         }
                     }
 

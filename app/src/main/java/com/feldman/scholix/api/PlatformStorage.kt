@@ -17,12 +17,14 @@ import com.feldman.motion.MotionSymbols
 import com.feldman.scholix.R
 import com.feldman.scholix.api.platforms.DemoPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
+import com.feldman.scholix.api.platforms.LockerimPlatform
 import com.feldman.scholix.api.platforms.GoogleClassroomPlatform
 import com.feldman.scholix.api.platforms.MashovPlatform
 import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.api.platforms.ShahafPlatform
+import com.feldman.scholix.api.platforms.SchoolyPlatform
 import java.util.Locale
 
 data class PlatformInfo(
@@ -40,6 +42,7 @@ data class ProviderCourseOverrides(
 )
 
 val platformOptions = listOf(
+    PlatformInfo("לוקרים", R.drawable.ic_lock) { LockerimPlatform() },
     PlatformInfo("Google Classroom", R.drawable.ic_docs, iconSymbol = MotionSymbols.ic_school) { GoogleClassroomPlatform() },
     PlatformInfo("Webtop", R.drawable.ic_webtop) { WebtopPlatform() as Platform },
     PlatformInfo("Bar-Ilan", R.drawable.ic_bar_ilan) { BarIlanPlatform() as Platform },
@@ -48,6 +51,7 @@ val platformOptions = listOf(
     PlatformInfo("Mashov", R.drawable.ic_mashov) { MashovPlatform() as Platform },
     PlatformInfo("Education Portal", R.drawable.ic_moe) { StudentsPortalPlatform() as Platform },
     PlatformInfo("Shahaf", R.drawable.ic_moe, iconSymbol = MotionSymbols.ic_school) { ShahafPlatform() },
+    PlatformInfo("Schooly", R.drawable.ic_schooly) { SchoolyPlatform() },
     PlatformInfo(
         "Demo",
         R.drawable.ic_account_circle,
@@ -58,6 +62,7 @@ val platformOptions = listOf(
 
 /** The provider's name as the provider list shows it, for messages about it. */
 fun Platform.providerName(): String = when (this) {
+    is LockerimPlatform -> "לוקרים"
     is GoogleClassroomPlatform -> "Google Classroom"
     is WebtopPlatform -> "Webtop"
     is InbarPlatform -> "Inbar (Bar-Ilan)"
@@ -66,6 +71,7 @@ fun Platform.providerName(): String = when (this) {
     is MashovPlatform -> "Mashov"
     is StudentsPortalPlatform -> "Education Portal"
     is ShahafPlatform -> "Shahaf"
+    is SchoolyPlatform -> "Schooly"
     is DemoPlatform -> "Demo"
     else -> platformDisplayName
 }
@@ -147,6 +153,18 @@ object PlatformStorage {
         }
     }
 
+    /** Persist renewed cookies without overwriting edits or a newer sign-in from another page. */
+    @Synchronized fun saveWebtopSession(context: Context, account: WebtopPlatform, previousCookies: String?) {
+        val platforms = loadPlatforms(context)
+        val index = platforms.indexOfFirst { it.id == account.id && it is WebtopPlatform }
+        val stored = platforms.getOrNull(index) as? WebtopPlatform ?: return
+        if (stored.cookies != previousCookies || stored.getUsername() != account.getUsername() ||
+            stored.getPassword() != account.getPassword()) return
+        platforms[index] = WebtopPlatform.fromJson(stored.toJson()
+            .put("cookies", account.cookies).put("loggedIn", account.loggedIn))
+        savePlatforms(context, platforms)
+    }
+
     /**
      * Loads and deserializes the full list of Platform objects using manual JSON parsing.
      */
@@ -188,6 +206,8 @@ object PlatformStorage {
                     existing is WebtopPlatform && np is WebtopPlatform
                 ) || (
                     existing is GoogleClassroomPlatform && np is GoogleClassroomPlatform && existing.getUsername() == np.getUsername()
+                ) || (
+                    existing is LockerimPlatform && np is LockerimPlatform && existing.phone == np.phone
                 )
             }
             platforms.add(np)
@@ -310,6 +330,9 @@ object PlatformStorage {
             async {
                 // Inbar is checked when the user opens its grades or timetable.
                 if (p is InbarPlatform) return@async null
+                // These providers recover expired sessions when their data is requested.
+                // Eager sign-in can invalidate a session another page is still using.
+                if (p is LockerimPlatform || (p is WebtopPlatform && p.isLoggedIn())) return@async null
                 val success = try {
                     p.refreshCookies()
                 } catch (e: Exception) {

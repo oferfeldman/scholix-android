@@ -234,6 +234,7 @@ class MashovPlatform() : Platform {
             .build()
         client.newCall(request).execute().use { response ->
             if (response.isSuccessful) return
+            if (response.code == 429) throw MashovSmsRateLimited()
             val body = response.body.string()
             if (response.code == 403 && body.contains("captcha", ignoreCase = true)) {
                 throw MashovCaptchaRequired()
@@ -252,7 +253,8 @@ class MashovPlatform() : Platform {
             password = null // One-time codes are never persisted.
             loginMethod = "sms"
         }
-        return ok && refreshGrades()
+        if (ok) refreshGrades()
+        return ok
     }
 
     /** Re-establish a Mashov session using the private-device token, without another SMS. */
@@ -273,11 +275,13 @@ class MashovPlatform() : Platform {
                     loggedIn = false
                     return false
                 }
-                adoptLoginResponse(
+                val restored = adoptLoginResponse(
                     JSONObject(response.body.string()),
                     response.header("X-Csrf-Token"),
                     response.header(DEVICE_PASS_HEADER),
-                ) && refreshGrades()
+                )
+                if (restored) refreshGrades()
+                restored
             }
         } catch (exception: Exception) {
             Log.w(TAG, "Mashov device login failed: ${exception.javaClass.simpleName}")

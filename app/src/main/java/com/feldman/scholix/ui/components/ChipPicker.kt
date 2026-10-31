@@ -9,6 +9,7 @@ import com.feldman.motion.MotionDropdownMenuAlignment
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.font.FontWeight
 import com.feldman.motion.MotionDropdown
+import com.feldman.motion.MotionDropdownAnimation
 import com.feldman.motion.MotionDropdownDefaults
 import com.feldman.motion.MotionDropdownDirection
 import com.feldman.motion.MotionDropdownLabelPosition
@@ -60,7 +61,8 @@ fun ChipPicker(
         trailingIcon = rememberSymbolPainter(MotionSymbols.ic_keyboard_arrow_down),
         text = MotionDropdownDefaults.text(value = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), label = MaterialTheme.typography.labelMedium, valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
         sizes = MotionDropdownDefaults.sizes(menuMinWidth = 112.dp.coerceAtMost(menuWidth), menuMaxWidth = menuWidth),
-        menu = MotionDropdownDefaults.menu(
+        // The morph transition can leave a touch-blocking popup after rapid toggles.
+        menu = MotionDropdownDefaults.menu(animation = MotionDropdownAnimation.Standard,
             matchAnchorWidth = false,
             alignment = MotionDropdownMenuAlignment.Center,
             showSelectedCheck = true,

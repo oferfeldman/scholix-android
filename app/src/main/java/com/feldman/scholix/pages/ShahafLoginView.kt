@@ -9,7 +9,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionButtonDefaults
 import com.feldman.motion.MotionCard
 import com.feldman.motion.MotionItemPosition
 import com.feldman.scholix.R
@@ -66,6 +68,8 @@ fun ShahafLoginView(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val signInLabel = stringResource(R.string.sign_in)
+    val fillFieldsMessage = stringResource(R.string.fill_all_fields)
     val draft = remember(account?.id) {
         (account?.let { ShahafPlatform.fromJson(it.toJson()) } ?: ShahafPlatform()).also { provider ->
             val legacyAutomaticName = provider.getStudentName().takeIf { it.isNotBlank() }?.let { "Shahaf · $it" }
@@ -88,6 +92,7 @@ fun ShahafLoginView(
     var name by remember(draft) { mutableStateOf(draft.getName()) }
     var groupParameters by remember(draft.id) { mutableStateOf(emptyList<ShahafGroupParameter>()) }
     var groupLoading by remember(draft.id) { mutableStateOf(account != null) }
+    var selectedGroups by remember(draft.id) { mutableStateOf(draft.getViewParameters()) }
 
     LaunchedEffect(account?.id) {
         if (account == null || !draft.isLoggedIn()) {
@@ -193,7 +198,7 @@ fun ShahafLoginView(
                         androidx.compose.material3.CircularProgressIndicator(Modifier.size(28.dp))
                     } else {
                         groupParameters.forEach { parameter ->
-                            val savedId = draft.getViewParameter(parameter.id)
+                            val savedId = selectedGroups[parameter.id].orEmpty()
                             val selectedId = savedId.ifBlank { parameter.selectedId }
                                 .takeIf { candidate -> parameter.options.any { it.id == candidate } }
                                 ?: parameter.options.first().id
@@ -206,6 +211,7 @@ fun ShahafLoginView(
                                 onSelectedChange = { label ->
                                     parameter.options.firstOrNull { it.label == label }?.let { option ->
                                         draft.setViewParameter(parameter.id, option.id)
+                                        selectedGroups = draft.getViewParameters()
                                     }
                                 },
                             )
@@ -225,11 +231,11 @@ fun ShahafLoginView(
             moeCredentials = draft.getUsername() to ""
         }
         if (method != "moe_sms") DynamicLoginFields(fields, onFieldsChanged = {}, isLoading = busy, errorMessage = error,
-            buttonText = "Sign in", onCancel = onCancel, onSubmit = {
+            buttonText = signInLabel, onCancel = if (account == null) onCancel else null, onSubmit = {
                 val user = fields.getValue("username").orEmpty()
                 val pass = fields.getValue("password").orEmpty()
                 if (user.isBlank() || pass.isBlank()) {
-                    error = "Please fill in all fields"
+                    error = fillFieldsMessage
                 } else {
                     draft.setUsername(user)
                     draft.setPassword(pass)
@@ -255,6 +261,7 @@ fun ShahafLoginView(
                 MotionButton(
                     text = stringResource(R.string.cancel),
                     onClick = onCancel,
+                    sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp),
                     modifier = Modifier.weight(1f),
                 )
                 MotionButton(
@@ -263,6 +270,7 @@ fun ShahafLoginView(
                         draft.setName(name)
                         onSuccess(draft)
                     },
+                    sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp),
                     modifier = Modifier.weight(1f),
                 )
             }

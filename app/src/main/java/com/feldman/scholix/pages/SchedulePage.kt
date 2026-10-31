@@ -98,13 +98,15 @@ fun SchedulePage(
     inbarAccessRequested: Boolean = false,
     isActive: Boolean = true,
 ) {
+    val context = LocalContext.current
+    LaunchedEffect(isActive, platforms) {
+        if (isActive) com.feldman.scholix.widgets.ScheduleWidgetWorker.refresh(context)
+    }
     var inbarRequestedByUser by remember { mutableStateOf(false) }
     val active by rememberUpdatedState(isActive)
     val navigationRequested by rememberUpdatedState(inbarAccessRequested)
     fun inbarAllowed() = active && (navigationRequested || inbarRequestedByUser)
     val canAccessInbar = inbarAllowed()
-    val context = LocalContext.current
-
     val schedulePlatforms = platforms.filter { it.supportsSchedule }
     var selectedPlatformIndex by remember(schedulePlatforms.size) { mutableIntStateOf(0) }
     var platformPickerExpanded by remember { mutableStateOf(false) }
@@ -314,7 +316,7 @@ fun SchedulePage(
             Log.d("SchedulePage", "Fetching schedule for $selectedValue and page $page")
 
             if (platform != null) {
-                val requestPlatform = if (platform is InbarPlatform) withContext(Dispatchers.IO) {
+                val requestPlatform = if (platform is InbarPlatform || platform is WebtopPlatform) withContext(Dispatchers.IO) {
                     PlatformStorage.loadPlatforms(context).firstOrNull { it.id == platform.id } ?: platform
                 } else platform
                 if (requestPlatform is InbarPlatform) recoveredProviders = recoveredProviders + (requestPlatform.id to requestPlatform)
@@ -331,7 +333,9 @@ fun SchedulePage(
                     // (e.g., using coroutineScope.ensureActive() inside the low-level logic,
                     // or using a cancellable HTTP client). Assuming the `platform.getSchedule` is blocking:
 
+                    val previousCookies = (requestPlatform as? WebtopPlatform)?.cookies
                     val schedule = requestPlatform.getSchedule(page, null, selectedValue)
+                    if (requestPlatform is WebtopPlatform) PlatformStorage.saveWebtopSession(context, requestPlatform, previousCookies)
 
                     // detect if an error object is returned
                     if (schedule.has("error")) {
@@ -343,7 +347,7 @@ fun SchedulePage(
                             inbarRelogin = inbar.forSmsLogin()
                             return@withContext emptyList()
                         }
-                        val webtop = platform as? WebtopPlatform
+                        val webtop = requestPlatform as? WebtopPlatform
                         if (errorCode == "login_failed" && webtop != null &&
                             webtop.needsInteractiveRelogin() && !reloginAttempted
                         ) {
@@ -363,13 +367,14 @@ fun SchedulePage(
                         schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                     }
                 }
-                if (inbarRelogin != null) return@LaunchedEffect
+                if (inbarRelogin != null || webtopRelogin != null || errorMessages[page] != null) return@LaunchedEffect
                 // Update the state *after* the blocking call, back on the main thread (which LaunchedEffect runs on).
                 allSchedulesUpdated[page] = updated
 
                 // --- Original schedule ---
                 val original = if (!supportsOriginal) updated else withContext(Dispatchers.IO) {
                     val schedule = requestPlatform.getOriginalSchedule(page, null, selectedValue)
+                    check(!schedule.has("error")) { schedule.optString("error") }
                     schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                 }
                 allSchedulesOriginal[page] = original
@@ -379,18 +384,19 @@ fun SchedulePage(
                     val remainingDays = withContext(Dispatchers.IO) {
                         dayNames.indices
                             .filter { it != page }
-                            .associateWith { day ->
+                            .mapNotNull { day ->
                                 val updatedSchedule = requestPlatform.getSchedule(day, null, selectedValue)
                                 val originalSchedule = if (supportsOriginal) requestPlatform.getOriginalSchedule(day, null, selectedValue)
                                     else updatedSchedule
+                                if (updatedSchedule.has("error") || originalSchedule.has("error")) return@mapNotNull null
                                 val updatedItems = updatedSchedule.keys().asSequence()
                                     .map { updatedSchedule.getJSONObject(it) }
                                     .toList()
                                 val originalItems = originalSchedule.keys().asSequence()
                                     .map { originalSchedule.getJSONObject(it) }
                                     .toList()
-                                updatedItems to originalItems
-                            }
+                                day to (updatedItems to originalItems)
+                            }.toMap()
                     }
                     val newUpdated = remainingDays.mapValues { it.value.first }
                     val newOriginal = remainingDays.mapValues { it.value.second }
@@ -413,7 +419,11 @@ fun SchedulePage(
         } else {
             // 2. Handle all other unexpected errors
             Log.e("SchedulePage", "Error fetching schedule", e)
-            errorMessages[pagerState.currentPage] = "Unknown error occurred while loading schedule."
+            errorMessages[page] = when (e.message) {
+                "server_unreachable" -> "Cannot reach the server.\nCheck your internet connection."
+                "login_failed" -> "Login failed.\nPlease re-login."
+                else -> "Unknown error occurred while loading schedule."
+            }
         }
     } finally {
         // This finally block always executes, whether cancelled or not,
@@ -555,9 +565,8 @@ fun SchedulePage(
                 providers = schedulePlatforms,
                 selectedIndex = selectedPlatformIndex,
                 onSelected = {
-                    if (schedulePlatforms.getOrNull(it) is InbarPlatform) inbarRequestedByUser = true
                     platformPickerExpanded = false
-
+                    if (schedulePlatforms.getOrNull(it) is InbarPlatform) inbarRequestedByUser = true
                     selectedPlatformIndex = it
                 },
                 expanded = platformPickerExpanded,
@@ -720,7 +729,6 @@ fun SchedulePage(
                         onClick = { coroutineScope.launch { pagerState.animateScrollToPage(index) } },
                         selectedContentColor = MaterialTheme.colorScheme.primary,
                         unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-
                     ) {
                         Text(
                             text = day,
@@ -773,6 +781,14 @@ fun SchedulePage(
                                     if (canAccessInbar) inbarRelogin = inbar.forSmsLogin()
                                     else scheduleReloadTrigger++
                                 }) { Text(if (canAccessInbar) "Retry login" else "Load Inbar schedule") }
+                            } else {
+                                TextButton(onClick = {
+                                    allSchedulesUpdated.remove(page)
+                                    allSchedulesOriginal.remove(page)
+                                    errorMessages[page] = null
+                                    reloginAttempted = false
+                                    scheduleReloadTrigger++
+                                }) { Text("Retry") }
                             }
                             }
                         }

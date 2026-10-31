@@ -6,7 +6,6 @@ import com.feldman.motion.MotionDialog
 import android.app.DownloadManager
 import android.content.Context
 import android.os.Environment
-
 import android.webkit.WebView
 import android.text.BidiFormatter
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -36,7 +35,6 @@ import androidx.core.net.toUri
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
-
 import com.feldman.motion.*
 import com.feldman.scholix.AppDest
 import com.feldman.scholix.TopBarSpacing
@@ -365,7 +363,6 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
     val instiCode = platform?.studentInstitution.orEmpty()
     val cookies = platform?.cookies
 
-
     var providerExpanded by rememberSaveable { mutableStateOf(false) }
     var searchVisible by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -489,7 +486,6 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                     } else {
                         MailIconAction(MotionSymbols.ic_refresh, "Refresh announcements") { vm.refresh() }
                     }
-
                 }
             }
             if (searchVisible || vm.query.isNotBlank()) Item(modifier = Modifier.padding(bottom = 8.dp)) {

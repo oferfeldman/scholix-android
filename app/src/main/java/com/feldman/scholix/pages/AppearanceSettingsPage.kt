@@ -56,8 +56,9 @@ fun AppearanceSettingsPage(onBack: () -> Unit) {
     val orientationMode by remember(context) { context.orientationModeFlow() }.collectAsState(initial = OrientationMode.AUTO)
     val expressiveDesign by themeRepository.expressiveDesign.collectAsState(initial = true)
     val useDark = isMotionDarkTheme()
-    val dynamicColorSeed =
+    val dynamicColorSeed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         if (useDark) dynamicDarkColorScheme(context).primary else dynamicLightColorScheme(context).primary
+    } else colorScheme.primary
 
     MotionScaffold(
         modifier = Modifier.fillMaxSize(),

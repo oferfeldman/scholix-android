@@ -36,7 +36,6 @@ import com.feldman.scholix.ui.components.SettingsTopBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
 import java.text.DateFormat
 import java.util.Date
 
@@ -73,18 +72,15 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
     val updated = snapshot.updated
     val enabled = snapshot.enabled
     val needsLogin = snapshot.needsLogin
-
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var courseFilter by rememberSaveable { mutableStateOf<Int?>(null) }
     var typeFilter by rememberSaveable { mutableStateOf("all") }
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val scope = rememberCoroutineScope()
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         // A completed sign-in may change accounts. Return to the freshly loaded list.
         if (result.resultCode == android.app.Activity.RESULT_OK) selectedId = null
-
     }
     val signInScope = rememberCoroutineScope()
     fun reconnect() {
@@ -109,7 +105,6 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val canRecover = withContext(Dispatchers.IO) { LemidaSignInStore(context).canRecover() } && LemidaBackgroundSignIn.available(context)
             if (repo.enabled() && (!repo.needsLogin() || canRecover) && !repo.syncing.value) LemidaSyncWorker.refresh(context)
-
         }
     }
     if (!snapshot.loaded) {
@@ -137,7 +132,6 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                         login.launch(Intent(context, LemidaLoginActivity::class.java).putExtra("edit_sign_in_details", true))
                     })
                     MotionDropdownMenuItem(text = { Text("Reconnect Lemida") }, enabled = !syncing, onClick = {
-
                         options = false
                         reconnect()
                     })
@@ -148,7 +142,6 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                     MotionDropdownMenuItem(text = { Text(if (enabled) "Pause automatic updates" else "Resume automatic updates") }, onClick = {
                         val next = !enabled; repo.setEnabled(next); options = false
                         if (next) { permission.launch(Manifest.permission.POST_NOTIFICATIONS); LemidaSyncWorker.schedule(context); LemidaSyncWorker.refresh(context, manual = true) }
-
                     })
                 }
             }

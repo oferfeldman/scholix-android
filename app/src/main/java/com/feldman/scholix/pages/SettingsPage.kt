@@ -373,6 +373,28 @@ fun AddPlatformSheet(
         else -> "Signing in"
     }
 
+    if (selectedPlatform?.name == "לוקרים") {
+        com.feldman.scholix.lockerim.LockerimLoginView(onSuccess = { created ->
+            scope.launch {
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
+                onAdded()
+                onClose()
+            }
+        }, onCancel = { selectedPlatform = null })
+        return
+    }
+
+    if (selectedPlatform?.name == "Schooly") {
+        SchoolyLoginView(onSuccess = { created ->
+            scope.launch {
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(created)) }
+                onAdded()
+                onClose()
+            }
+        }, onCancel = { selectedPlatform = null })
+        return
+    }
+
     if (selectedPlatform?.name == "Shahaf") {
         ShahafLoginView(onSuccess = { created ->
             scope.launch {
@@ -745,6 +767,26 @@ fun EditProviderSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    if (provider is com.feldman.scholix.api.platforms.LockerimPlatform) {
+        com.feldman.scholix.lockerim.LockerimLoginView(provider, onSuccess = { updated ->
+            scope.launch {
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(updated)) }
+                onChanged()
+                onClose()
+            }
+        }, onCancel = onClose)
+        return
+    }
+    if (provider is com.feldman.scholix.api.platforms.SchoolyPlatform) {
+        SchoolyLoginView(provider, onSuccess = { updated ->
+            scope.launch {
+                withContext(Dispatchers.IO) { PlatformStorage.addPlatforms(context, listOf(updated)) }
+                onChanged()
+                onClose()
+            }
+        }, onCancel = onClose)
+        return
+    }
     if (provider is com.feldman.scholix.api.platforms.ShahafPlatform) {
         ShahafLoginView(provider, onSuccess = { updated ->
             scope.launch {
