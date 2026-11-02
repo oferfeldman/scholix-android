@@ -548,6 +548,7 @@ fun MainScreen(
             AppDest.Lockerim,
             AppDest.Homework,
             AppDest.Materials,
+            AppDest.Studies,
             AppDest.Settings,
             AppDest.Platforms,
             AppDest.AddPlatform,

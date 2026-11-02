@@ -15,6 +15,10 @@
          Without it Scholix falls back to Android's one-message SMS User Consent UI. -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
+    <queries>
+        <intent><action android:name="com.feldman.documents.action.STUDY" /></intent>
+    </queries>
+
     <application
         android:name=".ScholixApp"
         android:allowBackup="true"

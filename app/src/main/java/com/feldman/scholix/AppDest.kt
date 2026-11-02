@@ -51,6 +51,19 @@ sealed class AppDest : MotionDest {
 
     @Serializable
     @Parcelize
+    data object Studies : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Studies"
+        @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
+        @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_docs_outline
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.studies.StudiesPage(onBack)
+        }
+    }
+
+    @Serializable
+    @Parcelize
     data object Lockerim : AppDest() {
         @IgnoredOnParcel @Transient override val label = "לוקרים"
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_lock
@@ -113,6 +126,8 @@ sealed class AppDest : MotionDest {
             ) {
                 Title("More")
                 Section {
+                    PageItem(title = "Studies", icon = painterResource(R.drawable.ic_docs),
+                        onClick = { onBack(); onNavigate(Studies) })
                     overflowPages.forEach { destination ->
                         PageItem(
                             key = destination.label,

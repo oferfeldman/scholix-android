@@ -21,7 +21,7 @@ import java.io.IOException
 
 data class LemidaSnapshot(val homework: List<Homework> = emptyList(), val courses: List<LemidaCourse> = emptyList(),
     val status: String = "", val updated: Long = 0, val enabled: Boolean = false, val needsLogin: Boolean = false,
-    val loaded: Boolean = false)
+    val loaded: Boolean = false, val account: String = "")
 
 class LemidaRepository internal constructor(context: Context, preferencesName: String,
     private val browserFactory: (Context, String?, WebView?) -> LemidaTransport) {
@@ -51,7 +51,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
             ?: homework.map { LemidaCourse(it.courseId, it.course) }.distinctBy { it.id }
         LemidaSnapshot(homework, courses.sortedBy { it.name }, values["status"] as? String ?: "",
             values["last_sync"] as? Long ?: 0L, values["enabled"] as? Boolean ?: false,
-            values["needs_login"] as? Boolean ?: false, loaded = true)
+            values["needs_login"] as? Boolean ?: false, loaded = true, account = values["user_id"] as? String ?: "")
     }.flowOn(Dispatchers.IO)
     fun setUserAgent(value: String) { prefs.edit().putString("user_agent", value).apply() }
     private fun detailKey(item: Homework) = "detail:${prefs.getString("user_id", "")}:${item.id}"

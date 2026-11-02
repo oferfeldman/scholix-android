@@ -97,9 +97,12 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         if (selectedId != null && homework.none { it.id == selectedId }) selectedId = null
     }
     homework.firstOrNull { it.id == selectedId }?.let { item ->
-        LemidaHomeworkDetail(item, repo, onBack = { selectedId = null }, onReconnect = {
-            reconnect()
-        }); return
+        key(snapshot.account, item.id) {
+            LemidaHomeworkDetail(item, repo, snapshot.account, onBack = { selectedId = null }, onReconnect = {
+                reconnect()
+            })
+        }
+        return
     }
     LaunchedEffect(lifecycle) {
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -230,9 +233,11 @@ internal fun LemidaHomeworkFilters(
 }
 
 @Composable
-internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack: () -> Unit, onReconnect: () -> Unit) {
+internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, account: String = "",
+    onBack: () -> Unit, onReconnect: () -> Unit) {
     BackHandler(onBack = onBack)
     var detail by remember(item.id) { mutableStateOf(repo.cachedDetail(item)) }
+    var detailCheckedAt by remember(item.id) { mutableLongStateOf(0) }
     var loading by remember(item.id) { mutableStateOf(true) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
     var requiresSignIn by remember(item.id) { mutableStateOf(false) }
@@ -250,7 +255,7 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack
         loading = true
         error = null
         requiresSignIn = false
-        try { detail = repo.detail(item) }
+        try { detail = repo.detail(item); detailCheckedAt = System.currentTimeMillis() }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) {
             error = e.message ?: "Could not update homework details."
@@ -288,6 +293,14 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, onBack
             Text(item.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         } }
+        if (account.isNotBlank()) Item {
+            val assignment = com.feldman.scholix.studies.StudyAssignment.create(LemidaParser.BASE, account,
+                item.courseId, item.type, item.id.substringAfterLast(':'), item.title, item.course,
+                status = detail?.tables?.flatten()?.filter { row -> row.firstOrNull()?.contains("status", ignoreCase = true) == true }
+                    ?.joinToString("; ") { it.joinToString(" · ") }.orEmpty().take(2000),
+                checkedAt = detailCheckedAt)
+            com.feldman.scholix.studies.StudyActions(assignment)
+        }
         error?.let { message -> Section {
             Item { Text(message, color = MaterialTheme.colorScheme.error) }
             if (requiresSignIn) PageItem(title = "Sign in to Lemida", description = "Reconnect to update this homework",
