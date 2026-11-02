@@ -1,5 +1,73 @@
 # Lemida homework on the phone
 
+## PDF attachments
+
+Homework details now show a **PDF attachments** section. Tap a file to open it
+inside Scholix with page navigation and pinch zoom; Back returns to the same
+homework. Linked and embedded PDF files are retained in the saved detail model,
+including older cache compatibility. Moodle resource links labelled as PDFs are
+also supported when they redirect to a PDF or contain one unambiguous embedded PDF.
+
+Use **Download** in the PDF reader to keep a copy in **Downloads → Scholix**.
+The save copies the already authenticated preview without another network request.
+It preserves Hebrew filenames and uses Android's scoped Downloads collection,
+without requesting broad storage access. The file stays hidden until the copy
+finishes; failed or cancelled saves remove the pending entry. A saved copy remains
+available after closing the reader, while the private preview is still removed.
+
+The download update passed 108 focused Android cases and 88 overlapping core
+cases. Five synthetic provider tests execute the production save code and verify
+binary integrity after preview deletion, publication only after copying, storage
+failure cleanup, cancellation cleanup and rejection of invalid preview content.
+The filename case covers Hebrew, extensions, paths and control characters. These
+are host tests with a controlled MediaStore provider; actual device storage/UI
+behavior remains to be checked.
+
+The main APK and combined phone APK also compile with the download action, using
+the isolated Motion source described below. The combined build starts from freshly
+pulled `integration/phone-build` `21ad5e3`, applies the download change as `c40be45`,
+and finishes 244 app unit tests with zero failures and one skipped case. Its
+development package and signing certificate are unchanged. The user's phone is
+disconnected; a different connected tablet was left untouched. No installation or
+live authenticated PDF/storage test was performed. The updated APK was packaged
+in a ZIP for Drive's upload size limit; decompression reproduces the original APK
+SHA-256 `c348974d642ebe099b7883d70b878b2cfa1103c134c09a4028516f510b0afdb7`.
+
+Files use the existing authenticated Lemida WebView session, after verifying the
+saved Moodle account. Only university HTTPS file/resource endpoints are accepted;
+external/login links, credentials in URLs and path traversal are rejected.
+The PDF fetch uses same-origin credentials, bounds the binary response to 20 MB,
+and moves it across the WebView bridge in 32 KB chunks. HTML sign-in responses,
+interrupted transfers and invalid PDF headers are not sent to the reader. Failed
+attempts remove the temporary download and retain cached instructions. Previews
+live only in private cache and are removed when closed; interrupted-process
+leftovers are bounded on subsequent opens. No university cookies are passed to
+an external PDF app.
+
+2026-10-18 checks: all 102 focused Android cases and 87 core cases passed
+(overlapping suites). Four new parser/file cases cover linked/embedded/resource
+PDFs, cache restart, unsafe URLs and invalid files. Seven controlled Robolectric
+cases execute the production repository and native chunk writer for account
+mismatch, expiry, interrupted download, binary reconstruction and cleanup.
+`tools/lemida/verify_pdf_requests.py` runs the actual production scripts in Chromium
+with intercepted traffic: multi-chunk binary integrity, Moodle resource wrappers,
+HTML login, size limit, navigation, origin and cancellation. No real PDF/session
+was accessed. The app APK compiled using isolated upstream Motion `c97004a`
+(beta57 source) through a local composite substitution; the checked-in beta56
+dependency was preserved. The full app suite ran 255 cases with one Webtop failure
+and one skipped case; the PDF cases passed. Instrumentation APK compilation is
+blocked by an unrelated unresolved `lockerapp.ui.theme.AppTheme` import in
+`InbarOnDemandUiTest`. No phone is connected, so actual PDF rendering, live
+authenticated file access and installation remain pending.
+
+The separate combined phone build applies this PDF change on top of freshly
+pulled `integration/phone-build` at `36d86de`, preserving its Inbar/Drive and other
+phone integrations. Its APK and unit suite build successfully with the same
+isolated Motion source: 243 tests, zero failures, one skipped. APK verification
+confirmed the existing development signing certificate, allowing a data-preserving
+update of `com.feldman.scholix.inbar.dev`. This is compile/host-test evidence;
+the disconnected phone was not updated or used for a live PDF test.
+
 Open **More → Homework** in Scholix and allow notifications. A remembered
 Microsoft account is selected by tapping its matching email tile automatically,
 before considering an email-entry field. In the direct-SMS development build,

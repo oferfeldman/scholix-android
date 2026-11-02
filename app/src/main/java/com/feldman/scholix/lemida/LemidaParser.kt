@@ -40,11 +40,13 @@ data class Homework(val id: String, val courseId: Int, val course: String,
 }
 
 data class HomeworkDetail(val description: String, val dates: String, val tables: List<List<List<String>>>, val text: String,
-                          val notices: List<String> = emptyList(), val tableCaptions: List<String> = emptyList()) {
+                          val notices: List<String> = emptyList(), val tableCaptions: List<String> = emptyList(),
+                          val pdfs: List<LemidaPdf> = emptyList()) {
     fun json() = JSONObject().put("description", description).put("dates", dates).put("text", text)
         .put("tables", JSONArray(tables.map { table -> JSONArray(table.map { JSONArray(it) }) }))
         .put("notices", JSONArray(notices))
         .put("tableCaptions", JSONArray(tableCaptions))
+        .put("pdfs", JSONArray(pdfs.map { JSONObject().put("name", it.name).put("url", it.url) }))
     companion object {
         fun fromJson(raw: String): HomeworkDetail {
             val j = JSONObject(raw)
@@ -60,6 +62,10 @@ data class HomeworkDetail(val description: String, val dates: String, val tables
                     (0 until messages.length()).map { messages.getString(it) }
                 }.orEmpty(), j.optJSONArray("tableCaptions")?.let { captions ->
                     (0 until captions.length()).map { captions.getString(it) }
+                }.orEmpty(), j.optJSONArray("pdfs")?.let { files ->
+                    (0 until files.length()).map { files.getJSONObject(it) }.mapNotNull {
+                        LemidaPdf.from(it.optString("name"), it.optString("url"))
+                    }
                 }.orEmpty())
         }
     }
@@ -194,6 +200,13 @@ object LemidaParser {
             .map { readableText(it) }.filter { it.isNotBlank() }.distinct()
         // Notices have their own section; don't repeat them in instructions or fallback text.
         alerts.remove()
+        val pdfs = main.select("a[href], iframe[src], embed[src], object[data]").mapNotNull { element ->
+            val url = element.attr(if (element.tagName() == "a") "href" else if (element.tagName() == "object") "data" else "src")
+            val name = element.text().ifBlank { element.attr("title") }.ifBlank { element.attr("download") }
+            val pdfHint = element.attr("type").equals("application/pdf", true) ||
+                Regex("\\.pdf(?:$|[\\s)])", RegexOption.IGNORE_CASE).containsMatchIn(name)
+            LemidaPdf.from(name, url, pdfHint)
+        }.distinctBy { it.url }
         val parsedTables = main.select("table").mapNotNull { table ->
             val rows = table.select("tr").filter { row -> row.parents().firstOrNull { it.tagName() == "table" } == table }
                 .map { row -> row.children().filter { it.tagName() in setOf("th", "td") }.map { cell ->
@@ -208,7 +221,7 @@ object LemidaParser {
         val topLevelDescriptions = descriptions.filter { element -> element.parents().none { it in descriptions } }
         return HomeworkDetail(topLevelDescriptions.joinToString("\n\n") { readableText(it) },
             main.select("[data-region=activity-dates], .activity-dates").text(), parsedTables.map { it.first },
-            readableText(main), notices, parsedTables.map { it.second })
+            readableText(main), notices, parsedTables.map { it.second }, pdfs)
     }
     private fun readableText(element: Element): String {
         val content = element.clone()

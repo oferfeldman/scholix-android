@@ -94,6 +94,35 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
         }
     }
 
+    suspend fun openPdf(item: Homework, pdf: LemidaPdf): java.io.File = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            require(LemidaPdf.allowedUrl(pdf.url) && cachedDetail(item)?.pdfs?.contains(pdf) == true) { "Refresh this homework before opening its attachment." }
+            val directory = java.io.File(appContext.cacheDir, "lemida-pdf").apply { mkdirs() }
+            // Previews are temporary; bound leftovers from interrupted processes.
+            directory.listFiles()?.filter { it.name.startsWith("attachment-") && it.extension == "pdf" }
+                ?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
+            val file = java.io.File.createTempFile("attachment-", ".pdf", directory)
+            val browser = withContext(Dispatchers.Main) { browserFactory(appContext, prefs.getString("user_agent", null), null) }
+            var complete = false
+            try {
+                browser.prepare()
+                val page = browser.get("${LemidaParser.BASE}/my/")
+                if (!LemidaParser.authenticated(page)) throw LemidaSessionExpired()
+                check(LemidaParser.config(page, "userId") == prefs.getString("user_id", null)) { "The signed-in account changed. Refresh your homework list first." }
+                browser.downloadPdf(pdf.url, file)
+                LemidaPdf.requireFile(file)
+                complete = true
+                file
+            } catch (e: LemidaSessionExpired) {
+                prefs.edit().putBoolean("needs_login", true).putString("status", e.message).commit()
+                throw e
+            } finally {
+                if (!complete) file.delete()
+                browser.close()
+            }
+        }
+    }
+
     /** Returns the account of the successfully committed snapshot, for guarded alert delivery. */
     suspend fun sync(view: WebView? = null): String = mutex.withLock {
         syncState.value = true
