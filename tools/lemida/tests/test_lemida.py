@@ -252,6 +252,21 @@ class DesktopMfaGuard(unittest.TestCase):
         self.login()
         self.alternative.click.assert_called_once()
 
+    def test_show_me_verification_methods_is_used_when_the_id_is_missing(self):
+        self.otp.count.return_value = 0
+        self.alternative.count.return_value = 0
+        link = Mock()
+        link.count.return_value = 1
+        link.is_visible.return_value = True
+        link.first = link
+        self.client.page.get_by_role.side_effect = lambda role, name: link if role == 'link' else self.fallback
+        self.login()
+        self.assertTrue(lemida.METHOD_LINKS.match('Show me verification methods'))
+        self.assertTrue(lemida.METHOD_LINKS.match('I can’t use my Microsoft Authenticator app right now'))
+        self.assertFalse(lemida.METHOD_LINKS.match('Forgot my password'))
+        link.click.assert_called_once()  # The same link is never pressed twice.
+        self.sms.click.assert_called_once()
+
     def test_lost_sms_click_navigation_still_requests_only_once(self):
         self.otp.count.return_value = 0
         self.alternative.count.return_value = 0

@@ -2,8 +2,11 @@ package com.feldman.scholix.lemida
 
 /** In-memory challenge state. Codes never enter saved state, preferences, or logs. */
 internal class LemidaMfaState {
-    var alternativeClicked = false
+    /** Steps taken towards Microsoft's method list; a link can lead to a second list. */
+    var alternativeSteps = 0
         private set
+    /** No more automatic steps towards other methods (SMS is chosen at most once anyway). */
+    val alternativeClicked get() = alternativeSteps >= MAX_ALTERNATIVE_STEPS
     var smsSelected = false
         private set
     var submitted = false
@@ -14,14 +17,19 @@ internal class LemidaMfaState {
 
     fun prepareAlternative(): Boolean {
         if (alternativeClicked) return false
-        alternativeClicked = true
+        alternativeSteps++
         return true
+    }
+
+    /** A step whose click certainly did not happen is returned, unless SMS is already chosen. */
+    fun undoAlternative() {
+        if (!smsSelected && alternativeSteps in 1..MAX_ALTERNATIVE_STEPS) alternativeSteps--
     }
 
     fun prepareSms(now: Long): Boolean {
         if (smsSelected) return false
         smsSelected = true
-        alternativeClicked = true
+        alternativeSteps = MAX_ALTERNATIVE_STEPS
         if (started == null) started = now
         return true
     }
@@ -30,7 +38,7 @@ internal class LemidaMfaState {
         // A challenge already exists, whether initiated by the picker or by the user.
         // Losing the field later must not trigger another automatic method request.
         smsSelected = true
-        alternativeClicked = true
+        alternativeSteps = MAX_ALTERNATIVE_STEPS
         if (started == null) started = now
     }
 
@@ -59,4 +67,6 @@ internal class LemidaMfaState {
     }
 
     fun discardCode() { pending = null }
+
+    companion object { const val MAX_ALTERNATIVE_STEPS = 2 }
 }
