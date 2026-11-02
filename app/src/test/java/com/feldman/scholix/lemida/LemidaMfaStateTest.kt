@@ -72,10 +72,36 @@ class LemidaMfaStateTest {
 
     @Test fun failedClickCannotRepeatTheAutomaticSmsRequest() {
         val state = LemidaMfaState()
-        assertTrue(state.prepareAlternative())
+        repeat(LemidaMfaState.MAX_ALTERNATIVE_STEPS) { assertTrue(state.prepareAlternative()) }
         assertFalse(state.prepareAlternative())
         assertTrue(state.prepareSms(1_000))
         // A missing/lost WebView click callback doesn't undo the native attempt flag.
         assertFalse(state.prepareSms(2_000))
+    }
+
+    @Test fun atMostTwoStepsTowardsOtherMethodsAndNoneAfterSms() {
+        val mfa = LemidaMfaState()
+        // "Sign in another way" can lead to "Show me verification methods".
+        assertTrue(mfa.prepareAlternative())
+        assertFalse(mfa.alternativeClicked)
+        assertTrue(mfa.prepareAlternative())
+        assertTrue(mfa.alternativeClicked)
+        assertFalse("never a third step, so a page cannot loop", mfa.prepareAlternative())
+
+        val chosen = LemidaMfaState()
+        assertTrue(chosen.prepareSms(1_000))
+        assertFalse("after SMS, no more method changes", chosen.prepareAlternative())
+    }
+
+    @Test fun aClickThatDidNotHappenReturnsItsStep() {
+        val mfa = LemidaMfaState()
+        assertTrue(mfa.prepareAlternative())
+        mfa.undoAlternative()  // the link vanished before the click
+        repeat(LemidaMfaState.MAX_ALTERNATIVE_STEPS) { assertTrue(mfa.prepareAlternative()) }
+        assertFalse(mfa.prepareAlternative())
+        val chosen = LemidaMfaState()
+        assertTrue(chosen.prepareSms(1_000))
+        chosen.undoAlternative()
+        assertFalse("nothing is returned once SMS is chosen", chosen.prepareAlternative())
     }
 }

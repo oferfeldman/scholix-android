@@ -30,6 +30,8 @@ internal class LemidaMfaPoll(
                 "alternative" -> {
                     if (!mfa.prepareAlternative()) { finish(); return@selected }
                     evaluate(LemidaSms.chooseScript("alternative")) {
+                        // "false" means nothing was clicked (the link vanished), so the step is returned.
+                        if (it == "false") mfa.undoAlternative()
                         if (current()) finish()
                     }
                 }

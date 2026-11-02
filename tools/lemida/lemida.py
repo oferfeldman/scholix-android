@@ -17,6 +17,14 @@ from urllib.parse import parse_qs, urljoin, urlparse
 from bs4 import BeautifulSoup
 from playwright.sync_api import Error as PlaywrightError
 
+
+# Links Microsoft shows to reach other verification methods (English and Hebrew).
+METHOD_LINKS = re.compile(
+    r"^(show me verification methods|sign in another way|use a different verification option|other ways to sign in"
+    r"|i can.?t use my microsoft authenticator app right now|הצג.*(שיטות|אפשרויות).*אימות|היכנס בדרך אחרת"
+    r"|השתמש באפשרות אימות אחרת)", re.I)
+MAX_METHOD_STEPS = 2
+
 BASE = 'https://lemida.biu.ac.il'
 ROOT = Path(__file__).resolve().parent
 
@@ -307,6 +315,9 @@ class Client:
         print('or SMS verification if your account offers it. Waiting for Moodle to return...')
         deadline = time.monotonic() + self.args.login_timeout
         switched = False
+        method_steps = 0  # "Sign in another way" can lead to "Show me verification methods".
+        pressed_id = False  # A link already pressed is never pressed again.
+        pressed_labels = set()
         sms_selected = False
         code_prompted = False
         while time.monotonic() < deadline:
@@ -322,9 +333,24 @@ class Client:
                         # Keep the guards even if navigation later hides the field.
                         switched = sms_selected = True
                     if self.args.mfa == 'sms' and not switched:
-                        alternative = self.page.locator('#signInAnotherWay')
-                        if alternative.count() and alternative.is_visible():
-                            switched = True
+                        alternative = None if pressed_id else self.page.locator('#signInAnotherWay')
+                        label = None
+                        if alternative is None or not (alternative.count() and alternative.is_visible()):
+                            # Microsoft also words it "Show me verification methods" and similar.
+                            alternative = self.page.get_by_role('link', name=METHOD_LINKS).first
+                            if not alternative.count():
+                                alternative = self.page.get_by_role('button', name=METHOD_LINKS).first
+                            label = alternative.inner_text() if alternative.count() else None
+                            if label in pressed_labels:
+                                alternative = None
+                        if alternative is not None and alternative.count() and alternative.is_visible():
+                            method_steps += 1
+                            switched = method_steps >= MAX_METHOD_STEPS
+                            # Record before clicking, so a lost navigation cannot repeat this press.
+                            if label is None:
+                                pressed_id = True
+                            else:
+                                pressed_labels.add(label)
                             alternative.click()
                     if self.args.mfa == 'sms' and not sms_selected:
                         choice = self.page.locator('[data-value="OneWaySMS"]').first
