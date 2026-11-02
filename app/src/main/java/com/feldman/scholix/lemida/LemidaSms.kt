@@ -28,8 +28,16 @@ object LemidaSms {
             if (sms) { window.__scholixMfaChoice = {element: sms, action: 'sms'}; return 'sms'; }
           }
           if (!$alternativeClicked) {
-            const other = document.querySelector('#signInAnotherWay');
-            if (enabled(other)) { window.__scholixMfaChoice = {element: other, action: 'alternative'}; return 'alternative'; }
+            // Microsoft words the way to other methods differently by page and account:
+            // "Sign in another way", "Show me verification methods", "I can't use my
+            // Microsoft Authenticator app right now", or a Hebrew equivalent.
+            const labelled = [...document.querySelectorAll('a, [role="button"], [role="link"], button')].find(e => enabled(e) &&
+              !e.hasAttribute('data-scholix-pressed') &&
+              /^(show me verification methods|sign in another way|use a different verification option|other ways to sign in|i can'?t use my microsoft authenticator app right now|הצג.*(שיטות|אפשרויות).*אימות|היכנס בדרך אחרת|השתמש באפשרות אימות אחרת)/i
+                .test(e.textContent.trim().replace(/[’]/g, "'").replace(/^[^\p{L}]+/u, '')));
+            // A link already pressed is never pressed again; only a new page's link is a further step.
+            const other = [document.querySelector('#signInAnotherWay'), labelled].find(e => enabled(e) && !e.hasAttribute('data-scholix-pressed'));
+            if (other) { window.__scholixMfaChoice = {element: other, action: 'alternative'}; return 'alternative'; }
           }
           return 'waiting';
         })()
@@ -47,6 +55,7 @@ object LemidaSms {
                   || !choice.element.getClientRects().length || choice.element.matches(':disabled')
                   || choice.element.closest('[aria-disabled="true"], [inert]')
                   || ['hidden', 'collapse'].includes(getComputedStyle(choice.element).visibility)) return false;
+              if (choice.action === 'alternative') choice.element.setAttribute('data-scholix-pressed', '1');
               choice.element.click(); return true;
             })()
         """.trimIndent()
