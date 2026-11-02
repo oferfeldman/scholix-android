@@ -53,7 +53,7 @@ fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String
     val selectedItem = items.firstOrNull { "${it.optString("kind")}:${it.optString("courseId")}:${it.optString("id")}" == selected }
     if (selectedItem != null) {
         BackHandler { selected = null }
-        ClassroomPostPage(selectedItem, onBack = { selected = null })
+        ClassroomPostPage(selectedItem, onBack = { selected = null }, account = provider.getUsername())
         return
     }
     val courses = items.distinctBy { it.optString("courseId") }
@@ -123,12 +123,18 @@ fun ClassroomAnnouncementPage(provider: GoogleClassroomPlatform, messageId: Stri
 }
 
 @Composable
-private fun ClassroomPostPage(post: JSONObject, onBack: () -> Unit) {
+private fun ClassroomPostPage(post: JSONObject, onBack: () -> Unit, account: String = "") {
     val uri = LocalUriHandler.current
     val announcement = post.optString("kind") == "announcement"
     val coursework = post.optString("kind") == "courseWork"
     MotionScaffold(topBar = { SettingsTopBar(if (announcement) "Announcement" else "Homework", onBack) }) {
         Title(post.optString("courseName"))
+        if (coursework && account.isNotBlank()) Item {
+            com.feldman.scholix.studies.StudyActions(com.feldman.scholix.studies.StudyAssignment.create(
+                "https://classroom.googleapis.com", account.trim().lowercase(java.util.Locale.ROOT), post.getString("courseId"), "courseWork", post.getString("id"),
+                post.getString("title"), post.optString("courseName"),
+                ClassroomMapping.status(post.optJSONObject("submission"))))
+        }
         Item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!announcement) Text(post.optString("title"), style = MaterialTheme.typography.headlineSmall)
             Text(post.optString(if (announcement) "text" else "description"))

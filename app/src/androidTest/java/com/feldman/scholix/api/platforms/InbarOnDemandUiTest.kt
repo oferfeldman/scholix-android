@@ -10,7 +10,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.feldman.lockerapp.ui.theme.AppTheme
+import com.feldman.motion.MotionTheme
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.pages.GradesScreen
 import com.feldman.scholix.pages.SchedulePage
@@ -63,7 +63,7 @@ class InbarOnDemandUiTest {
         compose.setContent {
             val owner = checkNotNull(LocalActivityResultRegistryOwner.current)
             CompositionLocalProvider(LocalContext provides context, LocalActivityResultRegistryOwner provides owner) {
-                AppTheme { GradesScreen(Modifier, account.getCourses()) }
+                MotionTheme { GradesScreen(Modifier, account.getCourses()) }
             }
         }
         awaitText("Cached assignment")
@@ -78,7 +78,7 @@ class InbarOnDemandUiTest {
         compose.setContent {
             val owner = checkNotNull(LocalActivityResultRegistryOwner.current)
             CompositionLocalProvider(LocalContext provides context, LocalActivityResultRegistryOwner provides owner) {
-                AppTheme { GradesScreen(Modifier, emptyList()) }
+                MotionTheme { GradesScreen(Modifier, emptyList()) }
             }
         }
         awaitText("Load Inbar grades")
@@ -92,7 +92,7 @@ class InbarOnDemandUiTest {
         compose.setContent {
             val owner = checkNotNull(LocalActivityResultRegistryOwner.current)
             CompositionLocalProvider(LocalContext provides context, LocalActivityResultRegistryOwner provides owner) {
-                AppTheme { SchedulePage(listOf(account)) }
+                MotionTheme { SchedulePage(listOf(account)) }
             }
         }
         awaitText("Load Inbar schedule")
