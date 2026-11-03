@@ -44,6 +44,14 @@
         </activity>
         <activity android:name=".pages.GradesActivity" />
         <activity android:name=".classroom.ClassroomLoginActivity" android:exported="false" />
+        <activity android:name=".openu.OpenUDraftActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="scholix-openu" android:host="draft" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".ui.MoeSmsLoginActivity"
             android:exported="false"

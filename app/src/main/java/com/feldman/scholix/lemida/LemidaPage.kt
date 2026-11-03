@@ -40,23 +40,27 @@ import java.text.DateFormat
 import java.util.Date
 
 @Composable
-fun LemidaPage(searchQuery: String = "") {
+fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNavigator) {
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
     val providers = com.feldman.scholix.LocalAppState.current.platforms
-        .filterIsInstance<com.feldman.scholix.api.platforms.GoogleClassroomPlatform>()
+        .filter { it is com.feldman.scholix.api.platforms.GoogleClassroomPlatform || it is com.feldman.scholix.api.platforms.OpenAUPlatform }
     var providerId by rememberSaveable { mutableStateOf(providers.firstOrNull()?.id ?: "lemida") }
     val selected = providers.firstOrNull { it.id == providerId }
+    val providerLabels = providers.map { "${if (it is com.feldman.scholix.api.platforms.OpenAUPlatform) "OpenU" else "Classroom"} · ${it.getUsername()}" }
     val providerPicker: @Composable () -> Unit = {
         if (providers.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
             com.feldman.scholix.ui.components.ChipPicker(label = "Provider",
-                options = listOf("Lemida") + providers.map { "Classroom · ${it.getUsername()}" },
-                selected = selected?.let { "Classroom · ${it.getUsername()}" } ?: "Lemida",
-                onSelectedChange = { label -> providerId = providers.firstOrNull { "Classroom · ${it.getUsername()}" == label }?.id ?: "lemida" })
+                options = listOf("Lemida") + providerLabels,
+                selected = providerLabels.getOrNull(providers.indexOf(selected)) ?: "Lemida",
+                onSelectedChange = { label -> providerId = providers.getOrNull(providerLabels.indexOf(label))?.id ?: "lemida" })
         }
     }
-    if (selected == null) LemidaPageContent(repo, searchQuery, providerPicker)
-    else com.feldman.scholix.classroom.ClassroomHomeworkPage(selected, searchQuery, providerPicker)
+    when (selected) {
+        is com.feldman.scholix.api.platforms.OpenAUPlatform -> com.feldman.scholix.openu.OpenUAssignmentsPage(selected, searchQuery, onNavigate, providerPicker)
+        is com.feldman.scholix.api.platforms.GoogleClassroomPlatform -> com.feldman.scholix.classroom.ClassroomHomeworkPage(selected, searchQuery, providerPicker)
+        else -> LemidaPageContent(repo, searchQuery, providerPicker)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
