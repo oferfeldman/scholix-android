@@ -53,7 +53,7 @@ fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String
                 homework
             }
         } catch (e: CancellationException) { throw e
-        } catch (e: Exception) { error = e.localizedMessage ?: "Could not update Classroom homework."
+        } catch (e: Exception) { error = e.localizedMessage ?: "Could not update Classroom assignments."
         } finally { loading = false }
     }
     val selectedItem = items.firstOrNull { "${it.optString("kind")}:${it.optString("courseId")}:${it.optString("id")}" == selected }
@@ -74,12 +74,13 @@ fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String
                 "${item.optString("title")} ${item.optString("description")} ${item.optString("courseName")}".contains(it, ignoreCase = true)
             } }
     }
-    MotionScaffold(topBar = { SettingsTopBar("Homework") }) {
+    MotionScaffold(topBar = { SettingsTopBar("Assignments") }) {
         if (coursePicker != null) Item { coursePicker() }
         Item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
-                placeholder = { Text("Search homework") }, shape = MaterialTheme.shapes.large)
+                placeholder = { Text("Search assignments") }, shape = MaterialTheme.shapes.large)
             if (coursePicker == null) ChipPicker(label = "Course", options = courseNames,
+                menuAnimation = com.feldman.motion.MotionDropdownAnimation.Morph,
                 selected = courseNames[courses.indexOfFirst { it.optString("courseId") == course } + 1],
                 onSelectedChange = { name -> course = courses.getOrNull(courseNames.indexOf(name) - 1)?.optString("courseId") ?: "all" })
             ChipPicker(label = "Type", options = listOf("All", "Coursework", "Materials"), selected = type, onSelectedChange = { type = it })
@@ -133,7 +134,7 @@ private fun ClassroomPostPage(post: JSONObject, onBack: () -> Unit, account: Str
     val uri = LocalUriHandler.current
     val announcement = post.optString("kind") == "announcement"
     val coursework = post.optString("kind") == "courseWork"
-    MotionScaffold(topBar = { SettingsTopBar(if (announcement) "Announcement" else "Homework", onBack) }) {
+    MotionScaffold(topBar = { SettingsTopBar(if (announcement) "Announcement" else "Assignments", onBack) }) {
         Title(post.optString("courseName"))
         if (coursework && account.isNotBlank()) Item {
             com.feldman.scholix.studies.StudyActions(com.feldman.scholix.studies.StudyAssignment.create(

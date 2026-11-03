@@ -298,7 +298,7 @@ class LemidaLoginActivity : ComponentActivity() {
                         }
                         syncing = true
                         retry.visibility = android.view.View.GONE
-                        status.text = "Signed in. Loading your homework before closing…"
+                        status.text = "Signed in. Loading your assignments before closing…"
                         loginScope.launch {
                             try {
                                 withContext(Dispatchers.IO) { LemidaCookieStore(this@LemidaLoginActivity).save(cookie) }
@@ -310,7 +310,7 @@ class LemidaLoginActivity : ComponentActivity() {
                                 finish()
                             } catch (e: CancellationException) { throw e
                             } catch (e: Exception) {
-                                status.text = "Sign-in was detected, but homework could not load: ${e.message}. Complete any browser check, then retry."
+                                status.text = "Sign-in was detected, but assignments could not load: ${e.message}. Complete any browser check, then retry."
                                 syncing = false
                                 retry.visibility = android.view.View.VISIBLE
                             }

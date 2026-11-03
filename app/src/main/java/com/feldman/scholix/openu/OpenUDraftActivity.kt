@@ -75,7 +75,7 @@ internal fun OpenUWebsiteDraftPage(raw: String, onNavigate: MotionNavigator, onB
     MotionScaffold(topBar = { SettingsTopBar("Unsubmitted website draft", onBack, actions = {
         IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh website draft") }
     }) }) {
-        Item { Text("Select the same OpenU account and course used in the browser. Refresh reads files from that exact draft, including files added outside Scholix.") }
+        Item { Text("Choose the OpenU account and course.") }
         if (reference == null) Item { Text("This website draft link is incomplete or invalid.") }
         else if (provider == null || repo == null) Item { Text("Connect your OpenU account in Scholix, then open this draft link again.") }
         else {
@@ -87,16 +87,14 @@ internal fun OpenUWebsiteDraftPage(raw: String, onNavigate: MotionNavigator, onB
                 val names = listOf("Choose course") + courses.map { "${it.optString("name")} · ${it.optString("term")}" }
                 ChipPicker("Course", names, names[courses.indexOfFirst { it.optString("courseKey") == courseKey } + 1], onSelectedChange = {
                     courseKey = courses.getOrNull(names.indexOf(it) - 1)?.optString("courseKey").orEmpty()
-                })
+                }, menuAnimation = com.feldman.motion.MotionDropdownAnimation.Morph)
                 if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 assignment?.let { Text("${it.label} · Accepted status: ${it.status.ifBlank { "unavailable" }}") }
-                if (checkedAt > 0) Text("Draft checked ${checkedTime(checkedAt)}")
             } }
             if (checkedAt > 0 && files.isEmpty() && error == null && !loading) Item { Text("This draft currently has no files.") }
             Section { files.forEach { f -> PageItem(title = f.name, description = "Unsubmitted file · open attachment",
                 onClick = { onNavigate(AppDest.OpenUAttachment(provider.id, f.name, f.url)) }) } }
-            Item { Text("These files are separate from the accepted submission. A canceled website edit can leave draft files behind. Viewing here does not submit or change them.") }
         }
         BottomBarSpacer(minMargin = 24.dp)
     }

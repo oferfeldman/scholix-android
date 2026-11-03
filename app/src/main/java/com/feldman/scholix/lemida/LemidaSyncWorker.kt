@@ -27,9 +27,9 @@ class LemidaSyncWorker(private val context: Context, params: WorkerParameters) :
             if (account == null) {
                 // A manual browser check remains necessary when automatic recovery cannot finish.
                 repo.deliverLoginReminder { notify(context, 73121, "Lemida needs sign-in",
-                    "Open Homework and sign in again to resume automatic updates.") }
+                    "Open Assignments and sign in again to resume automatic updates.") }
             } else {
-                repo.deliverPending(account) { items -> notify(context, 73120, "New Lemida homework",
+                repo.deliverPending(account) { items -> notify(context, 73120, "New Lemida assignments",
                     items.joinToString(" • ") { "${it.course}: ${it.title}" }) }
             }
             Result.success()
@@ -43,7 +43,7 @@ class LemidaSyncWorker(private val context: Context, params: WorkerParameters) :
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
                 return false
             val manager = context.getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(NotificationChannel(CHANNEL, "Lemida homework", NotificationManager.IMPORTANCE_DEFAULT))
+            manager.createNotificationChannel(NotificationChannel(CHANNEL, "Lemida assignments", NotificationManager.IMPORTANCE_DEFAULT))
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled() ||
                 manager.getNotificationChannel(CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE) return false
             val intent = Intent(context, MainActivity::class.java).putExtra("open_homework", true)

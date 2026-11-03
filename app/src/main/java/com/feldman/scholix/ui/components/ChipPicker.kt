@@ -22,7 +22,8 @@ fun ChipPicker(
     options: List<String>,
     selected: String,
     onSelectedChange: (String) -> Unit,
-    optionIcon: (@Composable (String) -> Painter?)? = null
+    optionIcon: (@Composable (String) -> Painter?)? = null,
+    menuAnimation: MotionDropdownAnimation = MotionDropdownAnimation.Transform,
 ) {
     val menuWidth = pickerMenuWidth(options, horizontalSpace = if (optionIcon == null) 76.dp else 108.dp)
     val anchorContainer = MaterialTheme.colorScheme.tertiaryContainer
@@ -61,8 +62,7 @@ fun ChipPicker(
         trailingIcon = rememberSymbolPainter(MotionSymbols.ic_keyboard_arrow_down),
         text = MotionDropdownDefaults.text(value = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), label = MaterialTheme.typography.labelMedium, valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
         sizes = MotionDropdownDefaults.sizes(menuMinWidth = 112.dp.coerceAtMost(menuWidth), menuMaxWidth = menuWidth),
-        // The morph transition can leave a touch-blocking popup after rapid toggles.
-        menu = MotionDropdownDefaults.menu(animation = MotionDropdownAnimation.Standard,
+        menu = MotionDropdownDefaults.menu(animation = menuAnimation,
             matchAnchorWidth = false,
             alignment = MotionDropdownMenuAlignment.Center,
             showSelectedCheck = true,

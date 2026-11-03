@@ -70,6 +70,7 @@ fun <T> PickerBar(
     showOptionsInMenu: Boolean = true,
     menuLabels: List<String> = options.map(optionLabel),
     menuDescriptions: List<String> = options.map(optionDescription),
+    menuAnimation: MotionDropdownAnimation = MotionDropdownAnimation.Transform,
 ) {
     val selected = options.getOrNull(selectedIndex) ?: return
     val menuWidth = pickerMenuWidth(menuLabels, menuDescriptions, horizontalSpace = 132.dp)
@@ -182,7 +183,7 @@ fun <T> PickerBar(
             shapes = MotionDropdownDefaults.shapes(anchor = RoundedCornerShape(28.dp), menu = RoundedCornerShape(28.dp), menuItem = RoundedCornerShape(24.dp)),
             sizes = MotionDropdownDefaults.sizes(borderWidth = 0.dp, minHeight = 64.dp, menuMaxHeight = 420.dp, menuMinWidth = 112.dp.coerceAtMost(menuWidth), menuMaxWidth = menuWidth),
             text = MotionDropdownDefaults.text(value = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
-            menu = MotionDropdownDefaults.menu(animation = MotionDropdownAnimation.Standard, matchAnchorWidth = false, alignment = MotionDropdownMenuAlignment.Center)
+            menu = MotionDropdownDefaults.menu(animation = menuAnimation, matchAnchorWidth = false, alignment = MotionDropdownMenuAlignment.Center)
         )
 
         MotionButton(

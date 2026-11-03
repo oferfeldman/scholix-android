@@ -91,7 +91,7 @@ sealed class AppDest : MotionDest {
     @Serializable
     @Parcelize
     data object Homework : AppDest() {
-        @IgnoredOnParcel @Transient override val label = "Homework"
+        @IgnoredOnParcel @Transient override val label = "Assignments"
         @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Description
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
         @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_docs_outline

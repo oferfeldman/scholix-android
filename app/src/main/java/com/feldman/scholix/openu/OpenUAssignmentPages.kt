@@ -8,6 +8,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.Indicator
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -21,8 +23,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.feldman.motion.MotionFonts
+import com.feldman.motion.MotionBackButton
+import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionSymbols
+import com.feldman.motion.rememberSymbolPainter
 import com.feldman.motion.MotionLazyColumn
 import com.feldman.motion.MotionNavigator
 import com.feldman.motion.MotionScaffold
@@ -35,6 +40,7 @@ import com.feldman.scholix.drive.DrivePdfReader
 import com.feldman.scholix.studies.StudyActions
 import com.feldman.scholix.studies.StudyAssignment
 import com.feldman.scholix.pages.gradeColor
+import com.feldman.scholix.pages.GradesLoadingIndicator
 import com.feldman.scholix.pages.isRtlText
 import com.feldman.scholix.ui.components.ChipPicker
 import com.feldman.scholix.ui.components.SettingsTopBar
@@ -45,8 +51,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.text.DateFormat
-import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,6 +64,7 @@ internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String,
     var stateFilter by rememberSaveable(provider.id) { mutableStateOf("All statuses") }
     var retry by remember { mutableIntStateOf(0) }
     var loading by remember(repo) { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
     var errors by remember(repo) { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(repo, selectedCourse, retry) {
         loading = true; errors = emptyList()
@@ -75,7 +80,7 @@ internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String,
             }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { errors = listOf(e.message ?: "Could not update OpenU assignments.") }
-        finally { loading = false }
+        finally { loading = false; refreshing = false }
     }
     val selectedKeys = if (selectedCourse == null) courses.filter { it.optInt("courseStatusRank", 1) == 0 }.map { it.optString("courseKey") }
         else listOf(selectedCourse)
@@ -93,16 +98,22 @@ internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String,
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
             ChipPicker("Status", listOf("All statuses", "Not submitted", "Submitted", "Checked"), stateFilter, onSelectedChange = { stateFilter = it })
-            IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh OpenU assignments") }
+            IconButton(onClick = { refreshing = true; retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh OpenU assignments") }
         }
         Spacer(Modifier.height(12.dp))
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        PullToRefreshBox(isRefreshing = loading && retry > 0, onRefresh = { if (!loading) retry++ },
-            modifier = Modifier.weight(1f)) {
-            MotionLazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        val pullRefreshState = rememberPullToRefreshState()
+        PullToRefreshBox(state = pullRefreshState, isRefreshing = refreshing,
+            onRefresh = { if (!loading) { refreshing = true; retry++ } },
+            indicator = {
+                Indicator(modifier = Modifier.align(Alignment.TopCenter), isRefreshing = refreshing,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer, state = pullRefreshState)
+            }, modifier = Modifier.weight(1f)) {
+            if (loading) GradesLoadingIndicator(Modifier.fillMaxSize())
+            else MotionLazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
                 item {
                     errors.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
-                    if (errors.isNotEmpty() && visible.isNotEmpty()) Text("Showing last-known assignments. Their status may have changed.")
+                    if (errors.isNotEmpty() && visible.isNotEmpty()) Text("Showing saved assignments.")
                     if (visible.isEmpty() && !loading) Text(if (searchQuery.isNotBlank()) "No matching assignments."
                         else if (errors.isNotEmpty()) "No saved assignment list is available. Refresh or reconnect OpenU."
                         else "No assignments in the selected courses and status.")
@@ -132,10 +143,6 @@ internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String,
                         }
                     }
                 }
-                visible.firstOrNull()?.let { assignment -> item {
-                    Text("Last checked ${checkedTime(repo.checkedAt(assignment))}", Modifier.padding(top = 8.dp),
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } }
             }
         }
     }
@@ -174,51 +181,92 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
         catch (e: Exception) { error = e.message ?: "Could not update this assignment." }
         finally { loading = false }
     }
-    MotionScaffold(topBar = { SettingsTopBar(item?.label ?: "Assignment", onBack, actions = {
-        IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh assignment details") }
-    }) }) {
-        val item = item
-        if (item == null || repo == null || provider == null) {
-            Item { Text("This assignment or account is no longer available. Return to Homework and refresh.") }
-        } else {
-            Item { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(item.courseName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("${item.semester} · ${item.status.ifBlank { "Status unavailable" }}")
-                if (item.due.isNotBlank()) Text("Due: ${item.due}")
-                if (item.opens.isNotBlank()) Text("Available from: ${item.opens}")
-                if (item.grade.isNotBlank() && item.grade != "-") Text("Grade: ${item.grade}")
-                Text("Status last checked ${checkedTime(repo.checkedAt(item))}", style = MaterialTheme.typography.labelSmall)
-                if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error)
-                    if (data != null) Text("Showing saved details and file links. Refresh before relying on the current submission status.") }
-                TextButton(onClick = { uri.openUri(item.url.ifBlank { "https://sheilta.apps.openu.ac.il/Main/Courses" }) }) { Text("Open in OpenU") }
-                if (item.module == "ouilassign") TextButton(onClick = { onNavigate(AppDest.OpenUDraftHelp) }) { Text("Connect a website draft") }
-            } }
-            Item { StudyActions(StudyAssignment.create("https://opal.openu.ac.il", provider.id, item.courseKey,
-                item.module, item.cmid, item.label, item.courseName, item.status, repo.checkedAt(item))) }
-            data?.let { detail ->
-                if (detail.fields.isNotEmpty()) { Title("Assignment details"); Section { detail.fields.forEach { (k, v) -> Item { Text("$k: $v") } } } }
-                if (detail.submission.isNotEmpty()) { Title("Submission and grading"); Section {
-                    detail.submission.forEach { (k, v) -> Item { Text("$k: $v") } }
-                } }
-                if (detail.instructions.isNotBlank()) { Title("Instructions"); Item { Text(detail.instructions) } }
-                detail.notices.forEach { Item { Text(it) } }
-                detail.files.groupBy { it.group }.forEach { (group, files) ->
-                    Title(group)
-                    Section { files.forEach { file -> PageItem(title = file.name, description = "Open attachment",
-                        onClick = { onNavigate(AppDest.OpenUAttachment(provider.id, file.name, file.url)) }) } }
-                }
-                Item { Text("Details last checked ${checkedTime(repo.detailCheckedAt(item))}", style = MaterialTheme.typography.labelSmall) }
-            }
-            drafts.forEachIndexed { index, draft ->
-                Title("Unsubmitted website draft ${index + 1}")
-                Item { Text("Last checked ${checkedTime(draft.checkedAt)}. Draft files can remain after canceling an edit; these are separate from your accepted submission.") }
-                Section { draft.files.forEach { f -> PageItem(title = f.name, description = "Open draft file",
-                    onClick = { onNavigate(AppDest.OpenUAttachment(provider.id, f.name, f.url)) }) } }
-                if (draft.files.isEmpty()) Item { Text("No files in this linked draft.") }
-            }
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Spacer(Modifier.height(TopBarSpacing()))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            MotionBackButton(onClick = onBack)
+            Text(item?.courseName.orEmpty(), Modifier.weight(1f).padding(horizontal = 12.dp),
+                style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh assignment") }
         }
-        BottomBarSpacer(minMargin = 24.dp)
+        val assignment = item
+        if (assignment == null || repo == null || provider == null) {
+            Text("Assignment unavailable.", Modifier.padding(vertical = 24.dp))
+        } else MotionLazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
+            item {
+                CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(assignment.label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SubjectIcon(subject = assignment.courseName, assignment = assignment.label)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(assignment.label, style = MaterialTheme.typography.headlineMedium.copy(
+                                fontFamily = MotionFonts.feldman(weight = 600), fontWeight = FontWeight.SemiBold))
+                            Text(assignment.semester, style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (assignment.grade.isNotBlank() && assignment.grade != "-") {
+                            Text(assignment.grade, style = MaterialTheme.typography.displaySmall.copy(
+                                fontFamily = MotionFonts.feldman(weight = 700, width = 50f)), color = gradeColor(assignment.grade))
+                        }
+                    }
+                }
+                Text(assignment.status.ifBlank { "Status unavailable" }, style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary)
+                if (assignment.due.isNotBlank()) Text("Due: ${assignment.due}", Modifier.padding(top = 8.dp))
+                if (assignment.opens.isNotBlank()) Text("Available from: ${assignment.opens}", Modifier.padding(top = 4.dp))
+                if (loading) GradesLoadingIndicator(Modifier.fillMaxWidth().height(80.dp))
+                error?.let { Text(it, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.error) }
+                Spacer(Modifier.height(16.dp))
+                MotionButton(text = "Open in OpenU", onClick = {
+                    uri.openUri(assignment.url.ifBlank { "https://sheilta.apps.openu.ac.il/Main/Courses" })
+                })
+                if (assignment.module == "ouilassign") TextButton(onClick = { onNavigate(AppDest.OpenUDraftHelp) }) {
+                    Text("Connect website draft")
+                }
+            }
+            data?.let { detail ->
+                if (detail.instructions.isNotBlank()) {
+                    Title("Instructions")
+                    item { Text(detail.instructions, style = MaterialTheme.typography.bodyLarge) }
+                }
+                listOf("Assignment details" to detail.fields, "Submission and grading" to detail.submission)
+                    .filter { it.second.isNotEmpty() }.forEach { (heading, fields) ->
+                        Title(heading)
+                        section(items = fields.withIndex().toList(), key = { "$heading:${it.index}" }) { field ->
+                            val (label, value) = field.value
+                            CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(value, Modifier.weight(1.5f), style = MaterialTheme.typography.bodyLarge)
+                                }
+                            }
+                        }
+                    }
+                detail.notices.forEachIndexed { index, notice -> item(key = "notice:$index") { Text(notice) } }
+            }
+            val fileGroups = data?.files.orEmpty().groupBy { it.group }.toList() +
+                drafts.mapIndexed { index, draft -> "Unsubmitted website draft ${index + 1}" to draft.files }
+            fileGroups.forEach { (group, files) ->
+                Title(group)
+                section(items = files, key = { "$group:${it.url}" }, contentType = { "attachment" }) { file ->
+                    Row(Modifier.fillMaxWidth().clickable(onClickLabel = "Open ${file.name}") {
+                        onNavigate(AppDest.OpenUAttachment(provider.id, file.name, file.url))
+                    }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(rememberSymbolPainter(MotionSymbols.ic_description), null,
+                            tint = MaterialTheme.colorScheme.primary)
+                        Text(file.name, Modifier.weight(1f).padding(horizontal = 12.dp),
+                            style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Icon(rememberSymbolPainter(MotionSymbols.ic_open_in_new), null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (files.isEmpty()) item { Text("No files.") }
+            }
+            Title("Study")
+            item { StudyActions(StudyAssignment.create("https://opal.openu.ac.il", provider.id, assignment.courseKey,
+                assignment.module, assignment.cmid, assignment.label, assignment.courseName, assignment.status, repo.checkedAt(assignment))) }
+        }
     }
 }
 
@@ -268,9 +316,6 @@ internal fun OpenUAttachmentPage(providerId: String, name: String, url: String, 
         } }
     }
 }
-
-internal fun checkedTime(time: Long): String = if (time <= 0) "unavailable" else
-    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(time))
 
 @Composable
 internal fun OpenUDraftHelpPage(onBack: () -> Unit) {

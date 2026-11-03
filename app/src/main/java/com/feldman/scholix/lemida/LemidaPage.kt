@@ -1,7 +1,9 @@
 package com.feldman.scholix.lemida
 
 import com.feldman.motion.MotionDropdownMenuItem
-import com.feldman.motion.MotionDropdownMenu
+import com.feldman.motion.MotionDropdown
+import com.feldman.motion.MotionDropdownDefaults
+import com.feldman.motion.MotionDropdownAnimation
 import android.Manifest
 import android.content.Intent
 import androidx.activity.compose.BackHandler
@@ -41,8 +43,6 @@ import com.feldman.scholix.ui.components.SettingsTopBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.DateFormat
-import java.util.Date
 import org.json.JSONObject
 
 @Composable
@@ -156,14 +156,19 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         (typeFilter == "all" || it.type == typeFilter) &&
         it.matchesSearch(query, searchQuery) } }
     MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = {
-        CenterAlignedTopAppBar(title = { Text("Homework", fontWeight = FontWeight.Bold) }, actions = {
+        CenterAlignedTopAppBar(title = { Text("Assignments", fontWeight = FontWeight.Bold) }, actions = {
             IconButton(onClick = { LemidaSyncWorker.refresh(context, manual = true) }, enabled = updated > 0L && !syncing && !needsLogin) {
                 if (syncing) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Default.Refresh, "Refresh")
             }
             Box {
-                IconButton(onClick = { options = true }) { Icon(Icons.Default.MoreVert, "Homework settings") }
-                MotionDropdownMenu(expanded = options, onDismissRequest = { options = false }) {
+                MotionDropdown<Unit>(options = emptyList(), selected = null, onSelected = {},
+                    expanded = options, onExpandedChange = { options = it },
+                    menu = MotionDropdownDefaults.menu(animation = MotionDropdownAnimation.Transform, matchAnchorWidth = false),
+                    sizes = MotionDropdownDefaults.sizes(menuMinWidth = 240.dp, menuMaxWidth = 320.dp),
+                    anchorContent = { _, toggle -> IconButton(onClick = toggle) {
+                        Icon(Icons.Default.MoreVert, "Assignment settings")
+                    } }, menuHeader = {
                     MotionDropdownMenuItem(text = { Text(if (LemidaSignInStore(context).enabled()) "Pause automatic sign-in" else "Resume automatic sign-in") }, onClick = {
                         LemidaSignInStore(context).apply { setEnabled(!enabled()) }
                         options = false
@@ -184,7 +189,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                         val next = !enabled; repo.setEnabled(next); options = false
                         if (next) { permission.launch(Manifest.permission.POST_NOTIFICATIONS); LemidaSyncWorker.schedule(context); LemidaSyncWorker.refresh(context, manual = true) }
                     })
-                }
+                })
             }
         }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer))
     }) {
@@ -200,16 +205,16 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
             )
         }
         if (updated == 0L || needsLogin) Section {
-            PageItem(title = "Sign in to Lemida", description = "Connect to resume homework updates", icon = painterResource(R.drawable.ic_docs), onClick = {
+            PageItem(title = "Sign in to Lemida", description = "Connect to resume assignment updates", icon = painterResource(R.drawable.ic_docs), onClick = {
                 permission.launch(Manifest.permission.POST_NOTIFICATIONS); reconnect()
             })
         }
         if (status.startsWith("Update failed")) Item { Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         if (visible.isEmpty()) Item { Text(when {
-            updated == 0L -> "Connect Lemida to see your homework."
-            homework.isEmpty() -> "No homework available yet. New activities will appear after an update."
-            courseFilter != null && homework.none { it.courseId == courseFilter } -> "No homework in this course yet. New activities will appear automatically."
-            else -> "No homework matches. Try another search or choose All courses and All."
+            updated == 0L -> "Connect Lemida to see your assignments."
+            homework.isEmpty() -> "No assignments available yet. New activities will appear after an update."
+            courseFilter != null && homework.none { it.courseId == courseFilter } -> "No assignments in this course yet. New activities will appear automatically."
+            else -> "No assignments matches. Try another search or choose All courses and All."
         }, modifier = Modifier.padding(24.dp)) }
         visible.groupBy { it.courseId }.toSortedMap().forEach { (courseId, group) ->
             val color = MotionThemeDefaults.VibrantIconBackgrounds[Math.floorMod(courseId, MotionThemeDefaults.VibrantIconBackgrounds.size)]
@@ -245,17 +250,14 @@ internal fun LemidaHomeworkFilters(
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("${courses.size} courses • $count items", style = MaterialTheme.typography.labelLarge)
-            Text(if (updated > 0) "Updated ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(updated))}" else "Not synced",
-                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (updated > 0 && !automaticUpdates) Text("Automatic updates paused",
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         OutlinedTextField(value = query, onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth().testTag("homework-search"),
-            singleLine = true, placeholder = { Text("Search homework") }, shape = MaterialTheme.shapes.large,
+            singleLine = true, placeholder = { Text("Search assignments") }, shape = MaterialTheme.shapes.large,
             trailingIcon = if (query.isNotEmpty()) {
-                { IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Clear homework search") } }
+                { IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Clear assignments search") } }
             } else null)
         if (showCourseFilters) Row(Modifier.fillMaxWidth().testTag("homework-course-filters").horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -298,7 +300,7 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, accoun
         try { detail = repo.detail(item); detailCheckedAt = System.currentTimeMillis() }
         catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (e: Exception) {
-            error = e.message ?: "Could not update homework details."
+            error = e.message ?: "Could not update assignment details."
             requiresSignIn = e is LemidaSessionExpired
         }
         finally { loading = false }
@@ -327,11 +329,11 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, accoun
         }
         return
     }
-    MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = { SettingsTopBar("Homework details", onBack = onBack) }) {
+    MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = { SettingsTopBar("Assignment details", onBack = onBack) }) {
         Item { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(item.course, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Text(item.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (loading) com.feldman.scholix.pages.GradesLoadingIndicator(Modifier.fillMaxWidth().height(80.dp))
         } }
         if (account.isNotBlank()) Item {
             val assignment = com.feldman.scholix.studies.StudyAssignment.create(LemidaParser.BASE, account,
@@ -343,9 +345,9 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, accoun
         }
         error?.let { message -> Section {
             Item { Text(message, color = MaterialTheme.colorScheme.error) }
-            if (requiresSignIn) PageItem(title = "Sign in to Lemida", description = "Reconnect to update this homework",
+            if (requiresSignIn) PageItem(title = "Sign in to Lemida", description = "Reconnect to update this assignment",
                 icon = painterResource(R.drawable.ic_docs), onClick = onReconnect)
-            else PageItem(title = "Retry loading homework", icon = rememberVectorPainter(Icons.Default.Refresh), onClick = { retry++ })
+            else PageItem(title = "Retry loading assignments", icon = rememberVectorPainter(Icons.Default.Refresh), onClick = { retry++ })
         } }
         detail?.let { data ->
             if (data.pdfs.isNotEmpty()) {

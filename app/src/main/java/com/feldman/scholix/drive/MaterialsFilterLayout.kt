@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
+import com.feldman.scholix.ui.components.ChipPicker
 
 data class MaterialFilter(val id:String,val side:String="top")
 object MaterialsFilters {
@@ -58,19 +59,15 @@ fun MaterialsFilterDialog(filters:List<MaterialFilter>,onDismiss:()->Unit,onSave
         Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("Choose an edge for each filter. Arrows change the order along that edge.")
             draft.forEachIndexed {index,f->
-                var expanded by remember(f.id){mutableStateOf(false)}
                 Column {
                     Row {
                         Text(MaterialsFilters.labels.getValue(f.id),Modifier.weight(1f),style=MaterialTheme.typography.titleSmall)
                         IconButton(onClick={draft=draft.toMutableList().also {java.util.Collections.swap(it,index,index-1)}},enabled=index>0,modifier=Modifier.size(32.dp)) {Icon(Icons.Default.KeyboardArrowUp,"Move ${MaterialsFilters.labels[f.id]} earlier")}
                         IconButton(onClick={draft=draft.toMutableList().also {java.util.Collections.swap(it,index,index+1)}},enabled=index<draft.lastIndex,modifier=Modifier.size(32.dp)) {Icon(Icons.Default.KeyboardArrowDown,"Move ${MaterialsFilters.labels[f.id]} later")}
                     }
-                    Box {
-                        OutlinedButton(onClick={expanded=true}){Text("Position: ${f.side.replaceFirstChar {it.uppercase()}}")}
-                        DropdownMenu(expanded,onDismissRequest={expanded=false}) {MaterialsFilters.sides.forEach {side->
-                            DropdownMenuItem(text={Text(side.replaceFirstChar {it.uppercase()})},onClick={draft=draft.map {if(it.id==f.id)it.copy(side=side) else it};expanded=false})
-                        }}
-                    }
+                    ChipPicker("Position",MaterialsFilters.sides,f.side,onSelectedChange={side->
+                        draft=draft.map {if(it.id==f.id)it.copy(side=side) else it}
+                    })
                 }
             }
             TextButton(onClick={draft=MaterialsFilters.defaults}) {Text("Restore defaults")}

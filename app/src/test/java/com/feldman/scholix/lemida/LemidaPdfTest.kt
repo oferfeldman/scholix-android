@@ -10,7 +10,7 @@ class LemidaPdfTest {
         assertEquals("תרגיל 1.pdf", LemidaPdf("תרגיל 1", "").downloadName())
         assertEquals("Answers.PDF", LemidaPdf("Answers.PDF", "").downloadName())
         assertEquals("Questions.pdf", LemidaPdf("../../Questions", "").downloadName())
-        assertEquals("Homework.pdf", LemidaPdf("..\n", "").downloadName())
+        assertEquals("Assignment.pdf", LemidaPdf("..\n", "").downloadName())
         assertEquals("file.pdf", LemidaPdf("file\u202e", "").downloadName())
     }
     private fun page(body: String) = "<body><main id='region-main'>$body</main></body>"

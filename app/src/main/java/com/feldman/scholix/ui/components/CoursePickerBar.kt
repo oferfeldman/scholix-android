@@ -22,6 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.feldman.motion.MotionDropdownFolder
+import com.feldman.motion.MotionDropdownAnimation
 import com.feldman.motion.MotionSymbols
 import com.feldman.motion.rememberSymbolPainter
 import com.feldman.scholix.R
@@ -156,10 +157,6 @@ internal fun CoursePickerBar(
     val hasFolders = remember(menuEntries) { menuEntries.any { it is CourseDropdownEntry.Folder } }
     var openFolderPlatformId by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(expanded) {
-        if (!expanded) openFolderPlatformId = null
-    }
-
     val courseDisplayLabel: (JSONObject) -> String = { course ->
         val name = course.optString("name").ifBlank { courseLabel }
         val year = course.optInt("year")
@@ -199,7 +196,11 @@ internal fun CoursePickerBar(
         selectedIndex = selectedIndex,
         onSelected = onSelected,
         expanded = expanded,
-        onExpandedChange = onExpandedChange,
+        onExpandedChange = { opening ->
+            if (opening) openFolderPlatformId = menuEntries.filterIsInstance<CourseDropdownEntry.Folder>()
+                .firstOrNull { selectedIndex in it.courseIndices }?.platformId
+            onExpandedChange(opening)
+        },
         optionLabel = courseDisplayLabel,
         optionDescription = { course -> courseSupportingText(course) },
         optionKey = { course ->
@@ -218,6 +219,7 @@ internal fun CoursePickerBar(
         previousDescription = "Previous course",
         nextDescription = "Next course",
         menuContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+        menuAnimation = MotionDropdownAnimation.Morph,
         showOptionsInMenu = !hasFolders,
         menuLabels = visibleMenuLabels,
         menuDescriptions = visibleMenuDescriptions,
