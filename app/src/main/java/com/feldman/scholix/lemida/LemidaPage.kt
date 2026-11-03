@@ -32,40 +32,74 @@ import com.feldman.motion.MotionScaffold
 import com.feldman.motion.MotionSectionDefaults
 import com.feldman.motion.MotionThemeDefaults
 import com.feldman.scholix.R
+import com.feldman.scholix.LocalAppState
+import com.feldman.scholix.api.platforms.GoogleClassroomPlatform
+import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.openu.OpenUAssignmentsRepository
+import com.feldman.scholix.ui.components.CoursePickerBar
 import com.feldman.scholix.ui.components.SettingsTopBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
+import org.json.JSONObject
 
 @Composable
 fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNavigator) {
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
-    val providers = com.feldman.scholix.LocalAppState.current.platforms
-        .filter { it is com.feldman.scholix.api.platforms.GoogleClassroomPlatform || it is com.feldman.scholix.api.platforms.OpenAUPlatform }
-    var providerId by rememberSaveable { mutableStateOf(providers.firstOrNull()?.id ?: "lemida") }
-    val selected = providers.firstOrNull { it.id == providerId }
-    val providerLabels = providers.map { "${if (it is com.feldman.scholix.api.platforms.OpenAUPlatform) "OpenU" else "Classroom"} · ${it.getUsername()}" }
-    val providerPicker: @Composable () -> Unit = {
-        if (providers.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            com.feldman.scholix.ui.components.ChipPicker(label = "Provider",
-                options = listOf("Lemida") + providerLabels,
-                selected = providerLabels.getOrNull(providers.indexOf(selected)) ?: "Lemida",
-                onSelectedChange = { label -> providerId = providers.getOrNull(providerLabels.indexOf(label))?.id ?: "lemida" })
+    val app = LocalAppState.current
+    val providers = app.platforms.filter { it is GoogleClassroomPlatform || it is OpenAUPlatform }
+    val snapshot by repo.snapshots.collectAsStateWithLifecycle(initialValue = LemidaSnapshot())
+    val refreshedCourses = remember { mutableStateMapOf<String, List<JSONObject>>() }
+    val cachedCourses = remember(app.preloadedCourses, app.platforms) {
+        providers.associate { provider ->
+            val saved = if (provider is OpenAUPlatform) OpenUAssignmentsRepository(context, provider).cachedCourses()
+                else (provider as GoogleClassroomPlatform).coursesList.toList()
+            provider.id to saved.ifEmpty { app.preloadedCourses.filter { it.optString("platformId") == provider.id } }
         }
     }
-    when (selected) {
-        is com.feldman.scholix.api.platforms.OpenAUPlatform -> com.feldman.scholix.openu.OpenUAssignmentsPage(selected, searchQuery, onNavigate, providerPicker)
-        is com.feldman.scholix.api.platforms.GoogleClassroomPlatform -> com.feldman.scholix.classroom.ClassroomHomeworkPage(selected, searchQuery, providerPicker)
-        else -> LemidaPageContent(repo, searchQuery, providerPicker)
+    val courses = providers.flatMap { provider ->
+        (refreshedCourses[provider.id] ?: cachedCourses[provider.id]).orEmpty().map { course ->
+            JSONObject(course.toString()).put("platformId", provider.id)
+                .put("courseKey", course.optString("courseKey").ifBlank { course.optString("id") })
+        }.ifEmpty { listOf(JSONObject().put("platformId", provider.id).put("courseKey", "")
+            .put("name", provider.getName()).put("status", "Refresh to load courses")) }
+    } + snapshot.courses.map { course ->
+        JSONObject().put("platformId", "lemida").put("platformName", "Lemida")
+            .put("courseKey", course.id.toString()).put("name", course.name)
+    }.ifEmpty { listOf(JSONObject().put("platformId", "lemida").put("courseKey", "")
+        .put("name", "Lemida").put("status", "Sign in to load courses")) }
+    var selectedKey by rememberSaveable { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
+    val selectedIndex = courses.indexOfFirst { "${it.optString("platformId")}|${it.optString("courseKey")}" == selectedKey }.coerceAtLeast(0)
+    val selectedCourse = courses[selectedIndex]
+    val providerId = selectedCourse.optString("platformId")
+    val courseKey = selectedCourse.optString("courseKey").takeIf { it.isNotBlank() }
+    LaunchedEffect(providerId, courseKey) {
+        selectedKey = "$providerId|${courseKey.orEmpty()}"
+    }
+    val coursePicker: @Composable () -> Unit = {
+        CoursePickerBar(courses, selectedIndex, onSelected = { index ->
+            courses.getOrNull(index)?.let { selectedKey = "${it.optString("platformId")}|${it.optString("courseKey")}" }
+        }, expanded = expanded, onExpandedChange = { expanded = it }, providersById = providers.associateBy { it.id })
+    }
+    key(providerId) {
+        when (val selected = providers.firstOrNull { it.id == providerId }) {
+            is OpenAUPlatform -> com.feldman.scholix.openu.OpenUAssignmentsPage(selected, searchQuery, onNavigate,
+                courseKey, coursePicker, onCoursesChanged = { refreshedCourses[providerId] = it })
+            is GoogleClassroomPlatform -> com.feldman.scholix.classroom.ClassroomHomeworkPage(selected, searchQuery,
+                coursePicker, selectedCourseId = courseKey, onCoursesChanged = { refreshedCourses[providerId] = it })
+            else -> LemidaPageContent(repo, searchQuery, coursePicker, selectedCourseId = courseKey?.toIntOrNull())
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "", providerPicker: (@Composable () -> Unit)? = null) {
+internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "", coursePicker: (@Composable () -> Unit)? = null,
+                               selectedCourseId: Int? = null) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val syncing by repo.syncing.collectAsStateWithLifecycle()
@@ -77,7 +111,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
     val enabled = snapshot.enabled
     val needsLogin = snapshot.needsLogin
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
-    var courseFilter by rememberSaveable { mutableStateOf<Int?>(null) }
+    var courseFilter by rememberSaveable(selectedCourseId) { mutableStateOf(selectedCourseId) }
     var typeFilter by rememberSaveable { mutableStateOf("all") }
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
@@ -154,7 +188,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
             }
         }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer))
     }) {
-        if (providerPicker != null) Item { providerPicker() }
+        if (coursePicker != null) Item { coursePicker() }
         Item {
             LemidaHomeworkFilters(
                 count = visible.size, updated = updated, courses = courses,
@@ -162,6 +196,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                 courseFilter = courseFilter, onCourseChange = { courseFilter = it },
                 typeFilter = typeFilter, onTypeChange = { typeFilter = it },
                 automaticUpdates = enabled,
+                showCourseFilters = coursePicker == null,
             )
         }
         if (updated == 0L || needsLogin) Section {
@@ -206,6 +241,7 @@ internal fun LemidaHomeworkFilters(
     courseFilter: Int?, onCourseChange: (Int?) -> Unit,
     typeFilter: String, onTypeChange: (String) -> Unit,
     automaticUpdates: Boolean = true,
+    showCourseFilters: Boolean = true,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -221,7 +257,7 @@ internal fun LemidaHomeworkFilters(
             trailingIcon = if (query.isNotEmpty()) {
                 { IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Clear homework search") } }
             } else null)
-        Row(Modifier.fillMaxWidth().testTag("homework-course-filters").horizontalScroll(rememberScrollState()),
+        if (showCourseFilters) Row(Modifier.fillMaxWidth().testTag("homework-course-filters").horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = courseFilter == null, onClick = { onCourseChange(null) }, label = { Text("All courses") })
             courses.forEach { c -> FilterChip(selected = courseFilter == c.id,

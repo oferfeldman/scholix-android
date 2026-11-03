@@ -25,14 +25,15 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable
-fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String = "", providerPicker: (@Composable () -> Unit)? = null) {
+fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String = "", coursePicker: (@Composable () -> Unit)? = null,
+                          selectedCourseId: String? = null, onCoursesChanged: (List<JSONObject>) -> Unit = {}) {
     val context = LocalContext.current
     var items by remember(provider.id) { mutableStateOf(provider.cachedHomework()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var retry by remember { mutableIntStateOf(0) }
     var selected by rememberSaveable(provider.id) { mutableStateOf<String?>(null) }
-    var course by rememberSaveable(provider.id) { mutableStateOf("all") }
+    var course by rememberSaveable(provider.id, selectedCourseId) { mutableStateOf(selectedCourseId ?: "all") }
     var type by rememberSaveable { mutableStateOf("All") }
     var query by rememberSaveable { mutableStateOf("") }
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -44,7 +45,12 @@ fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String
         try {
             items = withContext(Dispatchers.IO) {
                 val current = PlatformStorage.loadPlatforms(context).filterIsInstance<GoogleClassroomPlatform>().first { it.id == provider.id }
-                current.refreshHomework().also { PlatformStorage.addPlatform(context, current) }
+                val homework = current.refreshHomework().toList()
+                PlatformStorage.addPlatform(context, current)
+                homework to current.coursesList.toList()
+            }.let { (homework, courses) ->
+                onCoursesChanged(courses)
+                homework
             }
         } catch (e: CancellationException) { throw e
         } catch (e: Exception) { error = e.localizedMessage ?: "Could not update Classroom homework."
@@ -69,11 +75,11 @@ fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String
             } }
     }
     MotionScaffold(topBar = { SettingsTopBar("Homework") }) {
-        if (providerPicker != null) Item { providerPicker() }
+        if (coursePicker != null) Item { coursePicker() }
         Item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,
                 placeholder = { Text("Search homework") }, shape = MaterialTheme.shapes.large)
-            ChipPicker(label = "Course", options = courseNames,
+            if (coursePicker == null) ChipPicker(label = "Course", options = courseNames,
                 selected = courseNames[courses.indexOfFirst { it.optString("courseId") == course } + 1],
                 onSelectedChange = { name -> course = courses.getOrNull(courseNames.indexOf(name) - 1)?.optString("courseId") ?: "all" })
             ChipPicker(label = "Type", options = listOf("All", "Coursework", "Materials"), selected = type, onSelectedChange = { type = it })

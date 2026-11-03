@@ -17,6 +17,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.feldman.motion.MotionNavigator
 import com.feldman.motion.MotionScaffold
+import com.feldman.motion.MotionSymbols
+import com.feldman.motion.rememberSymbolPainter
 import com.feldman.scholix.AppDest
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platforms.OpenAUPlatform
@@ -37,14 +39,13 @@ import java.util.Date
 
 @Composable
 internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String, onNavigate: MotionNavigator,
-                                  providerPicker: @Composable () -> Unit) {
+                                  selectedCourse: String?, coursePicker: @Composable () -> Unit,
+                                  onCoursesChanged: (List<JSONObject>) -> Unit) {
     val context = LocalContext.current
     val repo = remember(provider.id, provider.getUsername()) { OpenUAssignmentsRepository(context, provider) }
     var courses by remember(repo) { mutableStateOf(repo.cachedCourses()) }
     var items by remember(repo) { mutableStateOf(repo.cachedAssignments()) }
-    var selectedCourse by rememberSaveable(provider.id) { mutableStateOf("current") }
     var stateFilter by rememberSaveable(provider.id) { mutableStateOf("All statuses") }
-    var query by rememberSaveable(provider.id) { mutableStateOf("") }
     var retry by remember { mutableIntStateOf(0) }
     var loading by remember(repo) { mutableStateOf(false) }
     var errors by remember(repo) { mutableStateOf<List<String>>(emptyList()) }
@@ -52,7 +53,8 @@ internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String,
         loading = true; errors = emptyList()
         try {
             courses = repo.refreshCourses()
-            val selected = if (selectedCourse == "current") courses.filter { it.optInt("courseStatusRank", 1) == 0 }
+            onCoursesChanged(courses)
+            val selected = if (selectedCourse == null) courses.filter { it.optInt("courseStatusRank", 1) == 0 }
                 else courses.filter { it.optString("courseKey") == selectedCourse }
             for (course in selected) {
                 try { repo.refresh(course); items = repo.cachedAssignments() }
@@ -63,44 +65,41 @@ internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String,
         catch (e: Exception) { errors = listOf(e.message ?: "Could not update OpenU assignments.") }
         finally { loading = false }
     }
-    val courseLabels = listOf("Current courses") + courses.map { "${it.optString("name")} · ${it.optString("term")}" }
-    val selectedKeys = if (selectedCourse == "current") courses.filter { it.optInt("courseStatusRank", 1) == 0 }.map { it.optString("courseKey") }
+    val selectedKeys = if (selectedCourse == null) courses.filter { it.optInt("courseStatusRank", 1) == 0 }.map { it.optString("courseKey") }
         else listOf(selectedCourse)
     val visible = items.filter { item -> item.courseKey in selectedKeys &&
         (stateFilter == "All statuses" || if (stateFilter == "Not submitted") item.statusCode == "notsubmitted"
             else if (stateFilter == "Submitted") item.statusCode in listOf("submitted", "wait") else item.statusCode == "checked") &&
-        listOf(query, searchQuery).all { text -> text.trim().split(Regex("\\s+")).all {
+        searchQuery.trim().split(Regex("\\s+")).all {
             "${item.label} ${item.courseName} ${item.semester} ${item.status}".contains(it, true)
-        } }
+        }
     }
     MotionScaffold(topBar = { SettingsTopBar("Homework", actions = {
         IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh OpenU assignments") }
     }) }) {
-        Item { providerPicker() }
+        Item { coursePicker() }
         Item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ChipPicker("Course", courseLabels, courseLabels.getOrElse(courses.indexOfFirst { it.optString("courseKey") == selectedCourse } + 1) { courseLabels.first() }, onSelectedChange = {
-                selectedCourse = courses.getOrNull(courseLabels.indexOf(it) - 1)?.optString("courseKey") ?: "current"
-            })
             ChipPicker("Status", listOf("All statuses", "Not submitted", "Submitted", "Checked"), stateFilter, onSelectedChange = { stateFilter = it })
-            OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Search assignments") })
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             errors.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
             if (errors.isNotEmpty() && visible.isNotEmpty()) Text("Showing last-known assignments. Their status may have changed.")
         } }
-        if (visible.isEmpty() && !loading) Item { Text(if (query.isNotBlank() || searchQuery.isNotBlank()) "No matching assignments."
+        if (visible.isEmpty() && !loading) Item { Text(if (searchQuery.isNotBlank()) "No matching assignments."
             else if (errors.isNotEmpty()) "No saved assignment list is available. Refresh or reconnect OpenU."
             else "No assignments in the selected courses and status.") }
         visible.groupBy { it.courseKey }.forEach { (_, assignments) ->
             Title("${assignments.first().courseName} · ${assignments.first().semester}")
             Section {
                 assignments.forEach { item ->
-                    PageItem(title = item.label, description = listOf(item.status.ifBlank { "Status unavailable" },
+                    PageItem(key = item.key, title = item.label, icon = rememberSymbolPainter(MotionSymbols.ic_assignment),
+                        description = listOf(item.status.ifBlank { "Status unavailable" },
                         item.due.takeIf(String::isNotBlank)?.let { "Due $it" },
-                        item.grade.takeIf { it.isNotBlank() && it != "-" }?.let { "Grade $it" },
-                        "Last checked ${checkedTime(repo.checkedAt(item))}").filterNotNull().joinToString(" · "),
+                        item.grade.takeIf { it.isNotBlank() && it != "-" }?.let { "Grade $it" }).filterNotNull().joinToString(" · "),
                         onClick = { onNavigate(AppDest.OpenUAssignment(provider.id, item.key)) })
                 }
             }
+            Item { Text("Last checked ${checkedTime(repo.checkedAt(assignments.first()))}",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         BottomBarSpacer(minMargin = 24.dp)
     }
