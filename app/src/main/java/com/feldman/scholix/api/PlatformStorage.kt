@@ -161,7 +161,11 @@ object PlatformStorage {
         if (stored.cookies != previousCookies || stored.getUsername() != account.getUsername() ||
             stored.getPassword() != account.getPassword()) return
         platforms[index] = WebtopPlatform.fromJson(stored.toJson()
-            .put("cookies", account.cookies).put("loggedIn", account.loggedIn))
+            .put("cookies", account.cookies).put("loggedIn", account.loggedIn)
+            .put("loginMethod", account.loginMethod)
+            .put("studentId", account.studentId).put("institution", account.studentInstitution)
+            .put("classCode", account.studentClass).put("userStudentId", account.userStudentId)
+            .put("userType", account.userType ?: JSONObject.NULL).put("schoolName", account.schoolName))
         savePlatforms(context, platforms)
     }
 

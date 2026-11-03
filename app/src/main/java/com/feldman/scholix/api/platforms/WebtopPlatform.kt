@@ -80,6 +80,7 @@ class WebtopPlatform(
     )
     @Volatile
     private var cachedPupilCardSettings: MutableMap<Int, PupilCardSettings> = mutableMapOf()
+    private var cachedPupilCardSettingsTime: Long = 0
     internal val messageAttachments = WebtopAttachmentDownload(cookie = { _cookies.orEmpty() })
     val mailbox: WebtopMailbox = WebtopMailbox(
         cookie = { _cookies ?: "" },
@@ -254,7 +255,10 @@ class WebtopPlatform(
     override fun toString(): String =
         "WebtopPlatform(name=$studentName, institution=$studentInstitution, loggedIn=$loggedIn)"
 
-    internal fun adoptPasswordLoginData(data: JSONObject, cookieHeader: String): Boolean {
+    internal fun adoptPasswordLoginData(data: JSONObject, cookieHeader: String): Boolean =
+        adoptLoginData(data, cookieHeader, "password")
+
+    private fun adoptLoginData(data: JSONObject, cookieHeader: String, method: String): Boolean {
         val userId = data.optString("userId")
         if (userId.isBlank()) {
             loginError = "Webtop sign-in response did not include a user ID."
@@ -270,7 +274,7 @@ class WebtopPlatform(
         userStudentId = data.optString("studentId").ifEmpty { null }
         userType = if (data.has("userType") && !data.isNull("userType")) data.optInt("userType") else null
         schoolName = data.optString("institutionName").ifEmpty { null }
-        loginMethod = "password"
+        loginMethod = method
         loginError = null
         _cookies = cookieHeader
         cachedShotefKey = null
@@ -333,7 +337,11 @@ class WebtopPlatform(
 
 
 
-    fun fetchPupilCardSettings(year: Int): PupilCardSettings? {
+    @Synchronized
+    fun fetchPupilCardSettings(year: Int, retry: Boolean = true): PupilCardSettings? {
+        if (System.currentTimeMillis() - cachedPupilCardSettingsTime >= 60_000) {
+            cachedPupilCardSettings.clear()
+        }
         cachedPupilCardSettings[year]?.let { return it }
         try {
             val payload = JSONObject().put("id", year)
@@ -344,12 +352,18 @@ class WebtopPlatform(
                 .build()
 
             _client.newCall(request).execute().use { response ->
+                if (response.code == 401 || response.code == 403) {
+                    loggedIn = false
+                    if (retry && refreshCookies()) return fetchPupilCardSettings(year, retry = false)
+                    return null
+                }
                 if (!response.isSuccessful) {
                     Log.w("WebtopPlatform", "Failed to fetch GetSettingsList: ${response.code}")
                     return null
                 }
                 val body = response.body.string()
                 val json = JSONObject(body)
+                if (!json.optBoolean("status", true)) return null
                 val data = json.optJSONObject("data") ?: return null
 
                 val divisions = mutableMapOf<String, Int>()
@@ -374,6 +388,8 @@ class WebtopPlatform(
 
                 val settings = PupilCardSettings(divisions, encId, currentStudyYear)
                 cachedPupilCardSettings[year] = settings
+                cachedPupilCardSettingsTime = System.currentTimeMillis()
+                loggedIn = true
                 Log.d("WebtopPlatform", "Fetched PupilCard settings for year $year: divisions=$divisions, encId=${encId?.take(10)}..., currentStudyYear=$currentStudyYear")
                 return settings
             }
@@ -640,6 +656,13 @@ class WebtopPlatform(
     private fun getSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?, retry: Boolean): JSONObject {
         Log.d("WebtopPlatform", "override getSchedule(dayIndex: $dayIndex, institutionCode $institutionCode, selectedValue $selectedValue) called.")
 
+        if (dayIndex < 0) return JSONObject()
+        // Shotef returns HTTP 200 with empty lessons for an expired session.
+        val today = LocalDate.now()
+        val studyYear = if (today.monthValue >= 9) today.year + 1 else today.year
+        if (fetchPupilCardSettings(studyYear) == null) {
+            return JSONObject().put("error", if (loggedIn) "server_unreachable" else "login_failed")
+        }
         val institution = institutionCode ?: studentInstitution
         val classCode = selectedValue?.takeIf { it.isNotBlank() } ?: studentClass
 
@@ -1014,6 +1037,11 @@ class WebtopPlatform(
     private fun getOriginalSchedule(dayIndex: Int, institutionCode: Int?, selectedValue: String?, retry: Boolean): JSONObject {
         val schedule = JSONObject()
         if (dayIndex < 0) return schedule
+        val today = LocalDate.now()
+        val studyYear = if (today.monthValue >= 9) today.year + 1 else today.year
+        if (fetchPupilCardSettings(studyYear) == null) {
+            return JSONObject().put("error", if (loggedIn) "server_unreachable" else "login_failed")
+        }
         val institution = institutionCode ?: studentInstitution
         val classCode = selectedValue?.takeIf { it.isNotBlank() } ?: studentClass
 
@@ -1110,22 +1138,17 @@ class WebtopPlatform(
                     val session = WebtopMoeLogin(_client).login(u, p)
                     val newCookies = session.cookieHeader
                     if (newCookies.isNotBlank()) {
-                        _cookies = newCookies
-                        cachedShotefKey = null
-                        cachedPupilCardSettings.clear()
-                        cachedShotefDays = null
-                        loggedIn = true
-                        Log.i("WebtopPlatform", "MOE Webtop cookies refreshed successfully via headless flow")
-                        return true
+                        return adoptLoginData(JSONObject(session.data.toString()), newCookies, "moe")
                     }
                 } catch (e: Exception) {
                     Log.w("WebtopPlatform", "Headless MOE cookie refresh failed: ${e.message}")
                 }
             }
-            loggedIn = false
-            return false
+            // Older saved accounts inferred Ministry login from alphabetic Webtop usernames.
+            // A successful password login below also corrects the persisted login method.
         }
 
+        loggedIn = false
         return try {
             val loginData = JSONObject()
                 .put("Data", encrypt(username + "0"))
@@ -1177,17 +1200,22 @@ class WebtopPlatform(
     override fun getAttendanceEvents(period: String): JSONObject {
         val currentYear = java.time.Year.now().value
         val currentMonth = java.time.LocalDate.now().monthValue
-        val studyYear = if (currentMonth in 9..12 || currentMonth == 1) currentYear + 1 else currentYear
+        val studyYear = if (currentMonth >= 9) currentYear + 1 else currentYear
         return getAttendanceEvents(studyYear, period)
     }
 
     @Throws(JSONException::class, IOException::class)
     override fun getAttendanceEvents(year: Int, period: String): JSONObject {
+        return getAttendanceEvents(year, period, retry = true)
+    }
+
+    private fun getAttendanceEvents(year: Int, period: String, retry: Boolean): JSONObject {
         if (period !in listOf("a", "b", "ab")) {
             throw IllegalArgumentException("Period must be a, b, or ab")
         }
 
         val settings = fetchPupilCardSettings(year)
+            ?: return JSONObject().put("error", if (loggedIn) "server_unreachable" else "login_failed")
         val periodId = when (period) {
             "a" -> settings?.divisions?.get("a") ?: 938
             "b" -> settings?.divisions?.get("b") ?: 939
@@ -1215,14 +1243,20 @@ class WebtopPlatform(
                 .build()
 
             _client.newCall(request).execute().use { response ->
+                if (response.code == 401 || response.code == 403) {
+                    loggedIn = false
+                    if (retry && refreshCookies()) return getAttendanceEvents(year, period, retry = false)
+                    return JSONObject().put("error", "login_failed")
+                }
                 if (!response.isSuccessful) {
                     Log.e("WebtopPlatform", "Failed to fetch discipline events: ${response.code}")
-                    return result
+                    return JSONObject().put("error", "server_unreachable")
                 }
 
                 val body = response.body.string()
                 val json = JSONObject(body)
-                val data = json.optJSONObject("data") ?: return result
+                if (!json.optBoolean("status", true)) return JSONObject().put("error", "server_unreachable")
+                val data = json.optJSONObject("data") ?: return JSONObject().put("error", "server_unreachable")
                 val eventsArray = data.optJSONArray("diciplineEvents")
                     ?: data.optJSONArray("disciplineEvents")
                     ?: JSONArray()
@@ -1268,6 +1302,7 @@ class WebtopPlatform(
             }
         } catch (e: Exception) {
             Log.e("WebtopPlatform", "Failed to fetch discipline events", e)
+            return JSONObject().put("error", "server_unreachable")
         }
 
         return result

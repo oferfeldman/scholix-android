@@ -828,11 +828,13 @@ fun GradesScreen(
                         // Startup displays saved grades without contacting Inbar or requesting SMS.
                         gradesArray = course.optJSONArray("grades") ?: JSONArray()
                     } else {
+                        val previousCookies = (platform as? WebtopPlatform)?.cookies
                         gradesArray = platform.getGrades(
                             course = course.optString("courseKey").ifBlank { course.optString("name") },
                             year = year,
                             semester = semester
                         )
+                        if (platform is WebtopPlatform) PlatformStorage.saveWebtopSession(context, platform, previousCookies)
                     }
 
                     if (gradesArray.length() == 1) {

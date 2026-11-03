@@ -25,6 +25,8 @@ import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.AppDest
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
+import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.attendance.*
 import com.feldman.scholix.ui.components.ProviderPickerBar
 import com.feldman.scholix.ui.components.ChipPicker
@@ -36,6 +38,8 @@ import com.feldman.motion.MotionFonts
 import com.feldman.motion.MotionNavigator
 import com.feldman.motion.rememberSymbolPainter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.LocalDate
@@ -174,6 +178,10 @@ fun AttendancePage(
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var events by remember { mutableStateOf<Map<String, List<JSONObject>>>(emptyMap()) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var webtopRelogin by remember { mutableStateOf<WebtopPlatform?>(null) }
+    var reloadTrigger by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val currentYear = java.time.Year.now().value
@@ -210,6 +218,7 @@ fun AttendancePage(
         providersLoaded = true
     }
     val selectedPlatform = attendancePlatforms.getOrNull(selectedPlatformIndex)
+    var reloginAttempted by remember(selectedPlatform?.id) { mutableStateOf(false) }
 
     var scheduleHoursBySubject by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     LaunchedEffect(selectedPlatform?.id) {
@@ -286,16 +295,37 @@ fun AttendancePage(
         }
     }
 
-    LaunchedEffect(selectedPlatform?.id, yearState, semesterState) {
+    LaunchedEffect(selectedPlatform?.id, yearState, semesterState, reloadTrigger) {
         val platform = selectedPlatform
         if (platform == null) {
             if (attendancePlatforms.isEmpty() && providersLoaded) isLoading = false
             return@LaunchedEffect
         }
         isLoading = true
-        withContext(Dispatchers.IO) {
-            try {
-                val json = platform.getAttendanceEvents(yearState, semesterState.lowercase())
+        errorMessage = null
+        try {
+            val (requestPlatform, json) = withContext(Dispatchers.IO) {
+                val current = if (platform is WebtopPlatform) {
+                    PlatformStorage.loadPlatforms(context).firstOrNull { it.id == platform.id } ?: platform
+                } else platform
+                val previousCookies = (current as? WebtopPlatform)?.cookies
+                val result = current.getAttendanceEvents(yearState, semesterState.lowercase())
+                if (current is WebtopPlatform) PlatformStorage.saveWebtopSession(context, current, previousCookies)
+                current to result
+            }
+            if (json.has("error")) {
+                val webtop = requestPlatform as? WebtopPlatform
+                if (json.optString("error") == "login_failed" && webtop != null &&
+                    webtop.needsInteractiveRelogin() && !reloginAttempted) {
+                    reloginAttempted = true
+                    webtopRelogin = webtop
+                } else {
+                    errorMessage = if (json.optString("error") == "login_failed") "Login failed.\nPlease re-login."
+                        else "Could not load attendance.\nPlease try again."
+                    isLoading = false
+                }
+                events = emptyMap()
+            } else {
                 val grouped = mutableMapOf<String, MutableList<JSONObject>>()
 
                 val eventsJson = json.optJSONObject("events")
@@ -308,13 +338,33 @@ fun AttendancePage(
                     grouped[type] = list
                 }
 
-                withContext(Dispatchers.Main) {
-                    events = grouped
-                    isLoading = false
+                events = grouped
+                isLoading = false
+                reloginAttempted = false
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            errorMessage = "Could not load attendance.\nPlease try again."
+            isLoading = false
+        }
+    }
+
+    webtopRelogin?.let { webtop ->
+        HiddenWebtopMoeLogin(webtop.getUsername(), webtop.getPassword()) { key, _ ->
+            if (key == null) {
+                webtopRelogin = null
+                errorMessage = "Login failed.\nPlease re-login."
+                isLoading = false
+            } else scope.launch {
+                val success = withContext(Dispatchers.IO) {
+                    val previousCookies = webtop.cookies
+                    webtop.adoptSession(key).also { ok ->
+                        if (ok) PlatformStorage.saveWebtopSession(context, webtop, previousCookies)
+                    }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) {
+                webtopRelogin = null
+                if (success) reloadTrigger++ else {
+                    errorMessage = "Login failed.\nPlease re-login."
                     isLoading = false
                 }
             }
@@ -370,6 +420,12 @@ fun AttendancePage(
 
         if (isLoading) {
             GradesLoadingIndicator(modifier = modifier.fillMaxSize())
+        } else if (errorMessage != null) {
+            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center) {
+                Text(errorMessage.orEmpty(), textAlign = TextAlign.Center)
+                TextButton(onClick = { reloginAttempted = false; reloadTrigger++ }) { Text("Retry") }
+            }
         } else {
             if (events.isEmpty()) {
                 Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

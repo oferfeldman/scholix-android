@@ -373,7 +373,9 @@ fun SchedulePage(
 
                 // --- Original schedule ---
                 val original = if (!supportsOriginal) updated else withContext(Dispatchers.IO) {
+                    val previousCookies = (requestPlatform as? WebtopPlatform)?.cookies
                     val schedule = requestPlatform.getOriginalSchedule(page, null, selectedValue)
+                    if (requestPlatform is WebtopPlatform) PlatformStorage.saveWebtopSession(context, requestPlatform, previousCookies)
                     check(!schedule.has("error")) { schedule.optString("error") }
                     schedule.keys().asSequence().map { schedule.getJSONObject(it) }.toList()
                 }
