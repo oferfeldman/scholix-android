@@ -52,6 +52,7 @@ import java.util.Date
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DriveMaterialsPage(searchQuery: String = "") {
+    val webLinks = androidx.compose.ui.platform.LocalUriHandler.current
     val context = LocalContext.current
     val loadedRepository by produceState<DriveRepository?>(null,context.applicationContext) {
         value=withContext(Dispatchers.IO){DriveRepository.get(context)}
@@ -127,8 +128,8 @@ fun DriveMaterialsPage(searchQuery: String = "") {
         val uri = Uri.Builder().scheme("https").authority("drive.google.com")
             .appendPath("file").appendPath("d").appendPath(item.effectiveId).appendPath("view")
             .apply { if (item.effectiveKey.isNotEmpty()) appendQueryParameter("resourcekey", item.effectiveKey) }.build()
-        try { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-        catch (_: android.content.ActivityNotFoundException) { error = "No browser or Drive viewer is available." }
+        // The Drive app when installed, otherwise Scholix's own browser.
+        webLinks.openUri(uri.toString())
     }
     fun open(item: DriveItem) {
         if (item.folder) { stopLoading();stack.add(item); return }

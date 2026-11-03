@@ -2,7 +2,6 @@ package com.feldman.scholix.ui.components
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.print.PrintAttributes
@@ -115,6 +114,7 @@ fun RichMessageEditor(
 @Composable
 fun RichMessageBody(html: String, modifier: Modifier = Modifier, onView: (WebView) -> Unit = {}) {
     val context = LocalContext.current
+    val links = androidx.compose.ui.platform.LocalUriHandler.current
     val scheme = MaterialTheme.colorScheme
     val background = "#%06X".format(0xFFFFFF and scheme.surface.toArgb())
     val foreground = "#%06X".format(0xFFFFFF and scheme.onSurface.toArgb())
@@ -141,9 +141,8 @@ fun RichMessageBody(html: String, modifier: Modifier = Modifier, onView: (WebVie
             setBackgroundColor(scheme.surface.toArgb())
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                    if (request.url.scheme in listOf("https", "http", "mailto", "tel")) {
-                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
-                    }
+                    // Message links open in Scholix's browser (or the email/phone app), never an outside browser.
+                    if (request.isForMainFrame) links.openUri(request.url.toString())
                     return true
                 }
             }

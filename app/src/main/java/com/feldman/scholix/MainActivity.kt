@@ -162,6 +162,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        com.feldman.scholix.lemida.HomeworkLinks.request(intent)
         if (intent.getBooleanExtra("open_homework", false)) homeworkOpenRequest++
     }
 
@@ -202,6 +203,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         homeworkOpenRequest = savedInstanceState?.getInt("lemida_open_request", 0) ?: 0
+        if (savedInstanceState == null) com.feldman.scholix.lemida.HomeworkLinks.request(intent)
         // Clean up grade notifications & legacy periodic worker
         GradeMonitorWorker.clearNotificationsAndChannel(this)
         GradeMonitorWorker.cancelPeriodicWorker(this)
@@ -242,6 +244,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MotionTheme {
+            // Web links stay in Scholix's own browser, which shares its university sign-ins.
+            com.feldman.scholix.browser.ScholixWebLinkScope {
                 var isLoggedIn by remember { mutableStateOf<Boolean?>(null) }
                 val context = LocalContext.current
                 val scope = rememberCoroutineScope()
@@ -512,6 +516,7 @@ class MainActivity : ComponentActivity() {
                         Box(Modifier.align(Alignment.BottomCenter)) { snackbarHost() }
                     }
                 }
+            }
             }
         }
     }

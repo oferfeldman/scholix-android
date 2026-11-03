@@ -34,6 +34,7 @@ import com.feldman.motion.MotionThemeDefaults
 import com.feldman.scholix.R
 import com.feldman.scholix.ui.components.SettingsTopBar
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
@@ -46,6 +47,13 @@ fun LemidaPage(searchQuery: String = "") {
     val providers = com.feldman.scholix.LocalAppState.current.platforms
         .filterIsInstance<com.feldman.scholix.api.platforms.GoogleClassroomPlatform>()
     var providerId by rememberSaveable { mutableStateOf(providers.firstOrNull()?.id ?: "lemida") }
+    val requestedAssignment by HomeworkLinks.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(requestedAssignment) {
+        val request = requestedAssignment ?: return@LaunchedEffect
+        val saved = repo.snapshots.first { it.loaded }
+        if (HomeworkLinks.match(request, saved.homework, saved.account) != null) providerId = "lemida"
+        else HomeworkLinks.consume(request) // Not a Lemida assignment of this account: show the homework list.
+    }
     val selected = providers.firstOrNull { it.id == providerId }
     val providerPicker: @Composable () -> Unit = {
         if (providers.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -95,6 +103,13 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         if (!snapshot.loaded) return@LaunchedEffect
         if (courseFilter != null && courses.none { it.id == courseFilter }) courseFilter = null
         if (selectedId != null && homework.none { it.id == selectedId }) selectedId = null
+    }
+    val requestedAssignment by HomeworkLinks.pending.collectAsStateWithLifecycle()
+    LaunchedEffect(requestedAssignment, homework, snapshot.loaded, snapshot.account) {
+        val request = requestedAssignment ?: return@LaunchedEffect
+        if (!snapshot.loaded) return@LaunchedEffect
+        HomeworkLinks.match(request, homework, snapshot.account)?.let { selectedId = it.id }
+        HomeworkLinks.consume(request)
     }
     homework.firstOrNull { it.id == selectedId }?.let { item ->
         key(snapshot.account, item.id) {
@@ -294,12 +309,21 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, accoun
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         } }
         if (account.isNotBlank()) Item {
-            val assignment = com.feldman.scholix.studies.StudyAssignment.create(LemidaParser.BASE, account,
-                item.courseId, item.type, item.id.substringAfterLast(':'), item.title, item.course,
+            val assignment = item.studyAssignment(account,
                 status = detail?.tables?.flatten()?.filter { row -> row.firstOrNull()?.contains("status", ignoreCase = true) == true }
                     ?.joinToString("; ") { it.joinToString(" · ") }.orEmpty().take(2000),
                 checkedAt = detailCheckedAt)
             com.feldman.scholix.studies.StudyActions(assignment)
+        }
+        // The official hand-in: Lemida's own page in Scholix's browser, already signed in. Scholix never submits.
+        if (item.url.startsWith("${LemidaParser.BASE}/") && com.feldman.scholix.browser.ScholixLinks.loadable(item.url)) Section {
+            val quiz = item.type == "quiz"
+            PageItem(title = if (quiz) "Open quiz on Lemida" else "Hand in on Lemida",
+                description = if (quiz) "Opens this quiz on Lemida's website inside Scholix."
+                    else "Opens this assignment on Lemida's website inside Scholix. Upload your exported PDF there.",
+                icon = painterResource(R.drawable.ic_docs), onClick = {
+                    context.startActivity(com.feldman.scholix.browser.ScholixBrowserActivity.intent(context, item.url, item.title))
+                })
         }
         error?.let { message -> Section {
             Item { Text(message, color = MaterialTheme.colorScheme.error) }

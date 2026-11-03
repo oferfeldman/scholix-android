@@ -44,6 +44,9 @@
         </activity>
         <activity android:name=".pages.GradesActivity" />
         <activity android:name=".classroom.ClassroomLoginActivity" android:exported="false" />
+        <!-- Keeps a half-filled page, such as a Lemida upload form, across rotation. -->
+        <activity android:name=".browser.ScholixBrowserActivity" android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
         <activity
             android:name=".ui.MoeSmsLoginActivity"
             android:exported="false"

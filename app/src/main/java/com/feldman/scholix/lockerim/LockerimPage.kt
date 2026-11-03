@@ -1,9 +1,7 @@
 package com.feldman.scholix.lockerim
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,6 +36,7 @@ import org.json.JSONObject
 @Composable
 fun LockerimPage(searchQuery: String = "", onConnect: () -> Unit) {
     val context = LocalContext.current
+    val webLinks = androidx.compose.ui.platform.LocalUriHandler.current
     val state = LocalAppState.current
     val accounts = state.platforms.filterIsInstance<LockerimPlatform>()
     var accountId by rememberSaveable { mutableStateOf(accounts.firstOrNull()?.id) }
@@ -181,7 +180,7 @@ fun LockerimPage(searchQuery: String = "", onConnect: () -> Unit) {
                         }
                     }
                 }
-                TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://rb.lockerim.co.il/"))) }) {
+                TextButton(onClick = { webLinks.openUri("https://rb.lockerim.co.il/") }) {
                     Text("Rent a locker")
                 }
             }
