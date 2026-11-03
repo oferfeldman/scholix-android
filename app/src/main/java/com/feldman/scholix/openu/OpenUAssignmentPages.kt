@@ -2,32 +2,43 @@ package com.feldman.scholix.openu
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.feldman.motion.MotionFonts
+import com.feldman.motion.MotionLazyColumn
 import com.feldman.motion.MotionNavigator
 import com.feldman.motion.MotionScaffold
-import com.feldman.motion.MotionSymbols
-import com.feldman.motion.rememberSymbolPainter
 import com.feldman.scholix.AppDest
+import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.WebtopDownloadedAttachment
 import com.feldman.scholix.drive.DrivePdfReader
 import com.feldman.scholix.studies.StudyActions
 import com.feldman.scholix.studies.StudyAssignment
+import com.feldman.scholix.pages.gradeColor
+import com.feldman.scholix.pages.isRtlText
 import com.feldman.scholix.ui.components.ChipPicker
 import com.feldman.scholix.ui.components.SettingsTopBar
+import com.feldman.scholix.ui.components.SubjectIcon
 import com.feldman.scholix.ui.components.openMessageAttachment
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +48,7 @@ import org.json.JSONObject
 import java.text.DateFormat
 import java.util.Date
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String, onNavigate: MotionNavigator,
                                   selectedCourse: String?, coursePicker: @Composable () -> Unit,
@@ -74,34 +86,58 @@ internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String,
             "${item.label} ${item.courseName} ${item.semester} ${item.status}".contains(it, true)
         }
     }
-    MotionScaffold(topBar = { SettingsTopBar("Homework", actions = {
-        IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh OpenU assignments") }
-    }) }) {
-        Item { coursePicker() }
-        Item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Spacer(Modifier.height(TopBarSpacing()))
+        coursePicker()
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
             ChipPicker("Status", listOf("All statuses", "Not submitted", "Submitted", "Checked"), stateFilter, onSelectedChange = { stateFilter = it })
-            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            errors.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
-            if (errors.isNotEmpty() && visible.isNotEmpty()) Text("Showing last-known assignments. Their status may have changed.")
-        } }
-        if (visible.isEmpty() && !loading) Item { Text(if (searchQuery.isNotBlank()) "No matching assignments."
-            else if (errors.isNotEmpty()) "No saved assignment list is available. Refresh or reconnect OpenU."
-            else "No assignments in the selected courses and status.") }
-        visible.groupBy { it.courseKey }.forEach { (_, assignments) ->
-            Title("${assignments.first().courseName} · ${assignments.first().semester}")
-            Section {
-                assignments.forEach { item ->
-                    PageItem(key = item.key, title = item.label, icon = rememberSymbolPainter(MotionSymbols.ic_assignment),
-                        description = listOf(item.status.ifBlank { "Status unavailable" },
-                        item.due.takeIf(String::isNotBlank)?.let { "Due $it" },
-                        item.grade.takeIf { it.isNotBlank() && it != "-" }?.let { "Grade $it" }).filterNotNull().joinToString(" · "),
-                        onClick = { onNavigate(AppDest.OpenUAssignment(provider.id, item.key)) })
-                }
-            }
-            Item { Text("Last checked ${checkedTime(repo.checkedAt(assignments.first()))}",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh OpenU assignments") }
         }
-        BottomBarSpacer(minMargin = 24.dp)
+        Spacer(Modifier.height(12.dp))
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        PullToRefreshBox(isRefreshing = loading && retry > 0, onRefresh = { if (!loading) retry++ },
+            modifier = Modifier.weight(1f)) {
+            MotionLazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                item {
+                    errors.forEach { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (errors.isNotEmpty() && visible.isNotEmpty()) Text("Showing last-known assignments. Their status may have changed.")
+                    if (visible.isEmpty() && !loading) Text(if (searchQuery.isNotBlank()) "No matching assignments."
+                        else if (errors.isNotEmpty()) "No saved assignment list is available. Refresh or reconnect OpenU."
+                        else "No assignments in the selected courses and status.")
+                }
+                section(items = visible, key = { it.key }, contentType = { "assignment" }, contentPadding = 0.dp) { assignment ->
+                    CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(assignment.label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                        Row(Modifier.fillMaxWidth().clickable(onClickLabel = "Open ${assignment.label}") {
+                            onNavigate(AppDest.OpenUAssignment(provider.id, assignment.key))
+                        }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            SubjectIcon(subject = assignment.courseName, assignment = assignment.label)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(assignment.label, style = MaterialTheme.typography.titleLarge.copy(
+                                    fontFamily = MotionFonts.feldman(weight = 500), fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(assignment.status.ifBlank { "Status unavailable" }, style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (assignment.due.isNotBlank()) Text("Due ${assignment.due}", style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (assignment.grade.isNotBlank() && assignment.grade != "-") {
+                                Spacer(Modifier.width(8.dp))
+                                Text(assignment.grade, style = MaterialTheme.typography.headlineLarge.copy(
+                                    fontFamily = MotionFonts.feldman(weight = 700, width = 50f), fontWeight = FontWeight.Bold),
+                                    color = gradeColor(assignment.grade), maxLines = 1)
+                            }
+                        }
+                    }
+                }
+                visible.firstOrNull()?.let { assignment -> item {
+                    Text("Last checked ${checkedTime(repo.checkedAt(assignment))}", Modifier.padding(top = 8.dp),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } }
+            }
+        }
     }
 }
 

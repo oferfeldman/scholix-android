@@ -20,7 +20,7 @@ android {
         applicationId = "com.feldman.scholix"
         minSdk = 30
         targetSdk = 37
-        versionCode = 5
+        versionCode = 6
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

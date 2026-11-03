@@ -2,6 +2,8 @@
 
 Choose a course in **Homework** using the same course picker as Grades. OpenU, Classroom and Lemida courses share this picker, with provider folders for three or more courses, subject/provider icons, and previous/next buttons. OpenU includes previous and upcoming semesters; repeated course names show their semester. Selection follows provider and course identity across refreshes. The app's search and the status filter operate on the selected OpenU course. Course number, exact semester, activity module and Moodle activity ID identify each item. Failed or partial refreshes retain the last successful per-course snapshot and its original check time.
 
+The OpenU list uses Grades' content layout: the course picker sits below the status-bar inset, without a separate Homework app bar. Assignment rows use the same connected lazy section, subject icons and title/grade typography. Status and due dates remain visible, with refresh available inline and by pulling down.
+
 The implementation follows `Feldman/openu`'s `api/src/openu.ts` assignment index/detail contracts and its native Android assignment pages. It uses Scholix's existing direct OpenU provider session, not the OpenU app's Firebase/backend account. Opal course entry is `/ouil/course.php?course=c{courseId}&semester={term}`. Assignment, quiz and assessment rows include available dates, raw status, grades and weights. Viewing a quiz does not start an attempt. Due dates remain dates; an elapsed due date is not treated as a provider permission decision.
 
 Details show instructions, submission/grading fields (including the receipt), original task files, submitted files and checked feedback. File discovery comes from OpenU, independent of which app uploaded them. PDFs use the existing native reader; other formats can be opened with a compatible installed app. Any attachment can be saved through the system document picker. Downloads use the selected provider's authenticated cookie jar, stream to private storage and are bounded at 300 MiB. Login/error HTML is not opened as a downloaded file. Documents study actions use the existing versioned handoff and include the assignment's last-known status/check time.
@@ -19,6 +21,8 @@ The handoff contains only the Moodle course/activity/assignment IDs, draft item 
 ## Verification
 
 The shared course-picker update passed debug Kotlin compilation, the nine focused OpenU tests, and signed main-app (`assembleFast`) version 5 assembly. Grades and Homework both use `ui/components/CoursePickerBar.kt`; the provider folder implementation is shared rather than copied.
+
+The OpenU app-bar and row-layout correction passed signed main-app version 6 assembly, including the release lint checks. No provider, parser, submission or attachment behavior changed in this correction.
 
 `OpenUAssignmentsTest` covers list parsing, date/status labels, semester identity, failure versus empty lists, receipt preservation, files added by other clients, exact activity query parameters, fresh Opal grades, course mismatch, allowed attachment URLs and token-free draft references. All nine focused tests and debug APK assembly passed. The compiled Kotlin parser was also checked against previously recorded provider HTML (11 assignment rows, status/due date, receipt, accepted PDF, preexisting DOCX); the bookmark's selectors and token-free output were checked against the recorded active form. Private examples and credentials are not committed.
 
