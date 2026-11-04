@@ -29,11 +29,11 @@ object LemidaSms {
           }
           if (!$alternativeClicked) {
             // Microsoft words the way to other methods differently by page and account:
-            // "Sign in another way", "Show me verification methods", "I can't use my
+            // "Sign in another way", "Show me/more verification methods", "I can't use my
             // Microsoft Authenticator app right now", or a Hebrew equivalent.
             const labelled = [...document.querySelectorAll('a, [role="button"], [role="link"], button')].find(e => enabled(e) &&
               !e.hasAttribute('data-scholix-pressed') &&
-              /^(show me verification methods|sign in another way|use a different verification option|other ways to sign in|i can'?t use my microsoft authenticator app right now|הצג.*(שיטות|אפשרויות).*אימות|היכנס בדרך אחרת|השתמש באפשרות אימות אחרת)/i
+              /^(show (?:me |more )?verification methods|sign in another way|use a different verification option|other ways to sign in|i can'?t use my microsoft authenticator app right now|הצג.*(שיטות|אפשרויות).*אימות|היכנס בדרך אחרת|השתמש באפשרות אימות אחרת)/i
                 .test(e.textContent.trim().replace(/[’]/g, "'").replace(/^[^\p{L}]+/u, '')));
             // A link already pressed is never pressed again; only a new page's link is a further step.
             const other = [document.querySelector('#signInAnotherWay'), labelled].find(e => enabled(e) && !e.hasAttribute('data-scholix-pressed'));

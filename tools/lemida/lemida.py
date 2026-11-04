@@ -20,7 +20,7 @@ from playwright.sync_api import Error as PlaywrightError
 
 # Links Microsoft shows to reach other verification methods (English and Hebrew).
 METHOD_LINKS = re.compile(
-    r"^(show me verification methods|sign in another way|use a different verification option|other ways to sign in"
+    r"^(show (?:me |more )?verification methods|sign in another way|use a different verification option|other ways to sign in"
     r"|i can.?t use my microsoft authenticator app right now|הצג.*(שיטות|אפשרויות).*אימות|היכנס בדרך אחרת"
     r"|השתמש באפשרות אימות אחרת)", re.I)
 MAX_METHOD_STEPS = 2

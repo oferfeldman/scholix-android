@@ -262,6 +262,9 @@ class DesktopMfaGuard(unittest.TestCase):
         self.client.page.get_by_role.side_effect = lambda role, name: link if role == 'link' else self.fallback
         self.login()
         self.assertTrue(lemida.METHOD_LINKS.match('Show me verification methods'))
+        self.assertTrue(lemida.METHOD_LINKS.match('Show more verification methods'))
+        self.assertFalse(lemida.METHOD_LINKS.match('More information'))
+        self.assertFalse(lemida.METHOD_LINKS.match('Use a verification code'))
         self.assertTrue(lemida.METHOD_LINKS.match('I can’t use my Microsoft Authenticator app right now'))
         self.assertFalse(lemida.METHOD_LINKS.match('Forgot my password'))
         link.click.assert_called_once()  # The same link is never pressed twice.
