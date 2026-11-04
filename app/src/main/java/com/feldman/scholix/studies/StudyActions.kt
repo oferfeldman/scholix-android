@@ -14,16 +14,25 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.feldman.scholix.LocalAppState
+import com.feldman.scholix.api.platforms.GoogleClassroomPlatform
+import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.lemida.LemidaRepository
+import com.feldman.scholix.lemida.LemidaSnapshot
+import com.feldman.scholix.lemida.studyAssignment
+import com.feldman.scholix.openu.OpenUAssignmentsRepository
 import com.feldman.motion.MotionButton
 import com.feldman.motion.MotionScaffold
 import com.feldman.scholix.ui.components.SettingsTopBar
 
 /** Used by assignments and the general catalog; no upload or provider submission is performed. */
 @Composable
-fun StudyActions(assignment: StudyAssignment? = null) {
+fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? = null, courseKey: String? = null,
+                 courseAssignmentKeys: Set<String> = emptySet()) {
     val context = LocalContext.current
     val catalog = remember(context) { StudyCatalog(context) }
-    var entries by remember(assignment?.key) { mutableStateOf(catalog.entries()) }
+    var entries by remember(assignment?.key, courseProviderId, courseKey) { mutableStateOf(catalog.entries()) }
     var pending by rememberSaveable { mutableStateOf<String?>(null) }
     var targetPackage by rememberSaveable { mutableStateOf<String?>(null) }
     var picker by remember { mutableStateOf<List<ComponentName>>(emptyList()) }
@@ -40,7 +49,7 @@ fun StudyActions(assignment: StudyAssignment? = null) {
         if (result.resultCode == Activity.RESULT_OK && request != null && owner != null) {
             runCatching {
                 val reference = DocumentsStudyContract.receipt(requireNotNull(result.data?.getStringExtra(DocumentsStudyContract.EXTRA)), request, owner)
-                catalog.save(reference)
+                catalog.save(reference.copy(courseProviderId = courseProviderId, courseKey = courseKey))
                 entries = catalog.entries()
                 open(reference)
             }.onFailure { error = it.message ?: "Could not open this study." }
@@ -71,7 +80,11 @@ fun StudyActions(assignment: StudyAssignment? = null) {
             TextButton(onClick = { picker = emptyList(); pending = null }) { Text("Cancel") }
         })
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        entries.filter { assignment == null || it.assignmentKey == assignment.key }.forEach { reference ->
+        entries.filter { reference ->
+            (assignment == null || reference.assignmentKey == assignment.key) &&
+                (courseProviderId == null || (reference.courseProviderId == courseProviderId && reference.courseKey == courseKey) ||
+                    reference.assignmentKey in courseAssignmentKeys)
+        }.forEach { reference ->
             MotionButton(text = "Open ${reference.title}", enabled = reference.isLocal && pending == null,
                 onClick = { request(reference) })
             if (!reference.isLocal) Text("This published study has not been downloaded. Download support is not available yet.")
@@ -83,10 +96,32 @@ fun StudyActions(assignment: StudyAssignment? = null) {
 }
 
 @Composable
-fun StudiesPage(onBack: () -> Unit) {
+fun StudiesPage(onBack: () -> Unit, providerId: String? = null, courseKey: String? = null) {
+    val context = LocalContext.current
+    val providers = LocalAppState.current.platforms
+    val repository = remember(context) { LemidaRepository(context) }
+    val lemida by repository.snapshots.collectAsStateWithLifecycle(initialValue = LemidaSnapshot())
+    val provider = providers.firstOrNull { it.id == providerId }
+    val assignmentKeys = remember(providerId, courseKey, lemida, providers) {
+        when {
+            providerId == "lemida:${lemida.account}" && lemida.account.isNotBlank() ->
+                lemida.homework.filter { it.courseId.toString() == courseKey }.map { it.studyAssignment(lemida.account).key }
+            provider is OpenAUPlatform -> OpenUAssignmentsRepository(context, provider).cachedAssignments()
+                .filter { it.courseKey == courseKey }.map {
+                    StudyAssignment.create("https://opal.openu.ac.il", provider.id, it.courseKey,
+                        it.module, it.cmid, it.label, it.courseName).key
+                }
+            provider is GoogleClassroomPlatform -> provider.cachedHomework()
+                .filter { it.optString("courseId") == courseKey && it.optString("kind") == "courseWork" }.map {
+                    StudyAssignment.create("https://classroom.googleapis.com", provider.getUsername().trim().lowercase(java.util.Locale.ROOT),
+                        it.getString("courseId"), "courseWork", it.getString("id"), it.getString("title"), it.optString("courseName")).key
+                }
+            else -> emptyList()
+        }.toSet()
+    }
     MotionScaffold(topBar = { SettingsTopBar("Studies", onBack) }) {
         Item { Text("Your linked studies open in Documents. Studies can be linked to an assignment or kept general.") }
-        Item { StudyActions() }
+        Item { StudyActions(courseProviderId = providerId, courseKey = courseKey, courseAssignmentKeys = assignmentKeys) }
         BottomBarSpacer(minMargin = 24.dp)
     }
 }

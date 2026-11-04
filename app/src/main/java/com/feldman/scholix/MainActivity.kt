@@ -4,6 +4,12 @@ import com.feldman.scholix.ui.HiddenMoeLogin
 import com.feldman.scholix.ui.HiddenMashovSmsLogin
 import com.feldman.scholix.api.providerName
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
+import com.feldman.scholix.courses.*
+import com.feldman.scholix.lemida.LemidaRepository
+import com.feldman.scholix.lemida.LemidaSnapshot
+import com.feldman.scholix.lemida.HomeworkLinks
+import com.feldman.scholix.api.platforms.GoogleClassroomPlatform
+import com.feldman.motion.MotionBackNavigationBehavior
 import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.MashovPlatform
 import androidx.compose.foundation.layout.PaddingValues
@@ -67,6 +73,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -540,9 +547,40 @@ fun MainScreen(
     val hasGrades = platforms.any { it.suportsGrades }
     val hasSchedule = platforms.any { it.supportsSchedule }
     val hasAttendance = platforms.any { it.supportsAttendance }
+    val lemida = remember(context) { LemidaRepository(context) }
+    val lemidaSnapshot by lemida.snapshots.collectAsState(initial = remember(lemida) { LemidaSnapshot(courses = lemida.cachedCourses(), enabled = lemida.enabled()) })
+    val hasCourseProviders = platforms.any { it is OpenAUPlatform || it is GoogleClassroomPlatform } ||
+        lemidaSnapshot.enabled || lemidaSnapshot.courses.isNotEmpty()
+    var courseCacheEpoch by remember { mutableIntStateOf(0) }
+    val courseCatalog = remember(preloadedCourses, platforms, lemidaSnapshot.courses, lemidaSnapshot.account, courseCacheEpoch) {
+        platforms.filter { it is OpenAUPlatform || it is GoogleClassroomPlatform }.flatMap { provider ->
+            val saved = if (provider is OpenAUPlatform)
+                com.feldman.scholix.openu.OpenUAssignmentsRepository(context, provider).cachedCourses()
+            else (provider as GoogleClassroomPlatform).coursesList.toList()
+            val details = if (provider is OpenAUPlatform)
+                com.feldman.scholix.openu.course.OpenUCourseRepository(context, provider) else null
+            (preloadedCourses.filter { it.optString("platformId") == provider.id } + saved).map { course ->
+                JSONObject(course.toString()).put("platformId", provider.id)
+                    .put("courseKey", course.stableCourseKey()).apply {
+                        details?.cached(course.stableCourseKey(), "overview")?.let { overview ->
+                            if (overview.has("hasBooklet")) put("hasBooklet", overview.optBoolean("hasBooklet"))
+                        }
+                    }
+            }
+        }.filter { it.stableCourseKey().isNotBlank() }.distinctBy { it.courseDestination() } +
+            if (lemidaSnapshot.account.isNotBlank()) lemidaSnapshot.courses.map { course ->
+                JSONObject().put("platformId", "lemida:${lemidaSnapshot.account}")
+                    .put("courseKey", course.id.toString()).put("name", course.name)
+            } else emptyList()
+    }
+    val requestedAssignment by HomeworkLinks.pending.collectAsState()
 
     val destinations = remember(hasGrades, hasSchedule, hasAttendance) {
         listOfNotNull(
+            AppDest.Home,
+            CourseSection(),
+            ScopeSwitcher(),
+            ProviderGrades(),
             if (hasGrades) AppDest.Grades else null,
             if (hasSchedule) AppDest.Schedule else null,
             if (hasAttendance) AppDest.Attendance else null,
@@ -577,21 +615,25 @@ fun MainScreen(
             AppDest.SchoolPortionsTable(),
             AppDest.Login,
             AppDest.Appearance
-        )
+        ) + openUCourseDestinations()
     }
 
     val navigationOrder by remember(context) { context.navigationOrderFlow() }
         .collectAsState(initial = defaultNavigationOrder)
-    val navigationPages = remember(destinations, navigationOrder) {
-        destinations.filter { it.label in navigationOrder }.sortedBy { navigationOrder.indexOf(it.label) }
+    val globalNavigationPages = remember(destinations, navigationOrder, hasCourseProviders) {
+        destinations.filter { it.parent == null && it !is ProviderGrades && it.label in navigationOrder &&
+            (it != AppDest.Home || hasCourseProviders) }.sortedBy { navigationOrder.indexOf(it.label) }
     }
 
     val startDestination = rememberSaveable {
         val activity = context as? android.app.Activity
         if (activity?.intent?.getBooleanExtra("open_crash_logs", false) == true) AppDest.CrashLogs
         else if (activity?.intent?.getBooleanExtra("open_messages", false) == true) AppDest.Messages
-        else if (activity?.intent?.getBooleanExtra("open_homework", false) == true) AppDest.Homework
+        else if (activity?.intent?.getBooleanExtra("open_homework", false) == true) {
+            if (requestedAssignment != null) AppDest.Home else AppDest.Homework
+        }
         else if (activity?.intent?.getBooleanExtra("open_schedule", false) == true && hasSchedule) AppDest.Schedule
+        else if (hasCourseProviders) AppDest.Home
         else if (hasGrades) AppDest.Grades else AppDest.Tiktek
     }
 
@@ -602,7 +644,20 @@ fun MainScreen(
         if (destination == AppDest.Grades || destination == AppDest.Schedule) {
             userOpenedPages = userOpenedPages + (destination as AppDest)
         }
-        if (topLevel) backStack.navigateTop(destination) else backStack.navigateTo(destination)
+        if (destination is CourseSection) {
+            // Close the old course item before replacing the section; identities live in routes.
+            backStack.navigateTop(AppDest.Home)
+            while (backStack.backStack.lastOrNull()?.courseScope() != null &&
+                backStack.backStack.lastOrNull() !is CourseSection) backStack.pop()
+            backStack.navigateTo(destination)
+        } else if (topLevel) {
+            backStack.navigateTop(destination)
+            if (destination == AppDest.Home || destination == AppDest.Grades) {
+                while (backStack.backStack.lastOrNull() != destination) {
+                    if (!backStack.pop()) break
+                }
+            }
+        } else backStack.navigateTo(destination)
     }
     var handledHomeworkOpenRequest by rememberSaveable { mutableIntStateOf(0) }
     var handledProvidersOpenRequest by rememberSaveable { mutableIntStateOf(0) }
@@ -612,15 +667,44 @@ fun MainScreen(
             handledProvidersOpenRequest = providersOpenRequest
         }
     }
-    LaunchedEffect(homeworkOpenRequest) {
+    LaunchedEffect(homeworkOpenRequest, requestedAssignment, lemidaSnapshot.loaded) {
         if (homeworkOpenRequest > handledHomeworkOpenRequest) {
-            backStack.navigateTop(AppDest.Homework)
+            if (requestedAssignment != null && !lemidaSnapshot.loaded) return@LaunchedEffect
+            val item = requestedAssignment?.let { HomeworkLinks.match(it, lemidaSnapshot.homework, lemidaSnapshot.account) }
+            if (item != null) navigateFromUser(CourseSection("lemida:${lemidaSnapshot.account}",
+                item.courseId.toString(), section = CourseSectionKind.ASSIGNMENTS))
+            else backStack.navigateTop(AppDest.Homework)
             handledHomeworkOpenRequest = homeworkOpenRequest
         }
     }
     val currentScreen = backStack.backStack.lastOrNull() ?: startDestination
-    val activeNavigationPage = backStack.backStack.asReversed().firstNotNullOfOrNull { screen ->
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == AppDest.Home) courseCacheEpoch++
+    }
+    val courseScope = currentScreen.courseScope()
+    val scopeCourse = courseScope?.let { scope -> courseCatalog.singleOrNull { scope.matches(it) } }
+    val navigationPages = if (courseScope != null && scopeCourse != null) {
+        courseSections(platforms.firstOrNull { it.id == courseScope.providerId }, scopeCourse)
+            .map { courseScope.copy(section = it) }
+    } else globalNavigationPages
+    val activeNavigationPage = if (generateSequence<MotionDest>(currentScreen) { it.parent }.any { it is ProviderGrades })
+        AppDest.Grades else backStack.backStack.asReversed().firstNotNullOfOrNull { screen ->
         generateSequence<MotionDest>(screen) { it.parent }.firstOrNull { it in navigationPages }
+    }
+    val courseStateHolder = rememberSaveableStateHolder()
+    var courseLocations by rememberSaveable { mutableStateOf(arrayListOf<AppDest>()) }
+    LaunchedEffect(currentScreen) {
+        if (courseScope != null && scopeCourse != null && currentScreen is AppDest && currentScreen !is ScopeSwitcher) {
+            courseLocations = ArrayList(listOf(currentScreen) + courseLocations.filterNot {
+                it.courseScope()?.sameCourse(courseScope) == true
+            }.take(7))
+        }
+    }
+    var recentCourses by rememberSaveable { mutableStateOf(arrayListOf<CourseSection>()) }
+    LaunchedEffect(courseScope) {
+        if (courseScope != null && scopeCourse != null) recentCourses = ArrayList(
+            listOf(courseScope) + recentCourses.filterNot { it.providerId == courseScope.providerId &&
+                it.courseKey == courseScope.courseKey && it.term == courseScope.term }.take(7))
     }
     val motionThemeRepository = remember(context) { MotionThemeRepository(context) }
     val motionLevel by motionThemeRepository.motionLevel
@@ -636,8 +720,7 @@ fun MainScreen(
     val messagesViewModel: MessagesViewModel = viewModel()
     LaunchedEffect(platforms) { messagesViewModel.configure(platforms) }
 
-    val appState = remember(preloadedCourses, repository, platforms, lockerViewModel, navigationPages, overflowPagesList, homeworkOpenRequest, userOpenedPages, currentScreen) {
-        AppState(
+    val appState = AppState(
             preloadedCourses = preloadedCourses,
             repository = repository,
             platforms = platforms,
@@ -651,10 +734,29 @@ fun MainScreen(
             homeworkOpenRequest = homeworkOpenRequest,
             userOpenedPages = userOpenedPages,
             activePage = currentScreen,
+            courseCatalog = courseCatalog,
+            recentCourses = recentCourses,
+            onCourseCacheChanged = { courseCacheEpoch++ },
+            onScopeSelected = { destination -> navigateFromUser(destination,
+                topLevel = destination.parent == null) },
+            onCourseResumed = { course ->
+                backStack.navigateTop(AppDest.Home)
+                if (backStack.backStack.lastOrNull()?.courseScope()?.sameCourse(course) != true) {
+                    while (backStack.backStack.lastOrNull() != AppDest.Home) { if (!backStack.pop()) break }
+                    backStack.navigateTo(courseLocations.firstOrNull { it.courseScope()?.sameCourse(course) == true } ?: course)
+                }
+            },
         )
+    val scopeLabel = if (scopeCourse != null) {
+        val provider = platforms.firstOrNull { it.id == courseScope?.providerId }?.platformDisplayName ?: "Lemida"
+        "${scopeCourse.optString("name")} \u00b7 $provider"
+    } else "All Scholix"
+    val scopeControl = ScopeControl(scopeLabel) {
+        backStack.navigateTo(ScopeSwitcher(currentScreen as? AppDest ?: AppDest.Home))
     }
 
-    CompositionLocalProvider(LocalAppState provides appState) {
+    CompositionLocalProvider(LocalAppState provides appState, LocalScopeControl provides scopeControl,
+        LocalCourseStateHolder provides courseStateHolder) {
         // Motion owns the shell: bar, rail, the bar's slide and predictive back, and the overflow
         // menu on the bar's button slot. The app keeps the back stack for its deep links.
         MotionNavFlow(
@@ -663,6 +765,8 @@ fun MainScreen(
             modifier = Modifier.fillMaxSize(),
             backStack = backStack,
             motionLevel = motionLevel,
+            backNavigationBehavior = if (courseScope != null) MotionBackNavigationBehavior.PopLatest
+                else MotionBackNavigationBehavior.PopPaneGroup,
             navigationDestinations = navigationPages,
             theme = null,
             navigation = { content ->
@@ -671,9 +775,9 @@ fun MainScreen(
                     snackbarHost = snackbarHost,
                     navigationDestinations = navigationPages,
                     selectedDestination = selectedNavbarDest,
-                    pinnedEndDestination = AppDest.Settings,
+                    pinnedEndDestination = if (courseScope == null) AppDest.Settings else null,
                     replacePinnedEndWhenFull = true,
-                    onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = true) },
+                    onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = dest.parent == null) },
                     contrastBlurEnabled = navigationBlurred,
                     onOverflowChanged = { overflowPagesList = it.filterIsInstance<AppDest>() },
                 )

@@ -378,7 +378,10 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
     MotionScaffold(
         contentWindowInsets = WindowInsets(0)
     ) {
-        Item { Spacer(Modifier.height(TopBarSpacing())) }
+        Item {
+            Spacer(Modifier.height(TopBarSpacing()))
+            com.feldman.scholix.ScopeChip()
+        }
         if (providers.isEmpty()) {
             Section {
                 PageItem(title = "Connect a provider", description = "Add Webtop for messages or Google Classroom for announcements.", icon = painterResource(R.drawable.ic_webtop), onClick = { onNavigate(AppDest.Platforms) })

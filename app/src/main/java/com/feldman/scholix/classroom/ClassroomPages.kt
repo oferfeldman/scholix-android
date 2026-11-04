@@ -26,7 +26,8 @@ import org.json.JSONObject
 
 @Composable
 fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String = "", coursePicker: (@Composable () -> Unit)? = null,
-                          selectedCourseId: String? = null, onCoursesChanged: (List<JSONObject>) -> Unit = {}) {
+                          selectedCourseId: String? = null, onCoursesChanged: (List<JSONObject>) -> Unit = {},
+                          materialsOnly: Boolean = false) {
     val context = LocalContext.current
     var items by remember(provider.id) { mutableStateOf(provider.cachedHomework()) }
     var loading by remember { mutableStateOf(false) }
@@ -34,7 +35,7 @@ fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String
     var retry by remember { mutableIntStateOf(0) }
     var selected by rememberSaveable(provider.id) { mutableStateOf<String?>(null) }
     var course by rememberSaveable(provider.id, selectedCourseId) { mutableStateOf(selectedCourseId ?: "all") }
-    var type by rememberSaveable { mutableStateOf("All") }
+    var type by rememberSaveable(materialsOnly) { mutableStateOf(if (materialsOnly) "Materials" else "All") }
     var query by rememberSaveable { mutableStateOf("") }
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (it.resultCode == Activity.RESULT_OK) retry++
@@ -83,7 +84,7 @@ fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String
                 menuAnimation = com.feldman.motion.MotionDropdownAnimation.Morph,
                 selected = courseNames[courses.indexOfFirst { it.optString("courseId") == course } + 1],
                 onSelectedChange = { name -> course = courses.getOrNull(courseNames.indexOf(name) - 1)?.optString("courseId") ?: "all" })
-            ChipPicker(label = "Type", options = listOf("All", "Coursework", "Materials"), selected = type, onSelectedChange = { type = it })
+            if (!materialsOnly) ChipPicker(label = "Type", options = listOf("All", "Coursework", "Materials"), selected = type, onSelectedChange = { type = it })
             MotionButton(text = "Refresh", onClick = { retry++ }, enabled = !loading)
         } }
         if (loading) Item { LinearProgressIndicator(Modifier.fillMaxWidth()) }

@@ -57,4 +57,17 @@ class DocumentsStudyContractTest {
         assertTrue(local.isLocal)
         assertNull(local.assignmentKey)
     }
+
+    @Test fun courseScopeRoundTripsWithoutChangingLegacyAssignmentIdentity() {
+        val reference = StudyReference("synthetic-ref", "Study", assignmentKey = assignment().key,
+            documentsPackage = "com.example.documents", studyId = "synthetic-study", localRevision = 9)
+        val legacy = StudyReference.fromJson(JSONObject(reference.json().toString()).apply {
+            remove("courseProviderId"); remove("courseKey")
+        })
+        assertEquals(reference, legacy)
+        val scoped = reference.copy(courseProviderId = "synthetic-provider", courseKey = "42:2027a")
+        assertEquals(scoped, StudyReference.fromJson(JSONObject(scoped.json().toString())))
+        assertEquals(reference.assignmentKey, scoped.assignmentKey)
+        assertEquals(reference.studyId, scoped.studyId)
+    }
 }

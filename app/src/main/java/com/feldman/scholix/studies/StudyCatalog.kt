@@ -27,12 +27,14 @@ data class StudyPublication(val id: String, val revision: String, val downloadUr
 
 data class StudyReference(val id: String, val title: String, val assignmentKey: String? = null,
     val documentsPackage: String? = null, val studyId: String? = null, val localRevision: Long = 0,
-    val publication: StudyPublication? = null, val importedPublicationRevision: String? = null) {
+    val publication: StudyPublication? = null, val importedPublicationRevision: String? = null,
+    val courseProviderId: String? = null, val courseKey: String? = null) {
     val isLocal get() = documentsPackage != null && studyId != null
     fun json() = JSONObject().put("id", id).put("title", title).put("assignmentKey", assignmentKey)
         .put("documentsPackage", documentsPackage).put("studyId", studyId).put("localRevision", localRevision)
         .put("publication", publication?.json())
         .put("importedPublicationRevision", importedPublicationRevision)
+        .put("courseProviderId", courseProviderId).put("courseKey", courseKey)
 
     companion object {
         fun fromJson(json: JSONObject): StudyReference {
@@ -42,7 +44,7 @@ data class StudyReference(val id: String, val title: String, val assignmentKey: 
             }
             return StudyReference(json.getString("id"), json.getString("title"), optional("assignmentKey"),
                 optional("documentsPackage"), optional("studyId"), json.optLong("localRevision"), publication,
-                optional("importedPublicationRevision"))
+                optional("importedPublicationRevision"), optional("courseProviderId"), optional("courseKey"))
         }
     }
 }
@@ -60,7 +62,9 @@ class StudyCatalog(context: Context) {
             (previous.documentsPackage == entry.documentsPackage && previous.studyId == entry.studyId &&
                 entry.localRevision >= previous.localRevision)) { "A newer local study reference is already saved." }
         val saved = entry.copy(publication = entry.publication ?: previous?.publication,
-            importedPublicationRevision = entry.importedPublicationRevision ?: previous?.importedPublicationRevision)
+            importedPublicationRevision = entry.importedPublicationRevision ?: previous?.importedPublicationRevision,
+            courseProviderId = entry.courseProviderId ?: previous?.courseProviderId,
+            courseKey = entry.courseKey ?: previous?.courseKey)
         check(prefs.edit().putString(entry.id, saved.json().toString()).commit()) { "Could not save the study reference." }
     }
 

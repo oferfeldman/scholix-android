@@ -60,6 +60,8 @@ import com.feldman.motion.MotionFonts
 import com.feldman.motion.rememberSymbolPainter
 import com.feldman.motion.MotionTheme
 import com.feldman.scholix.R
+import com.feldman.scholix.courses.stableCourseKey
+import com.feldman.scholix.courses.courseDestination
 import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
@@ -375,6 +377,10 @@ fun GradesScreen(
     preloadedCourses: List<JSONObject>,
     inbarAccessRequested: Boolean = false,
     isActive: Boolean = true,
+    focusedProviderId: String? = null,
+    focusedCourseKey: String? = null,
+    focusedTerm: String? = null,
+    onOpenCourse: ((com.feldman.scholix.CourseSection) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var inbarRequestedByUser by remember { mutableStateOf(false) }
@@ -394,10 +400,22 @@ fun GradesScreen(
     var semesterState by rememberSaveable { mutableStateOf(initialSemester) }
     var yearState by rememberSaveable { mutableIntStateOf(initialYear) }
 
-    var courses by remember { mutableStateOf(preloadedCourses) }
+    fun scopedCourses(values: List<JSONObject>) = values.filter { course ->
+        (focusedProviderId == null || course.optString("platformId") == focusedProviderId) &&
+            (focusedCourseKey == null || course.stableCourseKey() == focusedCourseKey) &&
+            (focusedTerm == null || course.optString("term") == focusedTerm)
+    }
+    val scopedPreloadedCourses = scopedCourses(preloadedCourses)
+    fun loadCourses(): List<JSONObject> {
+        if (focusedProviderId == null) return PlatformStorage.getCourses(context)
+        val provider = PlatformStorage.loadPlatforms(context).singleOrNull { it.id == focusedProviderId }
+            ?: return emptyList()
+        return scopedCourses(PlatformStorage.getProviderCourses(context, provider))
+    }
+    var courses by remember { mutableStateOf(scopedPreloadedCourses) }
     var courseLoadInProgress by remember { mutableStateOf(false) }
-    var courseLoadFinished by remember { mutableStateOf(preloadedCourses.isNotEmpty()) }
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var courseLoadFinished by remember { mutableStateOf(scopedPreloadedCourses.isNotEmpty()) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var courseMenuExpanded by rememberSaveable { mutableStateOf(false) }
     var grades by remember { mutableStateOf(listOf<JSONObject>()) }
     var average by remember { mutableFloatStateOf(0f) }
@@ -424,7 +442,7 @@ fun GradesScreen(
     LaunchedEffect(Unit) {
         providersById = withContext(Dispatchers.IO) {
             runCatching {
-                PlatformStorage.loadPlatforms(context).associateBy { it.id }
+                PlatformStorage.loadPlatforms(context).filter { focusedProviderId == null || it.id == focusedProviderId }.associateBy { it.id }
             }.getOrDefault(emptyMap())
         }
     }
@@ -442,7 +460,7 @@ fun GradesScreen(
                 } else {
                     courses = withContext(Dispatchers.IO) {
                         PlatformStorage.saveInbarLoginProgress(context, account)
-                        PlatformStorage.getCourses(context)
+                        loadCourses()
                     }
                     courseLoadFinished = true
                     isLoading = false
@@ -504,15 +522,15 @@ fun GradesScreen(
                     val availablePlatforms = PlatformStorage.loadPlatforms(context)
                     val platformId = course.optString("platformId")
                     val platform = availablePlatforms.firstOrNull { it.id == platformId }
-                        ?: availablePlatforms.getOrNull(course.optInt("index", -1))
-                        ?: availablePlatforms.firstOrNull { p ->
+                        ?: if (focusedProviderId != null) null else availablePlatforms.getOrNull(course.optInt("index", -1))
+                        ?: if (focusedProviderId != null) null else availablePlatforms.firstOrNull { p ->
                             val targetKey = course.optString("courseKey").ifBlank { course.optString("name") }
                             p.getCourses().any { c ->
                                 val key = c.optString("courseKey").ifBlank { c.optString("name") }
                                 key == targetKey || c.optString("id") == course.optString("id")
                             }
                         }
-                        ?: if (availablePlatforms.size == 1) availablePlatforms.first() else null
+                        ?: if (focusedProviderId == null && availablePlatforms.size == 1) availablePlatforms.first() else null
 
                     requestPlatform = platform
                     if (platform == null) {
@@ -623,7 +641,7 @@ fun GradesScreen(
             courseLoadInProgress = true
             scope.launch(Dispatchers.IO) {
                 val refreshed = try {
-                    PlatformStorage.getCourses(context)
+                    loadCourses()
                 } catch (exception: Exception) {
                     Log.w("GradesPage", "Failed to load courses", exception)
                     arrayListOf()
@@ -641,9 +659,9 @@ fun GradesScreen(
     }
 
     LaunchedEffect(preloadedCourses) {
-        if (preloadedCourses.isNotEmpty()) {
-            courses = preloadedCourses
-            selectedTab = selectedTab.coerceIn(0, preloadedCourses.lastIndex)
+        if (scopedPreloadedCourses.isNotEmpty()) {
+            courses = scopedPreloadedCourses
+            selectedTab = selectedTab.coerceIn(0, scopedPreloadedCourses.lastIndex)
             courseLoadFinished = true
         }
     }
@@ -758,7 +776,7 @@ fun GradesScreen(
                     val selectedKey = courses.getOrNull(selectedTab)?.optString("courseKey")
                     val refreshed = withContext(Dispatchers.IO) {
                         PlatformStorage.saveInbarLoginProgress(context, account)
-                        PlatformStorage.getCourses(context)
+                        loadCourses()
                     }
                     inbarRelogin = null
                     providersById = providersById + (account.id to account)
@@ -780,6 +798,7 @@ fun GradesScreen(
 
     if (courses.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            com.feldman.scholix.ScopeChip(Modifier.align(Alignment.TopCenter).padding(top = TopBarSpacing()))
             if (!courseLoadFinished || inbarRelogin != null || isLoading) {
                 GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
             } else if (!canAccessInbar && providersById.values.any { it is InbarPlatform && it.hasSavedLoginDetails() }) {
@@ -837,6 +856,18 @@ fun GradesScreen(
                 .padding(horizontal = 16.dp),
         ) {
             Spacer(Modifier.height(TopBarSpacing()))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                com.feldman.scholix.ScopeChip(Modifier.weight(1f))
+                val selected = courses.getOrNull(selectedTab)
+                val owner = providersById[selected?.optString("platformId")]
+                if (selected != null && onOpenCourse != null && focusedCourseKey == null &&
+                    (owner is com.feldman.scholix.api.platforms.OpenAUPlatform ||
+                        owner is com.feldman.scholix.api.platforms.GoogleClassroomPlatform)) {
+                    TextButton(onClick = { onOpenCourse(selected.courseDestination()) }) {
+                        Text("Open course \u203a")
+                    }
+                }
+            }
             if (!isLandscape && courses.size > 1) {
                 CoursePickerBar(
                     courses = courses,

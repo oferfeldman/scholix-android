@@ -51,6 +51,20 @@ sealed class AppDest : MotionDest {
 
     @Serializable
     @Parcelize
+    data object Home : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Home"
+        @IgnoredOnParcel @Transient override val pane = MotionPaneType.LIST
+        @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_home
+        @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_home
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.pages.HomePage(onNavigate)
+        }
+    }
+
+    @Serializable
+    @Parcelize
     data object Studies : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Studies"
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
@@ -107,23 +121,33 @@ sealed class AppDest : MotionDest {
 
     @Serializable
     @Parcelize
-    data class OpenUAssignment(val providerId: String, val assignmentKey: String) : AppDest() {
+    data class OpenUAssignment(val providerId: String = "", val assignmentKey: String = "",
+                               val courseKey: String = "", val term: String = "") : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Assignment"
-        @IgnoredOnParcel @Transient override val parent: MotionDest = Homework
-        @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+        @IgnoredOnParcel @Transient override val parent: MotionDest = if (courseKey.isNotBlank())
+            CourseSection(providerId, courseKey, term, com.feldman.scholix.courses.CourseSectionKind.ASSIGNMENTS) else Homework
+        @IgnoredOnParcel @Transient override val pane = if (courseKey.isBlank()) MotionPaneType.DETAIL else MotionPaneType.EXTRA
         @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
                              onFabAction: ((() -> Unit) -> Unit) -> Unit) {
-            com.feldman.scholix.openu.OpenUAssignmentPage(providerId, assignmentKey, onNavigate, onBack)
+            val scopedNavigator = object : MotionNavigator {
+                override fun invoke(dest: MotionDest, resetStack: Boolean) {
+                    onNavigate(if (dest is OpenUAttachment && courseKey.isNotBlank())
+                        dest.copy(courseKey = courseKey, term = term, assignmentKey = assignmentKey) else dest, resetStack)
+                }
+            }
+            com.feldman.scholix.openu.OpenUAssignmentPage(providerId, assignmentKey, scopedNavigator, onBack)
         }
     }
 
     @Serializable
     @Parcelize
-    data class OpenUAttachment(val providerId: String, val name: String, val url: String) : AppDest() {
+    data class OpenUAttachment(val providerId: String = "", val name: String = "", val url: String = "",
+                               val courseKey: String = "", val term: String = "", val assignmentKey: String = "") : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Attachment"
-        @IgnoredOnParcel @Transient override val parent: MotionDest = Homework
+        @IgnoredOnParcel @Transient override val parent: MotionDest = if (courseKey.isNotBlank())
+            OpenUAssignment(providerId, assignmentKey, courseKey, term) else Homework
         @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
@@ -224,7 +248,8 @@ sealed class AppDest : MotionDest {
                 preloadedCourses = state.preloadedCourses,
                 modifier = Modifier.fillMaxSize(),
                 inbarAccessRequested = Grades in state.userOpenedPages,
-                isActive = state.activePage == Grades
+                isActive = state.activePage == Grades,
+                onOpenCourse = { state.onScopeSelected(it) }
             )
         }
     }

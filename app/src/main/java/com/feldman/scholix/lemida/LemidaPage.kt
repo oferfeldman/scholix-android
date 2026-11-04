@@ -47,12 +47,33 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 @Composable
-fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNavigator) {
+fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNavigator,
+               courseProviderId: String? = null, courseKey: String? = null, filesOnly: Boolean = false) {
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
     val app = LocalAppState.current
     val providers = app.platforms.filter { it is GoogleClassroomPlatform || it is OpenAUPlatform }
     val snapshot by repo.snapshots.collectAsStateWithLifecycle(initialValue = LemidaSnapshot())
+    if (courseProviderId != null) {
+        if (courseProviderId.startsWith("lemida:")) {
+            if (!snapshot.loaded) {
+                Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }
+            } else if (courseProviderId != "lemida:${snapshot.account}" ||
+                snapshot.courses.none { it.id.toString() == courseKey }) {
+                Text("This course is no longer available for the saved Lemida account.", Modifier.padding(24.dp))
+            } else key(courseProviderId, courseKey, filesOnly) {
+                LemidaPageContent(repo, searchQuery, coursePicker = {}, selectedCourseId = courseKey?.toIntOrNull(),
+                    filesOnly = filesOnly)
+            }
+        } else when (val provider = providers.firstOrNull { it.id == courseProviderId }) {
+            is OpenAUPlatform -> com.feldman.scholix.openu.OpenUAssignmentsPage(provider, searchQuery, onNavigate,
+                courseKey, coursePicker = {}, onCoursesChanged = {})
+            is GoogleClassroomPlatform -> com.feldman.scholix.classroom.ClassroomHomeworkPage(provider, searchQuery,
+                coursePicker = {}, selectedCourseId = courseKey, materialsOnly = filesOnly)
+            else -> Text("This course account is no longer available.", Modifier.padding(24.dp))
+        }
+        return
+    }
     val refreshedCourses = remember { mutableStateMapOf<String, List<JSONObject>>() }
     val cachedCourses = remember(app.preloadedCourses, app.platforms) {
         providers.associate { provider ->
@@ -110,7 +131,7 @@ fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNa
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "", coursePicker: (@Composable () -> Unit)? = null,
-                               selectedCourseId: Int? = null) {
+                               selectedCourseId: Int? = null, filesOnly: Boolean = false) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val syncing by repo.syncing.collectAsStateWithLifecycle()
@@ -126,6 +147,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
     var typeFilter by rememberSaveable { mutableStateOf("all") }
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
+    val exportHomework = rememberHomeworkExportAction()
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         // A completed sign-in may change accounts. Return to the freshly loaded list.
@@ -170,11 +192,12 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { CircularProgressIndicator() }
         return
     }
-    val visible = remember(homework, courseFilter, typeFilter, query, searchQuery) { homework.filter { (courseFilter == null || it.courseId == courseFilter) &&
+    val visible = remember(homework, courseFilter, typeFilter, query, searchQuery, filesOnly, snapshot.updated) { homework.filter { (courseFilter == null || it.courseId == courseFilter) &&
         (typeFilter == "all" || it.type == typeFilter) &&
+        (!filesOnly || repo.cachedDetail(it)?.pdfs?.isNotEmpty() == true) &&
         it.matchesSearch(query, searchQuery) } }
     MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = {
-        CenterAlignedTopAppBar(title = { Text("Assignments", fontWeight = FontWeight.Bold) }, actions = {
+        SettingsTopBar(if (filesOnly) "Files" else "Assignments", actions = {
             IconButton(onClick = { LemidaSyncWorker.refresh(context, manual = true) }, enabled = updated > 0L && !syncing && !needsLogin) {
                 if (syncing) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Default.Refresh, "Refresh")
@@ -187,6 +210,10 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                     anchorContent = { _, toggle -> IconButton(onClick = toggle) {
                         Icon(Icons.Default.MoreVert, "Assignment settings")
                     } }, menuHeader = {
+                    MotionDropdownMenuItem(text = { Text("Save homework for PC") }, onClick = {
+                        options = false
+                        exportHomework()
+                    })
                     MotionDropdownMenuItem(text = { Text(if (LemidaSignInStore(context).enabled()) "Pause automatic sign-in" else "Resume automatic sign-in") }, onClick = {
                         LemidaSignInStore(context).apply { setEnabled(!enabled()) }
                         options = false
@@ -209,9 +236,18 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                     })
                 })
             }
-        }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer))
+        })
     }) {
         if (coursePicker != null) Item { coursePicker() }
+        if (filesOnly) Item {
+            Column(Modifier.padding(12.dp)) {
+                Text("Saved PDF attachments from assignments. Open an assignment and refresh its details to find its files.")
+                if (selectedCourseId != null) TextButton(onClick = {
+                    context.startActivity(com.feldman.scholix.browser.ScholixBrowserActivity.intent(context,
+                        "${LemidaParser.BASE}/course/view.php?id=$selectedCourseId", "Course files"))
+                }) { Text("Browse course files on Lemida") }
+            }
+        }
         Item {
             LemidaHomeworkFilters(
                 count = visible.size, updated = updated, courses = courses,
@@ -230,6 +266,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         if (status.startsWith("Update failed")) Item { Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         if (visible.isEmpty()) Item { Text(when {
             updated == 0L -> "Connect Lemida to see your assignments."
+            filesOnly -> "No saved PDF attachments in this course yet."
             homework.isEmpty() -> "No assignments available yet. New activities will appear after an update."
             courseFilter != null && homework.none { it.courseId == courseFilter } -> "No assignments in this course yet. New activities will appear automatically."
             else -> "No assignments matches. Try another search or choose All courses and All."

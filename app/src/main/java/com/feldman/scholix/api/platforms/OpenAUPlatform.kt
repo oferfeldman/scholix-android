@@ -268,7 +268,7 @@ class OpenAUPlatform() : Platform {
     }
 
     internal suspend fun assignmentFile(url: String, target: File): String = sessionMutex.withLock {
-        require(com.feldman.scholix.openu.OpenUAssignmentParser.fileUrl(url))
+        require(com.feldman.scholix.openu.OpenUAssignmentParser.fileUrl(url) || com.feldman.scholix.openu.course.OpenUCourseParser.documentUrl(url))
         restorePersistedCookiesLocked()
         repeat(2) { attempt ->
             val mime = client.prepareGet(url).execute { response ->
@@ -279,7 +279,8 @@ class OpenAUPlatform() : Platform {
                     throw IOException("OpenU returned a web page instead of the attachment. Refresh the assignment.")
                 }
                 if (!response.status.isSuccess()) throw IOException("Attachment unavailable (HTTP ${response.status.value}).")
-                if (!com.feldman.scholix.openu.OpenUAssignmentParser.fileUrl(response.call.request.url.toString()))
+                if (!com.feldman.scholix.openu.OpenUAssignmentParser.fileUrl(response.call.request.url.toString()) &&
+                    !com.feldman.scholix.openu.course.OpenUCourseParser.documentUrl(response.call.request.url.toString()))
                     throw IOException("OpenU redirected outside its attachment service.")
                 response.bodyAsChannel().toInputStream().use { input ->
                     target.outputStream().use { output ->
@@ -303,6 +304,70 @@ class OpenAUPlatform() : Platform {
             if (attempt != 0 || !authenticateLocked()) throw IOException("OpenU sign-in expired. Reconnect the account.")
         }
         throw IOException("Could not download the OpenU attachment.")
+    }
+
+    internal suspend fun coursePage(url: String): String {
+        if (com.feldman.scholix.openu.course.OpenUCourseParser.opalUrl(url)) return assignmentPage(url)
+        val target = Url(url)
+        require(target.protocol.name == "https" && target.host == "sheilta.apps.openu.ac.il" &&
+            target.encodedPath in listOf("/pls/myopr/booklet.viewbook", "/pls/myopr/booklet.tafrit"))
+        return sessionMutex.withLock {
+            restorePersistedCookiesLocked()
+            suspend fun read(): String {
+                val response = client.get(url)
+                if (!response.status.isSuccess()) throw IOException("OpenU returned HTTP ${response.status.value}.")
+                return response.body<ByteArray>().toString(charset("windows-1255"))
+            }
+            var html = read()
+            if (html.contains("top.location.href") && html.contains("sso.apps.openu.ac.il/login")) {
+                client.get("https://sso.apps.openu.ac.il/login") { parameter("T_PLACE", url) }
+                html = read()
+                if (html.contains("sso.apps.openu.ac.il/login")) throw IOException("OpenU booklet sign-in expired. Reconnect the account.")
+            }
+            snapshotCookiesLocked()
+            html
+        }
+    }
+
+    /** Book consent is explicit; the navigation and recording playlist actions are reads. */
+    internal suspend fun courseForm(url: String, fields: Map<String, String>): String = sessionMutex.withLock {
+        require(com.feldman.scholix.openu.course.OpenUCourseParser.opalUrl(url))
+        val path = Url(url).encodedPath
+        require(path in listOf("/lib/ajax/getnavbranch.php", "/mod/ouilvideocollection/actions.php",
+            "/local/ouil_ebook/ebook_actions.php"))
+        if (path == "/mod/ouilvideocollection/actions.php") require(fields["action"] == "getplaylist")
+        if (path == "/local/ouil_ebook/ebook_actions.php") require(fields["action"] == "subscribe")
+        restorePersistedCookiesLocked()
+        val response = client.submitForm(url, Parameters.build { fields.forEach { (key, value) -> append(key, value) } }) {
+            header("X-Requested-With", "XMLHttpRequest")
+        }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess() || looksLikeLoginResponse(response, body))
+            throw IOException("The OpenU action could not be completed. Refresh the page or reconnect the account.")
+        snapshotCookiesLocked()
+        body
+    }
+
+    internal suspend fun courseStream(url: String): Pair<String, String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        require(com.feldman.scholix.openu.course.OpenUCourseParser.hlsUrl(url))
+        // CDN reads use no account cookies, and each redirect is checked before following it.
+        val transport = okhttp3.OkHttpClient.Builder().followRedirects(false).build()
+        var current = url
+        repeat(6) {
+            val response = transport.newCall(okhttp3.Request.Builder().url(current)
+                .header("Referer", "https://opal.openu.ac.il/").build()).execute()
+            response.use {
+                val location = it.header("Location")
+                if (it.code in listOf(301, 302, 303, 307, 308) && location != null) {
+                    current = java.net.URI(current).resolve(location).toString()
+                    require(com.feldman.scholix.openu.course.OpenUCourseParser.hlsUrl(current))
+                } else {
+                    if (!it.isSuccessful) throw IOException("Recording unavailable (HTTP ${it.code}).")
+                    return@withContext current to (it.body?.string() ?: throw IOException("Recording stream is empty."))
+                }
+            }
+        }
+        throw IOException("Too many recording redirects.")
     }
 
     private suspend fun refreshCoursesLocked(retryAuthentication: Boolean): Boolean {
@@ -747,7 +812,7 @@ class OpenAUPlatform() : Platform {
     }
 
     private suspend fun snapshotCookiesLocked() {
-        val cookies = listOf(OPEN_U_COURSES_PAGE, OPEN_U_SSO_PROCESS, "https://opal.openu.ac.il/")
+        val cookies = listOf(OPEN_U_COURSES_PAGE, OPEN_U_SSO_PROCESS, "https://opal.openu.ac.il/", "https://sheilta.apps.openu.ac.il/pls/myopr/booklet.viewbook")
             .flatMap { cookieStorage.get(Url(it)) }.distinctBy { Triple(it.name, it.domain, it.path) }
         persistedCookieJar = JSONArray(cookies.map { renderSetCookieHeader(it.copy(maxAge = null)) })
         _cookies = cookies

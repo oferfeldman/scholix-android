@@ -21,6 +21,11 @@ class AppState(
     val homeworkOpenRequest: Int = 0,
     val userOpenedPages: Set<AppDest> = emptySet(),
     val activePage: com.feldman.motion.MotionDest? = null,
+    val courseCatalog: List<JSONObject> = emptyList(),
+    val recentCourses: List<CourseSection> = emptyList(),
+    val onScopeSelected: (AppDest) -> Unit = {},
+    val onCourseResumed: (CourseSection) -> Unit = {},
+    val onCourseCacheChanged: () -> Unit = {},
 )
 
 val LocalAppState = compositionLocalOf<AppState> {

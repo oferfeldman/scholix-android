@@ -21,7 +21,14 @@ fun SettingsTopBar(
     actions: @Composable RowScope.() -> Unit = {}
 ) {
     CenterAlignedTopAppBar(
-        title = { Text(title, fontWeight = FontWeight.Bold) },
+        title = {
+            if (com.feldman.scholix.LocalScopeControl.current != null) {
+                androidx.compose.foundation.layout.Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                    com.feldman.scholix.ScopeChip()
+                    Text(title, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, maxLines = 1)
+                }
+            } else Text(title, fontWeight = FontWeight.Bold)
+        },
         navigationIcon = {
             if (onBack != null) {
                 MotionBackButton(
