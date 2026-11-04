@@ -9,7 +9,9 @@ internal data class InbarSchedulePage(
     val years: List<Int>,
     val period: String,
     val periods: Map<String, String>,
-    val lessons: List<JSONObject>
+    val lessons: List<JSONObject>,
+    /** Rows without a readable weekday/time (an online or unscheduled course), as Inbar wrote them. */
+    val unscheduled: List<String> = emptyList(),
 )
 
 /** The period schedule is a Web Forms grid, including when it contains an empty-data row. */
@@ -26,6 +28,7 @@ internal object InbarSchedule {
         val year = selected(yearSelector)?.attr("value")?.toIntOrNull() ?: throw IOException("Invalid schedule year")
         val period = selected(periodSelector)?.attr("value") ?: throw IOException("Invalid schedule semester")
         val lessons = mutableListOf<JSONObject>()
+        val unscheduled = mutableListOf<String>()
         for (grid in grids) {
             val headers = grid.select("th").map { it.text().replace(Regex("\\s+"), " ").trim() }
             fun column(label: String): Int = headers.indexOf(label).also {
@@ -48,17 +51,21 @@ internal object InbarSchedule {
                 if (cells.size != headers.size) throw IOException("Inbar schedule row changed")
                 val subject = cells[subjectColumn].text()
                 if (subject.isBlank()) throw IOException("Inbar schedule course is missing")
-                val day = dayIndex(cells[dayColumn].text()) ?: throw IOException("Unrecognized Inbar schedule day")
+                // One course without a weekly slot (online, asynchronous, to be announced) must not
+                // hide the whole timetable. Such rows are kept aside; if nothing is readable at all,
+                // the page still fails below rather than showing an empty week.
+                val day = dayIndex(cells[dayColumn].text())
                 val times = Regex("(?<![0-9])([0-9]{1,2}):([0-9]{2})(?![0-9])")
                     .findAll(cells[timeColumn].text()).map { match ->
-                        val hour = match.groupValues[1].toInt()
-                        val minute = match.groupValues[2].toInt()
-                        if (hour !in 0..23 || minute !in 0..59) throw IOException("Invalid Inbar lesson time")
-                        "%02d:%02d".format(hour, minute)
+                        match.groupValues[1].toInt() to match.groupValues[2].toInt()
                     }.toList()
-                if (times.isEmpty() || times.size > 2) throw IOException("Unrecognized Inbar lesson time")
+                if (day == null || times.isEmpty() || times.size > 2 ||
+                    times.any { (hour, minute) -> hour !in 0..23 || minute !in 0..59 }) {
+                    unscheduled += "$subject | ${cells[dayColumn].text()} | ${cells[timeColumn].text()}"
+                    continue
+                }
                 // Hebrew directionality can reverse the visual order of the endpoints.
-                val ordered = times.sorted()
+                val ordered = times.map { (hour, minute) -> "%02d:%02d".format(hour, minute) }.sorted()
                 val start = ordered.first()
                 val startMinutes = start.substringBefore(':').toInt() * 60 + start.substringAfter(':').toInt()
                 val code = cells[codeColumn].text()
@@ -75,10 +82,12 @@ internal object InbarSchedule {
                 lessons += lesson
             }
         }
+        if (lessons.isEmpty() && unscheduled.isNotEmpty())
+            throw IOException("Unrecognized Inbar schedule day or time: ${unscheduled.first().substringAfter(" | ")}")
         return InbarSchedulePage(year,
             yearSelector.select("option").mapNotNull { it.attr("value").toIntOrNull() }, period,
             periodSelector.select("option").associate { it.attr("value") to it.text() },
-            lessons.sortedWith(compareBy({ it.optInt("day") }, { it.optInt("hour") })))
+            lessons.sortedWith(compareBy({ it.optInt("day") }, { it.optInt("hour") })), unscheduled)
     }
 
     private fun dayIndex(raw: String): Int? {

@@ -237,6 +237,8 @@ internal class InbarHttp(
             result = InbarSchedule.parse(page.html)
             if (result.period != period) throw IOException("Inbar did not select schedule semester")
         }
+        if (result.unscheduled.isNotEmpty()) android.util.Log.i("InbarSchedule",
+            "Lessons without a weekly slot: " + result.unscheduled.joinToString { it.substringAfter(" | ") })
         schedulePage = result
         scheduleFetchedAt = System.nanoTime()
         return result

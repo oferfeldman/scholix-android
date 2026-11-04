@@ -95,6 +95,15 @@ class InbarScheduleTest {
         }
     }
 
+    @Test fun aCourseWithoutAWeeklySlotDoesNotHideTheRestOfTheTimetable() {
+        val html = page(rows = row() + row(day = "", time = "", code = "online-01") +
+            row(day = "מקוון", time = "TBD", code = "online-02") + row(day = "יום ג'", code = "sample-02"))
+        val parsed = InbarSchedule.parse(html)
+        assertEquals(listOf("sample-01", "sample-02"), parsed.lessons.map { it.getString("courseCode") })
+        assertEquals(2, parsed.unscheduled.size)
+        assertTrue(parsed.unscheduled.last().contains("מקוון"))
+    }
+
     @Test fun loginFormsAreReportedAsExpiredSessions() {
         for (field in listOf("edtUsername", "edtCode")) {
             assertThrows(InbarSessionExpired::class.java) { InbarSchedule.parse("<input name='$field'>") }
