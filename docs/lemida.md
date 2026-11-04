@@ -2,7 +2,7 @@
 
 ## PDF attachments
 
-Homework details now show a **PDF attachments** section. Tap a file to open it
+Assignments details now show a **PDF attachments** section. Tap a file to open it
 inside Scholix with page navigation and pinch zoom; Back returns to the same
 homework. Linked and embedded PDF files are retained in the saved detail model,
 including older cache compatibility. Moodle resource links labelled as PDFs are
@@ -68,13 +68,13 @@ confirmed the existing development signing certificate, allowing a data-preservi
 update of `com.feldman.scholix.inbar.dev`. This is compile/host-test evidence;
 the disconnected phone was not updated or used for a live PDF test.
 
-Open **More → Homework** in Scholix and allow notifications. A remembered
+Open **More → Assignments** in Scholix and allow notifications. A remembered
 Microsoft account is selected by tapping its matching email tile automatically,
 before considering an email-entry field. In the direct-SMS development build,
 automatic recovery runs in an owned, invisible WebView during homework sync:
 it selects SMS and enters a fresh matching verification code without opening a
 sign-in Activity. Enable SMS reception on the phone first. **Automatic sign-in**
-in Homework's menu lets you save the university email and, optionally, a password
+in Assignments's menu lets you save the university email and, optionally, a password
 using Android's autofill/Password Manager UI. The account and optional password
 are encrypted with Android Keystore under `noBackupFilesDir`; they are not
 included in homework exports or logs. An existing Microsoft session can recover
@@ -105,7 +105,7 @@ When Android offers the verification message, accepting the single-message conse
 fills and submits the code. Denied consent, unavailable Play services, and messages
 that do not match leave manual code entry available in the visible browser.
 This session lives on the phone; no desktop Python
-process or server is required. Homework can also be pinned using Customize
+process or server is required. Assignments can also be pinned using Customize
 navigation.
 
 The first successful update loads existing homework without alerting for every
@@ -233,7 +233,7 @@ quizzes and workshops with stable course/module IDs; unrelated resources are ign
 This is an authenticated Moodle API, not an authentication bypass. Read-only probes
 on this deployment returned `servicenotavailable` for `core_course_get_contents`,
 `mod_assign_get_assignments`, and `mod_quiz_get_quizzes_by_courses`.
-Homework instructions and submission/grading tables still come from HTML pages:
+Assignments instructions and submission/grading tables still come from HTML pages:
 the discovered API supplies activity metadata, not all detail content.
 Activity URLs are parsed by endpoint and complete ID parameter, allowing reordered
 query parameters while rejecting ambiguous IDs and other origins. Moodle error
@@ -258,7 +258,7 @@ Moodle `userId` establishes a fresh notification baseline.
 Both discovery calls share response validation. Known session errors and HTML
 login redirects restore sign-in; unavailable methods and malformed responses
 preserve homework without falsely marking the session expired. Reconnect is also
-available in Homework's overflow menu, while the connected screen hides the
+available in Assignments's overflow menu, while the connected screen hides the
 sign-in row. Returning from sign-in refreshes the list immediately.
 Pending alerts use current titles and dates from the latest complete snapshot;
 withdrawn homework is removed from the notification queue. Delivery and acknowledgement
@@ -286,7 +286,7 @@ sync, native cached detail reads, and sign-in closing only after a successful lo
 `LemidaAlertsTest` uses isolated preferences and fake notification callbacks to check
 concurrent delivery, account switching, paused/failed delivery, and stale sign-in
 reminders. These tests send no notifications and read no saved account session.
-Homework notification taps reuse MainActivity when present and navigate to a fresh
+Assignments notification taps reuse MainActivity when present and navigate to a fresh
 homework list, clearing prior local filters and detail selection. Other navigation
 stacks remain available. A warm `open_homework` intent was verified on the phone;
 an actual notification tap and recreation still need device verification.

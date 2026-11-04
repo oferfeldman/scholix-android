@@ -1,7 +1,6 @@
 package com.feldman.scholix.pages
 
 import com.feldman.motion.MotionDropdownMenuItem
-import com.feldman.motion.MotionDropdownMenu
 import com.feldman.motion.MotionDialog
 import android.app.DownloadManager
 import android.content.Context
@@ -403,13 +402,14 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                     if (classroom == null) {
                         var optionsMenuExpanded by remember { mutableStateOf(false) }
                         Box {
-                            MailIconAction(MotionSymbols.ic_more_vert, "Mailbox options") {
-                                optionsMenuExpanded = true
-                            }
-                            MotionDropdownMenu(
+                            MotionDropdown<Unit>(
+                                options = emptyList(), selected = null, onSelected = {},
                                 expanded = optionsMenuExpanded,
-                                onDismissRequest = { optionsMenuExpanded = false }
-                            ) {
+                                onExpandedChange = { optionsMenuExpanded = it },
+                                menu = MotionDropdownDefaults.menu(animation = MotionDropdownAnimation.Transform, matchAnchorWidth = false),
+                                sizes = MotionDropdownDefaults.sizes(menuMinWidth = 220.dp, menuMaxWidth = 320.dp),
+                                anchorContent = { _, toggle -> MailIconAction(MotionSymbols.ic_more_vert, "Mailbox options", onClick = toggle) },
+                                menuHeader = {
                                 MotionDropdownMenuItem(
                                     text = { Text("Refresh") },
                                     leadingIcon = {
@@ -481,7 +481,7 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                                         onNavigate(AppDest.MessageSignature(vm.providerId))
                                     }
                                 )
-                            }
+                            })
                         }
                     } else {
                         MailIconAction(MotionSymbols.ic_refresh, "Refresh announcements") { vm.refresh() }

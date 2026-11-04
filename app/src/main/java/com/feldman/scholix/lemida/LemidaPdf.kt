@@ -8,7 +8,7 @@ data class LemidaPdf(val name: String, val url: String) {
     fun downloadName(): String {
         val base = name.substringAfterLast('/').substringAfterLast('\\')
             .filter { !it.isISOControl() && Character.getType(it) != Character.FORMAT.toInt() }
-            .trim().trim('.').take(160).ifBlank { "Homework" }
+            .trim().trim('.').take(160).ifBlank { "Assignment" }
         return if (base.endsWith(".pdf", true)) base else "$base.pdf"
     }
     companion object {

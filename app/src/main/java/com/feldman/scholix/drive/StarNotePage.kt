@@ -47,6 +47,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import coil.compose.AsyncImage
+import com.feldman.motion.MotionDropdown
+import com.feldman.motion.MotionDropdownDefaults
+import com.feldman.motion.MotionDropdownAnimation
+import com.feldman.motion.MotionDropdownMenuItem
 
 private data class StarLibraryPresentation(val modified:String, val title:String="", val cover:File?=null,
     val titleChecked:Boolean=false, val titleLoading:Boolean=false, val titleFailed:Boolean=false,
@@ -251,13 +255,11 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
             Row(verticalAlignment=Alignment.CenterVertically) {
                 Text("StarNote",Modifier.weight(1f),style=MaterialTheme.typography.titleLarge)
                 Box {
-                    TextButton(onClick={sortMenu=true}) {Text(sort.label);Icon(Icons.Default.ArrowDropDown,"Sort notes")}
-                    DropdownMenu(sortMenu,onDismissRequest={sortMenu=false}) {
-                        StarNoteSort.entries.forEach {option->
-                            DropdownMenuItem(text={Text(option.label)},
-                                onClick={sortName=option.name;sortMenu=false})
-                        }
-                    }
+                    MotionDropdown(options=StarNoteSort.entries,selected=sort,onSelected={sortName=it.name},
+                        expanded=sortMenu,onExpandedChange={sortMenu=it},
+                        items=MotionDropdownDefaults.items(label={it.label}),
+                        menu=MotionDropdownDefaults.menu(animation=MotionDropdownAnimation.Transform,matchAnchorWidth=false),
+                        anchorContent={_,toggle->TextButton(onClick=toggle) {Text(sort.label);Icon(Icons.Default.ArrowDropDown,"Sort notes")}})
                 }
                 IconButton(onClick={refresh()},enabled=!busy){Icon(Icons.Default.Refresh,"Refresh StarNote notes")}
             }
@@ -314,17 +316,20 @@ fun StarNotePage(drive:DriveRepository, query:String, modifier:Modifier=Modifier
                 Text(current.title.ifBlank {note.title},Modifier.weight(1f),maxLines=1,style=MaterialTheme.typography.titleMedium)
                 IconButton(onClick={details=true}) {Icon(if(error.isNotBlank()||note.document.warnings.isNotEmpty())Icons.Default.Info else if(current.backedUp)Icons.Default.CloudDone else Icons.Default.CloudUpload,status.ifBlank {"Note information"})}
                 Box {
-                    IconButton(onClick={more=true}){Icon(Icons.Default.MoreVert,"Note options")}
-                    DropdownMenu(more,onDismissRequest={more=false}) {
-                        DropdownMenuItem(text={Text("Rename in Scholix")},onClick={text=current.title.ifBlank {note.title};rename=true;more=false})
-                        DropdownMenuItem(text={Text(if(enableBackup)"Enable Drive backups" else "Back up now")},onClick={more=false;enable()})
-                        DropdownMenuItem(text={Text("Refresh from Drive")},onClick={more=false;run {
+                    MotionDropdown<Unit>(options=emptyList(),selected=null,onSelected={},
+                        expanded=more,onExpandedChange={more=it},
+                        menu=MotionDropdownDefaults.menu(animation=MotionDropdownAnimation.Transform,matchAnchorWidth=false),
+                        sizes=MotionDropdownDefaults.sizes(menuMinWidth=220.dp,menuMaxWidth=320.dp),
+                        anchorContent={_,toggle->IconButton(onClick=toggle){Icon(Icons.Default.MoreVert,"Note options")}},menuHeader={
+                        MotionDropdownMenuItem(text={Text("Rename in Scholix")},onClick={text=current.title.ifBlank {note.title};rename=true;more=false})
+                        MotionDropdownMenuItem(text={Text(if(enableBackup)"Enable Drive backups" else "Back up now")},onClick={more=false;enable()})
+                        MotionDropdownMenuItem(text={Text("Refresh from Drive")},onClick={more=false;run {
                             repository.saveLocal(note.account,current)
                             val fresh=repository.open(selectedNote!!,true)
                             pageIndex=pageIndex.coerceAtMost(fresh.document.pages.lastIndex)
                             opened=fresh;edits=fresh.edits
                         }})
-                    }
+                    })
                 }
             }
             Surface(shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surfaceContainerHigh) {

@@ -32,7 +32,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
     private val appContext = context.applicationContext
     fun enabled() = prefs.getBoolean("enabled", false)
     fun setEnabled(value: Boolean) { prefs.edit().putBoolean("enabled", value).apply() }
-    fun status() = prefs.getString("status", "Sign in to Lemida to sync homework.").orEmpty()
+    fun status() = prefs.getString("status", "Sign in to Lemida to sync assignments.").orEmpty()
     fun lastSync() = prefs.getLong("last_sync", 0L)
     fun cached() = LemidaParser.decode(prefs.getString("homework", "[]") ?: "[]")
     fun cachedCourses(): List<LemidaCourse> = prefs.getString("courses", null)?.let { LemidaCourse.decode(it) }
@@ -66,7 +66,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                 fun requireAccount(html: String) {
                     if (!LemidaParser.authenticated(html)) throw LemidaSessionExpired()
                     check(LemidaParser.config(html, "userId") == prefs.getString("user_id", null)) {
-                        "The signed-in account changed. Refresh your homework list first."
+                        "The signed-in account changed. Refresh your assignments list first."
                     }
                 }
                 val html = try {
@@ -84,8 +84,8 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                 val editor = prefs.edit().putString(detailKey(item), result.json().toString())
                     .putString("homework", LemidaParser.encode(items))
                     .putBoolean("needs_login", false).putBoolean("login_notified", false)
-                if (needsLogin()) editor.putString("status", "Connected to Lemida. Refresh to update all homework.")
-                check(editor.commit()) { "Could not save homework details." }
+                if (needsLogin()) editor.putString("status", "Connected to Lemida. Refresh to update all assignments.")
+                check(editor.commit()) { "Could not save assignment details." }
                 result
             } catch (e: LemidaSessionExpired) {
                 prefs.edit().putBoolean("needs_login", true).putString("status", e.message).commit()
@@ -96,7 +96,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
 
     suspend fun openPdf(item: Homework, pdf: LemidaPdf): java.io.File = mutex.withLock {
         withContext(Dispatchers.IO) {
-            require(LemidaPdf.allowedUrl(pdf.url) && cachedDetail(item)?.pdfs?.contains(pdf) == true) { "Refresh this homework before opening its attachment." }
+            require(LemidaPdf.allowedUrl(pdf.url) && cachedDetail(item)?.pdfs?.contains(pdf) == true) { "Refresh this assignment before opening its attachment." }
             val directory = java.io.File(appContext.cacheDir, "lemida-pdf").apply { mkdirs() }
             // Previews are temporary; bound leftovers from interrupted processes.
             directory.listFiles()?.filter { it.name.startsWith("attachment-") && it.extension == "pdf" }
@@ -108,7 +108,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                 browser.prepare()
                 val page = browser.get("${LemidaParser.BASE}/my/")
                 if (!LemidaParser.authenticated(page)) throw LemidaSessionExpired()
-                check(LemidaParser.config(page, "userId") == prefs.getString("user_id", null)) { "The signed-in account changed. Refresh your homework list first." }
+                check(LemidaParser.config(page, "userId") == prefs.getString("user_id", null)) { "The signed-in account changed. Refresh your assignments list first." }
                 browser.downloadPdf(pdf.url, file)
                 LemidaPdf.requireFile(file)
                 complete = true
@@ -150,7 +150,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                                     .put("limit", 50).put("offset", offset).put("sort", "fullname")))
                             val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
                             val data = LemidaParser.ajaxData(raw) as? JSONObject
-                                ?: throw IOException("Unexpected Moodle course data. Previous homework preserved.")
+                                ?: throw IOException("Unexpected Moodle course data. Previous assignments preserved.")
                             val next = LemidaParser.nextCourseOffset(data, offset)
                             val batch = data.getJSONArray("courses")
                             for (i in 0 until batch.length()) {
@@ -168,7 +168,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                                 .put("methodname", "core_courseformat_get_state").put("args", JSONObject().put("courseid", id)))
                             val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
                             val state = LemidaParser.ajaxData(raw) as? String
-                                ?: throw IOException("Unexpected Moodle activity data. Previous homework preserved.")
+                                ?: throw IOException("Unexpected Moodle activity data. Previous assignments preserved.")
                             LemidaParser.stateHomework(state, id, name).map { item ->
                                 item.copy(dates = previous[item.id]?.dates.orEmpty())
                             }
@@ -183,8 +183,8 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                             .putString("pending", LemidaParser.encode(alerts))
                             .putLong("last_sync", System.currentTimeMillis()).putBoolean("needs_login", false)
                             .putBoolean("login_notified", false)
-                            .putString("status", "${courses.size} courses • ${items.size} homework items • automatic sync every 30 minutes")
-                            .commit()) { "Could not save homework." }
+                            .putString("status", "${courses.size} courses • ${items.size} assignments • automatic sync every 30 minutes")
+                            .commit()) { "Could not save assignments." }
                         return user
                     }
                     try {
@@ -201,10 +201,10 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                     prefs.edit().putBoolean("needs_login", true).putString("status", e.message).commit()
                     throw e
                 } catch (e: IOException) {
-                    prefs.edit().putString("status", "Update failed. Previous homework is still available. ${e.message}").commit()
+                    prefs.edit().putString("status", "Update failed. Previous assignments are still available. ${e.message}").commit()
                     throw e
                 } catch (e: Exception) {
-                    prefs.edit().putString("status", "Update failed. Previous homework is still available. Try Refresh.").commit()
+                    prefs.edit().putString("status", "Update failed. Previous assignments are still available. Try Refresh.").commit()
                     throw e
                 } finally {
                     browser.close()
@@ -219,7 +219,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
             val pending = LemidaParser.decode(prefs.getString("pending", "[]") ?: "[]")
             // Read, deliver, and acknowledge under the same lock as sync/account changes.
             if (pending.isNotEmpty() && deliver(pending)) {
-                check(prefs.edit().putString("pending", "[]").commit()) { "Could not acknowledge homework alerts." }
+                check(prefs.edit().putString("pending", "[]").commit()) { "Could not acknowledge assignment alerts." }
             }
         }
     }

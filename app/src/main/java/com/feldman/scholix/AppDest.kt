@@ -91,7 +91,7 @@ sealed class AppDest : MotionDest {
     @Serializable
     @Parcelize
     data object Homework : AppDest() {
-        @IgnoredOnParcel @Transient override val label = "Homework"
+        @IgnoredOnParcel @Transient override val label = "Assignments"
         @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Description
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
         @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_docs_outline
@@ -100,8 +100,60 @@ sealed class AppDest : MotionDest {
                              onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             // Each notification opens the full list rather than retaining a prior detail/filter.
             key(LocalAppState.current.homeworkOpenRequest) {
-                com.feldman.scholix.lemida.LemidaPage(searchQuery)
+                com.feldman.scholix.lemida.LemidaPage(searchQuery, onNavigate)
             }
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data class OpenUAssignment(val providerId: String, val assignmentKey: String) : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Assignment"
+        @IgnoredOnParcel @Transient override val parent: MotionDest = Homework
+        @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+        @IgnoredOnParcel @Transient override val showNavigation = false
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.openu.OpenUAssignmentPage(providerId, assignmentKey, onNavigate, onBack)
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data class OpenUAttachment(val providerId: String, val name: String, val url: String) : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Attachment"
+        @IgnoredOnParcel @Transient override val parent: MotionDest = Homework
+        @IgnoredOnParcel @Transient override val showNavigation = false
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.openu.OpenUAttachmentPage(providerId, name, url, onBack)
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data object OpenUDraftHelp : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Connect a website draft"
+        @IgnoredOnParcel @Transient override val parent: MotionDest = Homework
+        @IgnoredOnParcel @Transient override val showNavigation = false
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.openu.OpenUDraftHelpPage(onBack)
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data class OpenUWebsiteDraft(val reference: String) : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Website draft"
+        @IgnoredOnParcel @Transient override val showNavigation = false
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.openu.OpenUWebsiteDraftPage(reference, onNavigate, onBack)
         }
     }
 

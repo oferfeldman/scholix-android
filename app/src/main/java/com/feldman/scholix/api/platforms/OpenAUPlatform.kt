@@ -19,8 +19,11 @@ import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
+import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.utils.io.jvm.javaio.toInputStream
 import io.ktor.http.ContentType
 import io.ktor.http.Cookie
 import io.ktor.http.CookieEncoding
@@ -34,6 +37,8 @@ import io.ktor.http.renderCookieHeader
 import io.ktor.http.renderSetCookieHeader
 import io.ktor.util.date.GMTDate
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -42,6 +47,7 @@ import org.json.JSONObject
 import org.jsoup.Jsoup
 import java.io.ByteArrayInputStream
 import java.io.IOException
+import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -216,6 +222,88 @@ class OpenAUPlatform() : Platform {
 
     override fun getSubjectList(): List<String> =
         getCourses().map { it.optString("name") }.filter { it.isNotBlank() }.distinct()
+
+    internal suspend fun assignmentCourses(): List<JSONObject> = sessionMutex.withLock {
+        val refreshed = refreshCoursesLocked(retryAuthentication = true)
+        currentCoroutineContext().ensureActive()
+        if (!refreshed) throw IOException("Could not refresh OpenU courses. Check the connection or reconnect the account.")
+        courses.map { JSONObject(it.toString()) }
+    }
+
+    /** Uses the provider's existing SSO/cookie jar; these reads never start attempts or submit work. */
+    internal suspend fun assignmentPage(url: String): String = sessionMutex.withLock {
+        val target = Url(url)
+        require(target.protocol.name == "https" && target.host == "opal.openu.ac.il")
+        restorePersistedCookiesLocked()
+        repeat(2) { attempt ->
+            val response = client.get(url)
+            val body = response.bodyAsText()
+            if (looksLikeLoginResponse(response, body)) {
+                if (attempt == 0 && authenticateLocked()) return@repeat
+                throw IOException("OpenU sign-in expired. Reconnect the account.")
+            }
+            if (!response.status.isSuccess()) throw IOException("OpenU returned HTTP ${response.status.value}.")
+            snapshotCookiesLocked()
+            return@withLock body
+        }
+        throw IOException("Could not open this OpenU page.")
+    }
+
+    internal suspend fun assignmentDraftFiles(page: String, itemId: String, clientId: String): String {
+        val html = assignmentPage(page)
+        val token = Regex("[\"']sesskey[\"']\\s*:\\s*[\"']([^\"']+)").find(html)?.groupValues?.get(1)
+            ?: throw IOException("OpenU did not provide an authenticated draft session.")
+        return sessionMutex.withLock {
+            val response = client.submitForm("https://opal.openu.ac.il/repository/draftfiles_ajax.php?action=list",
+                Parameters.build {
+                    append("sesskey", token); append("itemid", itemId); append("client_id", clientId); append("filepath", "/")
+                })
+            if (!response.status.isSuccess()) throw IOException("Could not read the website draft.")
+            val body = response.bodyAsText()
+            val json = runCatching { JSONObject(body) }.getOrNull()
+                ?: throw IOException("OpenU did not return a draft file list.")
+            if (json.has("error")) throw IOException("This website draft is unavailable for the selected account.")
+            body
+        }
+    }
+
+    internal suspend fun assignmentFile(url: String, target: File): String = sessionMutex.withLock {
+        require(com.feldman.scholix.openu.OpenUAssignmentParser.fileUrl(url))
+        restorePersistedCookiesLocked()
+        repeat(2) { attempt ->
+            val mime = client.prepareGet(url).execute { response ->
+                val type = response.headers[HttpHeaders.ContentType].orEmpty().substringBefore(';')
+                if (type.contains("html", true)) {
+                    val text = response.bodyAsText()
+                    if (looksLikeLoginResponse(response, text)) return@execute null
+                    throw IOException("OpenU returned a web page instead of the attachment. Refresh the assignment.")
+                }
+                if (!response.status.isSuccess()) throw IOException("Attachment unavailable (HTTP ${response.status.value}).")
+                if (!com.feldman.scholix.openu.OpenUAssignmentParser.fileUrl(response.call.request.url.toString()))
+                    throw IOException("OpenU redirected outside its attachment service.")
+                response.bodyAsChannel().toInputStream().use { input ->
+                    target.outputStream().use { output ->
+                        val buffer = ByteArray(32 * 1024)
+                        var total = 0L
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            if (total > 300L * 1024 * 1024) throw IOException("The attachment exceeds 300 MB.")
+                            output.write(buffer, 0, count)
+                        }
+                        if (total == 0L) throw IOException("OpenU returned an empty attachment.")
+                    }
+                }
+                snapshotCookiesLocked()
+                type.ifBlank { "application/octet-stream" }
+            }
+            if (mime != null) return@withLock mime
+            if (attempt != 0 || !authenticateLocked()) throw IOException("OpenU sign-in expired. Reconnect the account.")
+        }
+        throw IOException("Could not download the OpenU attachment.")
+    }
 
     private suspend fun refreshCoursesLocked(retryAuthentication: Boolean): Boolean {
         restorePersistedCookiesLocked()
@@ -621,6 +709,10 @@ class OpenAUPlatform() : Platform {
             item.putIfText("status", firstText(assignment, "statusDesc", "status"))
             item.putIfText("statusCode", firstText(assignment, "statusCode"))
             item.putIfText("assignmentSemester", firstText(assignment, "assignmentSemester"))
+            item.putIfText("examDate", firstText(assignment, "examinationDate", "examDate"))
+            for (flag in listOf("hasExamFileId", "hasQuestionnaire")) {
+                if (assignment.has(flag)) item.put(flag, assignment.optBoolean(flag))
+            }
             sanitized.put(item)
         }
 
@@ -655,7 +747,8 @@ class OpenAUPlatform() : Platform {
     }
 
     private suspend fun snapshotCookiesLocked() {
-        val cookies = cookieStorage.get(Url(OPEN_U_COURSES_PAGE))
+        val cookies = listOf(OPEN_U_COURSES_PAGE, OPEN_U_SSO_PROCESS, "https://opal.openu.ac.il/")
+            .flatMap { cookieStorage.get(Url(it)) }.distinctBy { Triple(it.name, it.domain, it.path) }
         persistedCookieJar = JSONArray(cookies.map { renderSetCookieHeader(it.copy(maxAge = null)) })
         _cookies = cookies
             .joinToString("; ") { renderCookieHeader(it) }

@@ -106,14 +106,14 @@ object LemidaParser {
         }
         try {
             val envelope = JSONArray(raw)
-            if (envelope.length() != 1) throw IOException("Unexpected Moodle API response. Previous homework preserved.")
+            if (envelope.length() != 1) throw IOException("Unexpected Moodle API response. Previous assignments preserved.")
             val response = envelope.getJSONObject(0)
             if (response.optBoolean("error")) {
                 val code = response.optJSONObject("exception")?.optString("errorcode").orEmpty()
                 if (code in setOf("invalidsesskey", "requireloginerror", "servicerequireslogin")) throw LemidaSessionExpired()
-                throw IOException("Moodle API is unavailable (${code.ifBlank { "unknown" }}). Previous homework preserved.")
+                throw IOException("Moodle API is unavailable (${code.ifBlank { "unknown" }}). Previous assignments preserved.")
             }
-            if (!response.has("data") || response.isNull("data")) throw IOException("Moodle returned no API data. Previous homework preserved.")
+            if (!response.has("data") || response.isNull("data")) throw IOException("Moodle returned no API data. Previous assignments preserved.")
             return response.get("data")
         } catch (e: JSONException) {
             throw IOException("Unexpected Moodle API response. Try Refresh or reconnect to Lemida.", e)
@@ -181,9 +181,9 @@ object LemidaParser {
     }
     fun detail(html: String): HomeworkDetail {
         val doc = Jsoup.parse(html)
-        val main = doc.selectFirst("#region-main") ?: throw IllegalStateException("Homework page content is missing")
+        val main = doc.selectFirst("#region-main") ?: throw IllegalStateException("Assignment page content is missing")
         if (doc.body().id() == "page-error" || main.selectFirst(".errorbox") != null) {
-            throw IOException("Lemida could not open this homework. Try refreshing the homework list.")
+            throw IOException("Lemida could not open this assignment. Try refreshing the assignment list.")
         }
         main.select("script, style, noscript, form, button, nav").remove()
         val alerts = main.select(".alert")
