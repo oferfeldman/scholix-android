@@ -6,11 +6,13 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     id("kotlin-parcelize")
-    id("com.google.firebase.crashlytics")
 }
 
 // A fresh checkout can build without private Firebase configuration.
-if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
+}
 
 android {
     namespace = "com.feldman.scholix"
