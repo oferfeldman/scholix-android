@@ -79,6 +79,8 @@ android {
             if (haveSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
+    // JVM tests reach android.util.Log through platform code; stubs return defaults instead of throwing.
+    testOptions { unitTests.isReturnDefaultValues = true }
     buildFeatures {
         compose = true
     }
