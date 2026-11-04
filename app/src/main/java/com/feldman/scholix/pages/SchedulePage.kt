@@ -117,7 +117,6 @@ fun SchedulePage(
     if (platform is com.feldman.scholix.api.platforms.ShahafPlatform) {
         Column(modifier.fillMaxSize()) {
             Spacer(Modifier.height(TopBarSpacing()))
-            com.feldman.scholix.ScopeChip(Modifier.padding(horizontal = 16.dp))
             if (schedulePlatforms.size > 1) ProviderPickerBar(
                 providers = schedulePlatforms, selectedIndex = selectedPlatformIndex,
                 onSelected = {
@@ -558,7 +557,6 @@ fun SchedulePage(
         // Same top inset as Grades and Attendance, so the provider picker lands in
         // the same place on all three pages.
         Spacer(Modifier.height(TopBarSpacing()))
-        com.feldman.scholix.ScopeChip(Modifier.padding(horizontal = 16.dp))
         val scheduleMode = remember { mutableStateOf(ScheduleMode.Updated) }
         LaunchedEffect(supportsOriginal) {
             if (!supportsOriginal) scheduleMode.value = ScheduleMode.Updated

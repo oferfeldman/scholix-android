@@ -27,7 +27,7 @@ import org.json.JSONObject
 @Composable
 fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String = "", coursePicker: (@Composable () -> Unit)? = null,
                           selectedCourseId: String? = null, onCoursesChanged: (List<JSONObject>) -> Unit = {},
-                          materialsOnly: Boolean = false) {
+                          materialsOnly: Boolean = false, onBack: (() -> Unit)? = null) {
     val context = LocalContext.current
     var items by remember(provider.id) { mutableStateOf(provider.cachedHomework()) }
     var loading by remember { mutableStateOf(false) }
@@ -75,7 +75,7 @@ fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String
                 "${item.optString("title")} ${item.optString("description")} ${item.optString("courseName")}".contains(it, ignoreCase = true)
             } }
     }
-    MotionScaffold(topBar = { SettingsTopBar("Assignments") }) {
+    MotionScaffold(topBar = { SettingsTopBar(if (materialsOnly) "Files" else "Assignments", onBack) }) {
         if (coursePicker != null) Item { coursePicker() }
         Item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,

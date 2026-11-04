@@ -30,7 +30,7 @@ private object PrefKeys {
     val NAVIGATION_ORDER = stringPreferencesKey("navigation_order")
 }
 
-val defaultNavigationOrder = listOf("Home", "Grades", "Schedule", "Assignments", "Messages", "Attendance", "Settings", "Locker", "Tiktek", "Materials", "לוקרים")
+val defaultNavigationOrder = listOf("Home", "Grades", "Schedule", "Assignments", "Messages", "Attendance", "Settings", "Locker", "Tiktek", "Materials", "Studies", "לוקרים")
 
 fun Context.navigationOrderFlow(): Flow<List<String>> =
     appPrefsDataStore.data.map { prefs ->
@@ -39,8 +39,7 @@ fun Context.navigationOrderFlow(): Flow<List<String>> =
                 val pinned = prefs[PrefKeys.NAVBAR_PAGES].orEmpty()
                 page in pinned || (page == "Assignments" && "Homework" in pinned)
             }
-        ((if ("Home" !in saved) listOf("Home") else emptyList()) +
-            saved.map { if (it == "Homework") "Assignments" else it } + defaultNavigationOrder)
+        (saved.map { if (it == "Homework") "Assignments" else it } + defaultNavigationOrder)
             .distinct().filter { it in defaultNavigationOrder }
     }
 

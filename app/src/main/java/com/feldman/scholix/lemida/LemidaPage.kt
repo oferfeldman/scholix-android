@@ -48,7 +48,8 @@ import org.json.JSONObject
 
 @Composable
 fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNavigator,
-               courseProviderId: String? = null, courseKey: String? = null, filesOnly: Boolean = false) {
+               courseProviderId: String? = null, courseKey: String? = null, filesOnly: Boolean = false,
+               onBack: (() -> Unit)? = null) {
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
     val app = LocalAppState.current
@@ -63,13 +64,13 @@ fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNa
                 Text("This course is no longer available for the saved Lemida account.", Modifier.padding(24.dp))
             } else key(courseProviderId, courseKey, filesOnly) {
                 LemidaPageContent(repo, searchQuery, coursePicker = {}, selectedCourseId = courseKey?.toIntOrNull(),
-                    filesOnly = filesOnly)
+                    filesOnly = filesOnly, onBack = onBack)
             }
         } else when (val provider = providers.firstOrNull { it.id == courseProviderId }) {
             is OpenAUPlatform -> com.feldman.scholix.openu.OpenUAssignmentsPage(provider, searchQuery, onNavigate,
                 courseKey, coursePicker = {}, onCoursesChanged = {})
             is GoogleClassroomPlatform -> com.feldman.scholix.classroom.ClassroomHomeworkPage(provider, searchQuery,
-                coursePicker = {}, selectedCourseId = courseKey, materialsOnly = filesOnly)
+                coursePicker = {}, selectedCourseId = courseKey, materialsOnly = filesOnly, onBack = onBack)
             else -> Text("This course account is no longer available.", Modifier.padding(24.dp))
         }
         return
@@ -131,7 +132,7 @@ fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNa
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "", coursePicker: (@Composable () -> Unit)? = null,
-                               selectedCourseId: Int? = null, filesOnly: Boolean = false) {
+                               selectedCourseId: Int? = null, filesOnly: Boolean = false, onBack: (() -> Unit)? = null) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
     val syncing by repo.syncing.collectAsStateWithLifecycle()
@@ -197,7 +198,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         (!filesOnly || repo.cachedDetail(it)?.pdfs?.isNotEmpty() == true) &&
         it.matchesSearch(query, searchQuery) } }
     MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = {
-        SettingsTopBar(if (filesOnly) "Files" else "Assignments", actions = {
+        SettingsTopBar(if (filesOnly) "Files" else "Assignments", onBack, actions = {
             IconButton(onClick = { LemidaSyncWorker.refresh(context, manual = true) }, enabled = updated > 0L && !syncing && !needsLogin) {
                 if (syncing) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Default.Refresh, "Refresh")

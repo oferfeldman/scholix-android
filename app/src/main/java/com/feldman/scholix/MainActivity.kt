@@ -749,11 +749,13 @@ fun MainScreen(
         )
     val scopeLabel = if (scopeCourse != null) {
         val provider = platforms.firstOrNull { it.id == courseScope?.providerId }?.platformDisplayName ?: "Lemida"
-        "${scopeCourse.optString("name")} \u00b7 $provider"
-    } else "All Scholix"
-    val scopeControl = ScopeControl(scopeLabel) {
+        listOf(scopeCourse.optString("name"), provider, courseScope?.term.orEmpty())
+            .filter { it.isNotBlank() }.joinToString(" \u00b7 ")
+    } else null
+    val scopeControl = if (courseScope != null || currentScreen == AppDest.Home ||
+        currentScreen == AppDest.Grades || currentScreen is ProviderGrades) ScopeControl(scopeLabel) {
         backStack.navigateTo(ScopeSwitcher(currentScreen as? AppDest ?: AppDest.Home))
-    }
+    } else null
 
     CompositionLocalProvider(LocalAppState provides appState, LocalScopeControl provides scopeControl,
         LocalCourseStateHolder provides courseStateHolder) {

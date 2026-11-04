@@ -56,7 +56,7 @@ import org.json.JSONObject
 @Composable
 internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String, onNavigate: MotionNavigator,
                                   selectedCourse: String?, coursePicker: @Composable () -> Unit,
-                                  onCoursesChanged: (List<JSONObject>) -> Unit) {
+                                  onCoursesChanged: (List<JSONObject>) -> Unit, includeTopInset: Boolean = true) {
     val context = LocalContext.current
     val repo = remember(provider.id, provider.getUsername()) { OpenUAssignmentsRepository(context, provider) }
     var courses by remember(repo) { mutableStateOf(repo.cachedCourses()) }
@@ -92,7 +92,7 @@ internal fun OpenUAssignmentsPage(provider: OpenAUPlatform, searchQuery: String,
         }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Spacer(Modifier.height(TopBarSpacing()))
+        if (includeTopInset) Spacer(Modifier.height(TopBarSpacing()))
         coursePicker()
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
@@ -187,6 +187,7 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
             MotionBackButton(onClick = onBack)
             Text(item?.courseName.orEmpty(), Modifier.weight(1f).padding(horizontal = 12.dp),
                 style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            com.feldman.scholix.PlatformSwitcherButton()
             IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh assignment") }
         }
         val assignment = item

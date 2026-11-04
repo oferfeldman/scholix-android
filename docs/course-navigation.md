@@ -2,13 +2,20 @@
 
 Connected OpenU, Lemida and Classroom users start on Home. School-only users keep
 Grades as their start page. Existing notification intents still take priority.
-Home uses saved course/provider data; opening it does not request Inbar SMS or
-refresh university sessions. Course-card chips open Assignments or Units directly.
-School-provider rows open Grades focused on that provider.
+Home uses saved course data; opening it does not request Inbar SMS or refresh
+university sessions. Provider-grouped course rows use the same icons, type and
+connected surfaces as assignment lists. Rows open Overview; Resume restores the
+last course location. Home no longer duplicates general-page or provider-grade
+shortcuts, aggregate grade summaries, or per-card action chips.
 
 The existing Motion bar and tablet rail switch to the selected course's sections.
-The scope chip in the existing header opens global views, provider grades and recent
-courses. Course routes retain provider, course and term identity; Lemida routes
+Normal page titles and existing general-page pickers are retained. A compact
+All platforms icon in Home, Grades and course/item headers opens direct provider
+grades first, including empty-cache accounts, then global views and recent courses.
+It replaces the old title chip and extra header rows. Provider rows include the
+account label. Home/course-to-provider navigation takes two taps before subject
+selection, loading or sign-in; consent and SMS remain separate interactions.
+Course routes retain provider, course and term identity; Lemida routes
 also retain the saved account. Recent courses resume their open route, while a
 Home tab selection returns to the course list. Course-section saveable state is
 kept above transient destination composition.
@@ -40,5 +47,9 @@ credentials and handwriting are excluded. Studies retain their separate export.
 Focused JVM checks cover course/provider/term identity, navigation ancestry and
 global excursions, OpenU parsing/resource isolation, study-reference compatibility
 and complete homework export with incomplete/account-mismatched cache rejection.
-The final debug APK build, Android test-source compilation and 32 focused JVM
-checks passed. Device UI and live provider verification were not run.
+The initial integration's debug APK build, Android test-source compilation and
+32 focused JVM checks passed. The 4 November UX correction also passes the five
+focused CourseScopeTest checks and Kotlin compilation. Local visual QA was blocked:
+device_open failed, then failed again after a device-list refresh because the
+codex_documents_qa emulator exited with code 1. No rendered or live provider
+verification is claimed for this correction.

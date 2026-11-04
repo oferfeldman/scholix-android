@@ -381,6 +381,7 @@ fun GradesScreen(
     focusedCourseKey: String? = null,
     focusedTerm: String? = null,
     onOpenCourse: ((com.feldman.scholix.CourseSection) -> Unit)? = null,
+    includeTopInset: Boolean = true,
 ) {
     val context = LocalContext.current
     var inbarRequestedByUser by remember { mutableStateOf(false) }
@@ -798,7 +799,8 @@ fun GradesScreen(
 
     if (courses.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            com.feldman.scholix.ScopeChip(Modifier.align(Alignment.TopCenter).padding(top = TopBarSpacing()))
+            if (includeTopInset) com.feldman.scholix.PlatformSwitcherButton(
+                Modifier.align(Alignment.TopEnd).padding(top = TopBarSpacing(), end = 16.dp))
             if (!courseLoadFinished || inbarRelogin != null || isLoading) {
                 GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
             } else if (!canAccessInbar && providersById.values.any { it is InbarPlatform && it.hasSavedLoginDetails() }) {
@@ -855,9 +857,23 @@ fun GradesScreen(
                 .fillMaxHeight()
                 .padding(horizontal = 16.dp),
         ) {
-            Spacer(Modifier.height(TopBarSpacing()))
+            if (includeTopInset) Spacer(Modifier.height(TopBarSpacing()))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                com.feldman.scholix.ScopeChip(Modifier.weight(1f))
+                if (!isLandscape && courses.size > 1) {
+                    Box(Modifier.weight(1f)) {
+                        CoursePickerBar(
+                            courses = courses, selectedIndex = selectedTab,
+                            onSelected = {
+                                if (providersById[courses.getOrNull(it)?.optString("platformId")] is InbarPlatform) inbarRequestedByUser = true
+                                selectedTab = it
+                            },
+                            expanded = courseMenuExpanded, onExpandedChange = { courseMenuExpanded = it },
+                            providersById = providersById
+                        )
+                    }
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
                 val selected = courses.getOrNull(selectedTab)
                 val owner = providersById[selected?.optString("platformId")]
                 if (selected != null && onOpenCourse != null && focusedCourseKey == null &&
@@ -867,20 +883,7 @@ fun GradesScreen(
                         Text("Open course \u203a")
                     }
                 }
-            }
-            if (!isLandscape && courses.size > 1) {
-                CoursePickerBar(
-                    courses = courses,
-                    selectedIndex = selectedTab,
-                    onSelected = {
-                        if (providersById[courses.getOrNull(it)?.optString("platformId")] is InbarPlatform) inbarRequestedByUser = true
-                        selectedTab = it
-                    },
-                    expanded = courseMenuExpanded,
-                    onExpandedChange = { courseMenuExpanded = it },
-                    providersById = providersById
-                )
-                Spacer(Modifier.height(8.dp))
+                if (includeTopInset) com.feldman.scholix.PlatformSwitcherButton()
             }
 
             val pullRefreshState = rememberPullToRefreshState()

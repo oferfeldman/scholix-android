@@ -56,11 +56,15 @@ data class CourseSection(
             return
         }
         when {
-            section == CourseSectionKind.GRADES -> com.feldman.scholix.pages.GradesScreen(
+            section == CourseSectionKind.GRADES -> MotionScaffold(scrollable = false,
+                contentPadding = PaddingValues(0.dp),
+                topBar = { com.feldman.scholix.ui.components.SettingsTopBar(section.label, onBack) }) {
+                Item { com.feldman.scholix.pages.GradesScreen(
                 modifier = Modifier.fillMaxSize(), preloadedCourses = state.preloadedCourses,
                 focusedProviderId = providerId, focusedCourseKey = courseKey, focusedTerm = term,
                 inbarAccessRequested = true, isActive = state.activePage == this,
-                onOpenCourse = { state.onScopeSelected(it) })
+                onOpenCourse = { state.onScopeSelected(it) }, includeTopInset = false) }
+            }
             section == CourseSectionKind.STUDIES -> com.feldman.scholix.studies.StudiesPage(onBack, providerId, courseKey)
             provider is OpenAUPlatform -> com.feldman.scholix.openu.course.OpenUCourseSection(
                 provider, courseKey, section, scopedNavigator, onBack, term)
@@ -86,7 +90,7 @@ data class CourseSection(
                 }
             }
             else -> com.feldman.scholix.lemida.LemidaPage(searchQuery, scopedNavigator,
-                courseProviderId = providerId, courseKey = courseKey, filesOnly = section == CourseSectionKind.FILES)
+                courseProviderId = providerId, courseKey = courseKey, filesOnly = section == CourseSectionKind.FILES, onBack = onBack)
         }
     }
 }

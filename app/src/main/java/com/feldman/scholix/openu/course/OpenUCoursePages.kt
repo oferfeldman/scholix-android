@@ -46,11 +46,16 @@ object OpenUCourseSections {
 fun OpenUCourseSection(platform: OpenAUPlatform, courseKey: String, section: CourseSectionKind,
                        onNavigate: MotionNavigator, onBack: () -> Unit, term: String = "") {
     if (section == CourseSectionKind.ASSIGNMENTS) {
-        OpenUAssignmentsPage(platform, "", object : MotionNavigator {
-            override fun invoke(destination: MotionDest, resetStack: Boolean) {
-                onNavigate(if (destination is AppDest.OpenUAssignment) destination.copy(courseKey = courseKey, term = term) else destination, resetStack)
+        MotionScaffold(scrollable = false, contentPadding = PaddingValues(0.dp),
+            topBar = { SettingsTopBar(section.label, onBack) }) {
+            Item {
+                OpenUAssignmentsPage(platform, "", object : MotionNavigator {
+                    override fun invoke(destination: MotionDest, resetStack: Boolean) {
+                        onNavigate(if (destination is AppDest.OpenUAssignment) destination.copy(courseKey = courseKey, term = term) else destination, resetStack)
+                    }
+                }, courseKey, {}, {}, includeTopInset = false)
             }
-        }, courseKey, {}, {})
+        }
         return
     }
     val context = LocalContext.current
@@ -83,7 +88,9 @@ fun OpenUCourseSection(platform: OpenAUPlatform, courseKey: String, section: Cou
             if (data != null) Text("Showing saved course content.") } }
         when (section) {
             CourseSectionKind.OVERVIEW -> {
-                val course = data
+                val course = data ?: LocalAppState.current.courseCatalog.singleOrNull {
+                    it.optString("platformId") == platform.id && it.optString("courseKey") == courseKey && it.optString("term") == term
+                }
                 if (course != null) {
                     Item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

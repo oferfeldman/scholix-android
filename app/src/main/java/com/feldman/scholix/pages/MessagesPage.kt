@@ -380,7 +380,6 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
     ) {
         Item {
             Spacer(Modifier.height(TopBarSpacing()))
-            com.feldman.scholix.ScopeChip()
         }
         if (providers.isEmpty()) {
             Section {

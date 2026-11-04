@@ -7,8 +7,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import com.feldman.motion.MotionBackButton
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -22,12 +25,13 @@ fun SettingsTopBar(
 ) {
     CenterAlignedTopAppBar(
         title = {
-            if (com.feldman.scholix.LocalScopeControl.current != null) {
-                androidx.compose.foundation.layout.Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                    com.feldman.scholix.ScopeChip()
-                    Text(title, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, maxLines = 1)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                com.feldman.scholix.LocalScopeControl.current?.label?.takeIf { title != "Home" && it != title }?.let { course ->
+                    Text(course, style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-            } else Text(title, fontWeight = FontWeight.Bold)
+            }
         },
         navigationIcon = {
             if (onBack != null) {
@@ -39,6 +43,9 @@ fun SettingsTopBar(
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = chromeColor, titleContentColor = chromeContentColor),
-        actions = actions
+        actions = {
+            com.feldman.scholix.PlatformSwitcherButton()
+            actions()
+        }
     )
 }
