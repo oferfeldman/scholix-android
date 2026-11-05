@@ -27,8 +27,19 @@ data class CourseSection(
     @IgnoredOnParcel @Transient override val label = section.label
     @IgnoredOnParcel @Transient override val parent: MotionDest = AppDest.Home
     @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
-    @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_docs
-    @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_docs_outline
+    @IgnoredOnParcel @Transient override val icon = when (section) {
+        CourseSectionKind.OVERVIEW -> MotionIcons.Outlined.Dashboard
+        CourseSectionKind.UNITS -> MotionIcons.Outlined.ViewModule
+        CourseSectionKind.ASSIGNMENTS -> MotionIcons.Outlined.Assignment
+        CourseSectionKind.RECORDINGS -> MotionIcons.Outlined.VideoLibrary
+        CourseSectionKind.FORUMS -> MotionIcons.Outlined.Forum
+        CourseSectionKind.ARCHIVE -> MotionIcons.Outlined.Archive
+        CourseSectionKind.BOOKS -> MotionIcons.Outlined.MenuBook
+        CourseSectionKind.BOOKLET -> MotionIcons.Outlined.Book
+        CourseSectionKind.FILES -> MotionIcons.Outlined.Folder
+        CourseSectionKind.GRADES -> MotionIcons.Outlined.Grade
+        CourseSectionKind.STUDIES -> MotionIcons.Outlined.School
+    }
 
     @Composable
     override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,

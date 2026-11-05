@@ -685,7 +685,7 @@ fun MainScreen(
     val scopeCourse = courseScope?.let { scope -> courseCatalog.singleOrNull { scope.matches(it) } }
     val navigationPages = if (courseScope != null && scopeCourse != null) {
         courseSections(platforms.firstOrNull { it.id == courseScope.providerId }, scopeCourse)
-            .map { courseScope.copy(section = it) }
+            .map { courseScope.copy(section = it) } + AppDest.Home
     } else globalNavigationPages
     val activeNavigationPage = if (generateSequence<MotionDest>(currentScreen) { it.parent }.any { it is ProviderGrades })
         AppDest.Grades else backStack.backStack.asReversed().firstNotNullOfOrNull { screen ->
@@ -777,7 +777,7 @@ fun MainScreen(
                     snackbarHost = snackbarHost,
                     navigationDestinations = navigationPages,
                     selectedDestination = selectedNavbarDest,
-                    pinnedEndDestination = if (courseScope == null) AppDest.Settings else null,
+                    pinnedEndDestination = if (courseScope == null) AppDest.Settings else AppDest.Home,
                     replacePinnedEndWhenFull = true,
                     onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = dest.parent == null) },
                     contrastBlurEnabled = navigationBlurred,

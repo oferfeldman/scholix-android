@@ -10,6 +10,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CourseScopeTest {
+    @Test fun courseTabsHaveDistinctSectionIcons() {
+        val icons = CourseSectionKind.entries.map { CourseSection(section = it).icon.name }
+        assertEquals(CourseSectionKind.entries.size, icons.distinct().size)
+        assertFalse(icons.contains("description"))
+    }
+
     private fun course(provider: String = "one", term: String = "2027a") = JSONObject()
         .put("platformId", provider).put("courseKey", "20476:$term")
         .put("name", "Same title").put("term", term)

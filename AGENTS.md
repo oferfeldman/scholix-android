@@ -8,6 +8,6 @@ Home must combine connected school providers such as Webtop and Mashov, universi
 
 Home should have no bottom navigation bar. Course pages need an easy course switcher at the top and a Home button. Preview proposed Android designs with the app's actual Compose/Motion components, fonts, colors, shapes, and provider data.
 
-Keep Home to a simple course list with the standard provider picker. Reuse Grades' course picker on course pages and keep the course's own navigation bar; avoid dashboard sections and resume cards.
+Keep Home to a simple course list with the standard provider picker. Course pages use a single header with Grades' course picker scoped to the active provider account, distinct section icons, and Home pinned in the course's own navigation bar; avoid dashboard sections and resume cards.
 
 Use an emulator for Android UX previews. Do not remotely access the user's physical Pixel 10 Pro unless the user explicitly requests it again.

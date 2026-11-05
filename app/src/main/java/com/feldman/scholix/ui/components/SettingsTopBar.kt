@@ -7,12 +7,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -45,50 +43,20 @@ fun SettingsTopBar(
 ) {
     val state = if (com.feldman.scholix.LocalScopeControl.current != null) LocalAppState.current else null
     val courseScope = state?.activePage?.courseScope()?.takeIf { title != "Home" }
-    val selectedCourseIndex = state?.courseCatalog?.indexOfFirst { courseScope?.matches(it) == true } ?: -1
+    val courses = state?.courseCatalog.orEmpty().filter { it.optString("platformId") == courseScope?.providerId }
+    val selectedCourseIndex = courses.indexOfFirst { courseScope?.matches(it) == true }
     var courseMenuExpanded by remember(courseScope) { mutableStateOf(false) }
-    Column {
-        CenterAlignedTopAppBar(
-            title = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    com.feldman.scholix.LocalScopeControl.current?.label?.takeIf { courseScope == null && title != "Home" && it != title }?.let { course ->
-                        Text(course, style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            },
-            navigationIcon = {
-                if (courseScope != null && state?.activePage is CourseSection) {
-                    TextButton(onClick = { state.onScopeSelected(AppDest.Home) }) {
-                        Icon(painterResource(AppDest.Home.outlineIcon), contentDescription = null)
-                        Text("Home")
-                    }
-                } else if (onBack != null) {
-                    MotionBackButton(
-                        onClick = onBack,
-                        containerColor = colorScheme.surface,
-                        contentColor = colorScheme.onSurface
-                    )
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = chromeColor, titleContentColor = chromeContentColor),
-            actions = {
-                if (courseScope != null && state != null && state.activePage !is CourseSection) {
-                    IconButton(onClick = { state.onScopeSelected(AppDest.Home) }) {
-                        Icon(painterResource(AppDest.Home.outlineIcon), contentDescription = "Home")
-                    }
-                }
-                com.feldman.scholix.PlatformSwitcherButton()
-                actions()
-            }
-        )
-        if (selectedCourseIndex >= 0 && state != null) {
+    if (selectedCourseIndex >= 0 && state?.activePage is CourseSection) {
+        Row(
+            modifier = Modifier.fillMaxWidth().background(chromeColor).statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             CoursePickerBar(
-                courses = state.courseCatalog,
+                courses = courses,
                 selectedIndex = selectedCourseIndex,
                 onSelected = { index ->
-                    val course = state.courseCatalog[index.coerceIn(0, state.courseCatalog.lastIndex)]
+                    val course = courses[index.coerceIn(0, courses.lastIndex)]
                     val provider = state.platforms.firstOrNull { it.id == course.optString("platformId") }
                     val section = courseScope?.section?.takeIf { it in courseSections(provider, course) }
                         ?: CourseSectionKind.OVERVIEW
@@ -97,8 +65,40 @@ fun SettingsTopBar(
                 expanded = courseMenuExpanded,
                 onExpandedChange = { courseMenuExpanded = it },
                 providersById = state.platforms.associateBy { it.id },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                modifier = Modifier.weight(1f)
             )
+            actions()
         }
+        return
     }
+    CenterAlignedTopAppBar(
+        title = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                com.feldman.scholix.LocalScopeControl.current?.label?.takeIf { courseScope == null && title != "Home" && it != title }?.let { course ->
+                    Text(course, style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        },
+        navigationIcon = {
+            if (onBack != null) {
+                MotionBackButton(
+                    onClick = onBack,
+                    containerColor = colorScheme.surface,
+                    contentColor = colorScheme.onSurface
+                )
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = chromeColor, titleContentColor = chromeContentColor),
+        actions = {
+            if (courseScope != null && state != null && state.activePage !is CourseSection) {
+                IconButton(onClick = { state.onScopeSelected(AppDest.Home) }) {
+                    Icon(painterResource(AppDest.Home.outlineIcon), contentDescription = "Home")
+                }
+            }
+            com.feldman.scholix.PlatformSwitcherButton()
+            actions()
+        }
+    )
 }

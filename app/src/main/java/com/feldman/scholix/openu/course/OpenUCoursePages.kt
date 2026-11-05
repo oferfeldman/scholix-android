@@ -81,7 +81,9 @@ fun OpenUCourseSection(platform: OpenAUPlatform, courseKey: String, section: Cou
         finally { loading = false }
     }
     MotionScaffold(topBar = { SettingsTopBar(section.label, onBack, actions = {
-        TextButton(onClick = { retry++ }, enabled = !loading && section != CourseSectionKind.ARCHIVE) { Text("Refresh") }
+        IconButton(onClick = { retry++ }, enabled = !loading && section != CourseSectionKind.ARCHIVE) {
+            Icon(rememberSymbolPainter(MotionSymbols.ic_refresh), contentDescription = "Refresh")
+        }
     }) }) {
         if (loading) Item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         if (error != null) Item { Column { Text(error!!, color = MaterialTheme.colorScheme.error)
