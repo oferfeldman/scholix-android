@@ -141,6 +141,7 @@ object LemidaParser {
             val (type, id) = activityIdentity(url) ?: return@mapNotNull null
             val title = item.selectFirst("[data-activityname]")?.attr("data-activityname")
                 ?.takeIf { it.isNotBlank() } ?: a.text()
+            if (!LemidaActivities.counts(type, title)) return@mapNotNull null
             val dates = item.select("[data-region=activity-dates], .activity-dates").text()
             Homework("$courseId:$type:$id", courseId, courseName, title, type, url.substringBefore('#'), dates)
         }.distinctBy { it.id }
@@ -154,8 +155,9 @@ object LemidaParser {
             if (!module.optBoolean("uservisible", true)) return@mapNotNull null
             val url = module.optString("url")
             val (type, id) = activityIdentity(url) ?: return@mapNotNull null
-            Homework("$courseId:$type:$id", courseId, courseName,
-                Jsoup.parse(module.getString("name")).text(), type, url.substringBefore('#'), "")
+            val title = Jsoup.parse(module.getString("name")).text()
+            if (!LemidaActivities.counts(type, title)) return@mapNotNull null
+            Homework("$courseId:$type:$id", courseId, courseName, title, type, url.substringBefore('#'), "")
         }.distinctBy { it.id }
     }
 
@@ -164,8 +166,9 @@ object LemidaParser {
         val uri = URI(url)
         if (uri.scheme != "https" || !uri.host.equals("lemida.biu.ac.il", ignoreCase = true) ||
             uri.port !in setOf(-1, 443) || uri.userInfo != null) return null
-        val type = Regex("^/mod/(assign|quiz|workshop)/view\\.php$")
-            .matchEntire(uri.path.orEmpty())?.groupValues?.get(1) ?: return null
+        val type = Regex("^/mod/([a-z0-9]+)/view\\.php$")
+            .matchEntire(uri.path.orEmpty())?.groupValues?.get(1)
+            ?.takeIf { it in LemidaActivities.types } ?: return null
         val ids = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
             val key = URLDecoder.decode(part.substringBefore('='), "UTF-8")
             if (key == "id") URLDecoder.decode(part.substringAfter('=', ""), "UTF-8") else null

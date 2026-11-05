@@ -194,7 +194,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         return
     }
     val visible = remember(homework, courseFilter, typeFilter, query, searchQuery, filesOnly, snapshot.updated) { homework.filter { (courseFilter == null || it.courseId == courseFilter) &&
-        (typeFilter == "all" || it.type == typeFilter) &&
+        (typeFilter == "all" || LemidaActivities.group(it.type) == typeFilter) &&
         (!filesOnly || repo.cachedDetail(it)?.pdfs?.isNotEmpty() == true) &&
         it.matchesSearch(query, searchQuery) } }
     MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = {
@@ -255,6 +255,9 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                 query = query, onQueryChange = { query = it },
                 courseFilter = courseFilter, onCourseChange = { courseFilter = it },
                 typeFilter = typeFilter, onTypeChange = { typeFilter = it },
+                groups = homework.filter { courseFilter == null || it.courseId == courseFilter }
+                    .map { LemidaActivities.group(it.type) }.toSet()
+                    .let { present -> LemidaActivities.groups.filter { it in present } },
                 automaticUpdates = enabled,
                 showCourseFilters = coursePicker == null,
             )
@@ -275,8 +278,8 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         visible.groupBy { it.courseId }.toSortedMap().forEach { (courseId, group) ->
             val color = MotionThemeDefaults.VibrantIconBackgrounds[Math.floorMod(courseId, MotionThemeDefaults.VibrantIconBackgrounds.size)]
             Title(group.first().course)
-            listOf("assign" to "Assignments", "quiz" to "Quizzes", "workshop" to "Workshops").forEach { (type, label) ->
-                val items = group.filter { it.type == type }.sortedWith(compareBy<Homework> {
+            LemidaActivities.groups.forEach { label ->
+                val items = group.filter { LemidaActivities.group(it.type) == label }.sortedWith(compareBy<Homework> {
                     Regex("\\d+").find(it.title)?.value?.toIntOrNull() ?: Int.MAX_VALUE
                 }.thenBy { it.title })
                 if (items.isNotEmpty()) {
@@ -284,7 +287,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                         modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     Section { items.forEach { item ->
                         PageItem(key = item.id, title = item.title, description = item.dates.takeIf { it.isNotBlank() },
-                            icon = painterResource(if (type == "quiz") R.drawable.ic_schedule else R.drawable.ic_docs),
+                            icon = painterResource(if (item.type == "quiz") R.drawable.ic_schedule else R.drawable.ic_docs),
                             iconStyle = MotionSectionDefaults.iconStyle(containerColor = color.color, contentColor = color.onColor), onClick = { selectedId = item.id })
                     } }
                 }
@@ -301,6 +304,8 @@ internal fun LemidaHomeworkFilters(
     query: String, onQueryChange: (String) -> Unit,
     courseFilter: Int?, onCourseChange: (Int?) -> Unit,
     typeFilter: String, onTypeChange: (String) -> Unit,
+    /** Kinds of work present, in display order; the type chips offer only these. */
+    groups: List<String> = LemidaActivities.groups,
     automaticUpdates: Boolean = true,
     showCourseFilters: Boolean = true,
 ) {
@@ -323,7 +328,7 @@ internal fun LemidaHomeworkFilters(
         }
         Row(Modifier.fillMaxWidth().testTag("homework-type-filters").horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("all" to "All", "assign" to "Assignments", "quiz" to "Quizzes", "workshop" to "Workshops").forEach { (type, label) ->
+            (listOf("all" to "All") + groups.map { it to it }).forEach { (type, label) ->
                 FilterChip(selected = typeFilter == type, onClick = { onTypeChange(type) }, label = { Text(label) })
             }
         }
@@ -350,6 +355,8 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, accoun
     var savingPdf by remember(item.id) { mutableStateOf(false) }
     DisposableEffect(pdfFile) { val file = pdfFile; onDispose { file?.delete() } }
     LaunchedEffect(item.id, retry) {
+        // A posted exercise file or link has no instructions page to read; it opens on Lemida.
+        if (!LemidaActivities.hasDetailPage(item.type)) { loading = false; return@LaunchedEffect }
         loading = true
         error = null
         requiresSignIn = false
@@ -400,10 +407,13 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, accoun
         }
         // The official hand-in: Lemida's own page in Scholix's browser, already signed in. Scholix never submits.
         if (item.url.startsWith("${LemidaParser.BASE}/") && com.feldman.scholix.browser.ScholixLinks.loadable(item.url)) Section {
-            val quiz = item.type == "quiz"
-            PageItem(title = if (quiz) "Open quiz on Lemida" else "Hand in on Lemida",
-                description = if (quiz) "Opens this quiz on Lemida's website inside Scholix."
-                    else "Opens this assignment on Lemida's website inside Scholix. Upload your exported PDF there.",
+            val label = LemidaActivities.openLabel(item.type)
+            PageItem(title = label,
+                description = when {
+                    item.type == "quiz" -> "Opens this quiz on Lemida's website inside Scholix."
+                    label == "Hand in on Lemida" -> "Opens this assignment on Lemida's website inside Scholix. Upload your exported PDF there."
+                    else -> "Opens it on Lemida's website inside Scholix."
+                },
                 icon = painterResource(R.drawable.ic_docs), onClick = {
                     context.startActivity(com.feldman.scholix.browser.ScholixBrowserActivity.intent(context, item.url, item.title))
                 })

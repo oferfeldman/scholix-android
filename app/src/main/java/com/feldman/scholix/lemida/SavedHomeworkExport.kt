@@ -48,7 +48,7 @@ data class SavedHomeworkExport(
                 val identity = item.id.split(':')
                 val url = java.net.URI(item.url)
                 require(identity.size == 3 && identity[0].toIntOrNull() == item.courseId &&
-                    identity[1] == item.type && item.type in setOf("assign", "quiz", "workshop") &&
+                    identity[1] == item.type && item.type in LemidaActivities.types &&
                     identity[2].isNotBlank() && identity[2].all(Char::isDigit) &&
                     url.scheme == "https" && url.authority == java.net.URI(LemidaParser.BASE).authority &&
                     url.rawUserInfo == null && url.rawFragment == null &&
