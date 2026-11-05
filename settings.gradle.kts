@@ -27,6 +27,9 @@ dependencyResolutionManagement {
 
 rootProject.name = "scholix"
 include(":app")
+include(":seamless-link", ":seamless-link-core")
+project(":seamless-link").projectDir = file("../seamless-link/android")
+project(":seamless-link-core").projectDir = file("../seamless-link/core")
 // TEMP-VERIFY (will revert)
 // providers.gradleProperty("scholix.motionSource").orNull?.let { source ->
 //     includeBuild(source) {

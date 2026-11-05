@@ -249,6 +249,13 @@ class OpenAUPlatform() : Platform {
         throw IOException("Could not open this OpenU page.")
     }
 
+    /** Seed the built-in assignment browser from this account's existing Opal session. */
+    internal suspend fun assignmentBrowserCookies(url: String): List<String> = sessionMutex.withLock {
+        require(com.feldman.scholix.openu.OpenUAssignmentParser.activityUrl(url))
+        restorePersistedCookiesLocked()
+        cookieStorage.get(Url(url)).map { renderSetCookieHeader(it) }
+    }
+
     internal suspend fun assignmentDraftFiles(page: String, itemId: String, clientId: String): String {
         val html = assignmentPage(page)
         val token = Regex("[\"']sesskey[\"']\\s*:\\s*[\"']([^\"']+)").find(html)?.groupValues?.get(1)

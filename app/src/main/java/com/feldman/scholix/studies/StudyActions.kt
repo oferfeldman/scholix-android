@@ -35,8 +35,10 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
     var entries by remember(assignment?.key, courseProviderId, courseKey) { mutableStateOf(catalog.entries()) }
     var pending by rememberSaveable { mutableStateOf<String?>(null) }
     var targetPackage by rememberSaveable { mutableStateOf<String?>(null) }
-    var picker by remember { mutableStateOf<List<ComponentName>>(emptyList()) }
+    var picker by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var localPackage by remember { mutableStateOf<String?>(null) }
     fun open(reference: StudyReference) {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("feldman-documents://study/${reference.studyId}"))
             .setPackage(reference.documentsPackage))
@@ -63,34 +65,29 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
     }
     fun request(reference: StudyReference? = null, choose: Boolean = false) {
         error = null
+        message = null
         pending = DocumentsStudyContract.request(assignment, reference, choose)
-        val targets = context.packageManager.queryIntentActivities(Intent(DocumentsStudyContract.ACTION), PackageManager.MATCH_DEFAULT_ONLY)
-            .map { ComponentName(it.activityInfo.packageName, it.activityInfo.name) }
-            .filter { reference?.documentsPackage == null || it.packageName == reference.documentsPackage }.distinct()
-        when (targets.size) {
-            0 -> { pending = null; error = "Install or update Documents to create and link studies." }
-            1 -> launch(targets.single())
-            else -> picker = targets
-        }
+        localPackage = reference?.documentsPackage
+        picker = true
     }
-    if (picker.isNotEmpty()) AlertDialog(onDismissRequest = { picker = emptyList(); pending = null },
-        title = { Text("Choose Documents app") }, text = { Column {
-            picker.forEach { target -> TextButton(onClick = { picker = emptyList(); launch(target) }) { Text(target.packageName) } }
-        } }, confirmButton = {}, dismissButton = {
-            TextButton(onClick = { picker = emptyList(); pending = null }) { Text("Cancel") }
-        })
+    if (picker && pending != null) StudyDevicePicker(pending!!, localPackage,
+        onLocal = { picker = false; launch(it) },
+        onSent = { picker = false; pending = null; message = "Opened Documents on $it" },
+        onDismiss = { picker = false; pending = null })
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         entries.filter { reference ->
-            (assignment == null || reference.assignmentKey == assignment.key) &&
+            assignment == null &&
                 (courseProviderId == null || (reference.courseProviderId == courseProviderId && reference.courseKey == courseKey) ||
                     reference.assignmentKey in courseAssignmentKeys)
         }.forEach { reference ->
-            MotionButton(text = "Open ${reference.title}", enabled = reference.isLocal && pending == null,
+            MotionButton(text = "Open ${reference.title}", enabled = pending == null,
                 onClick = { request(reference) })
             if (!reference.isLocal) Text("This published study has not been downloaded. Download support is not available yet.")
         }
-        MotionButton(text = if (assignment == null) "Create or link a study" else "Create or link assignment study",
-            enabled = pending == null, onClick = { request(choose = true) })
+        MotionButton(text = "Open fstudy", enabled = pending == null, onClick = {
+            request(assignment?.let { item -> entries.firstOrNull { it.assignmentKey == item.key } })
+        })
+        message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 }

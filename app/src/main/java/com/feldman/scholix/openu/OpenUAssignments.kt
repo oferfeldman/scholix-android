@@ -138,7 +138,7 @@ internal object OpenUAssignmentParser {
         return OpenUAssignmentDetail(fields("#ouilassign_view_section_details [index-item]", ".ouilassign_inner_title"),
             fields("#ouilassign_view_submission_content .ouilassign_submission_info_row", ".ouilassign_section_row_title") + quizFields,
             root.select("#ouilassign_view_section_guide .ouilassign_section_content, #intro, .quizintro").joinToString("\n\n") { it.wholeText().trim() },
-            files("#ouilassign_view_section_assignment a[href], #intro a[href]", "Original files") +
+            files("#ouilassign_view_section_assignment a[href], #ouilassign_view_section_guide a[href], #intro a[href], .quizintro a[href]", "Original files") +
                 files("#ouilassign_view_submission_content .ouilassign_section_row_file_item a[href]:not([aria-hidden=true])", "Submitted files") +
                 files("[id^=ouilassigntype_file_feedbacks_list] a[href], .ouilassign_view_section_feedback a[href]", "Checked files"),
             root.select(".alert, .notifyproblem").map(Element::text).filter(String::isNotBlank))

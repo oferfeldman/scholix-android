@@ -20,6 +20,18 @@ import java.util.UUID
 class StudyHandoffUiTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun pickerOpensWithoutDocumentsInstalledOnThisDevice() {
+        var dismissed = false
+        compose.setContent {
+            MotionTheme { StudyDevicePicker(DocumentsStudyContract.request(null), "com.example.notinstalled",
+                onLocal = { fail("An unavailable local app was offered") }, onSent = {}, onDismiss = { dismissed = true }) }
+        }
+        compose.onNodeWithText("Open fstudy").assertExists()
+        compose.onNodeWithText("This device").assertDoesNotExist()
+        compose.onNodeWithText("Cancel").performClick()
+        assertTrue(dismissed)
+    }
+
     private fun findNativeText(node: AccessibilityNodeInfo?, text: String): AccessibilityNodeInfo? {
         if (node == null) return null
         if (node.text?.toString() == text || node.contentDescription?.toString() == text) return node
@@ -61,7 +73,8 @@ class StudyHandoffUiTest {
             caller = requireNotNull(LocalActivity.current)
             MotionTheme { StudyActions(assignment) }
         }
-        compose.onNodeWithText("Create or link assignment study").performClick()
+        compose.onNodeWithText("Open fstudy").performClick()
+        compose.onNodeWithText("This device").performClick()
         clickNativeText("Create study")
         compose.waitUntil(20_000) { catalog.entries().any { it.assignmentKey == assignment.key } }
         val first = catalog.entries().single { it.assignmentKey == assignment.key }
@@ -76,19 +89,20 @@ class StudyHandoffUiTest {
                 caller.startActivity(Intent(caller, caller.javaClass).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
             }
             compose.waitUntil(20_000) { caller.hasWindowFocus() }
-            compose.onNodeWithText("Create or link assignment study").assertExists()
+            compose.onNodeWithText("Open fstudy").assertExists()
         }
         returnToScholix()
-        compose.onNodeWithText("Open ${first.title}").performClick()
+        compose.onNodeWithText("Open fstudy").performClick()
+        compose.onNodeWithText("This device").performClick()
         compose.waitUntil(20_000) {
             val root = instrumentation.uiAutomation.rootInActiveWindow
             findNativeText(root, assignment.title) != null && findNativeText(root, "No questions yet") != null
         }
         assertEquals(first.studyId, catalog.entries().single { it.assignmentKey == assignment.key }.studyId)
         returnToScholix()
-        compose.onNodeWithText("Create or link assignment study").performClick()
-        clickNativeText("Cancel")
-        compose.onNodeWithText("Create or link assignment study").assertExists()
+        compose.onNodeWithText("Open fstudy").performClick()
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithText("Open fstudy").assertExists()
         assertEquals(first.studyId, catalog.entries().single { it.assignmentKey == assignment.key }.studyId)
     }
 }

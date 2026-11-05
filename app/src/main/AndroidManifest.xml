@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
     <queries>
+        <package android:name="com.seamless" />
         <intent><action android:name="com.feldman.documents.action.STUDY" /></intent>
     </queries>
 

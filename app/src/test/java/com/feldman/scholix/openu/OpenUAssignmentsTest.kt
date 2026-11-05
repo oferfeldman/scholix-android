@@ -66,6 +66,15 @@ class OpenUAssignmentsTest {
         assertEquals(detail, OpenUAssignmentDetail.from(detail.json()))
     }
 
+    @Test fun findsAssignmentFilesInsideInstructions() {
+        val detail = OpenUAssignmentParser.detail("""<body class="course-54812"><main id="region-main">
+            <div id="ouilassign_view_section_guide"><a href="/pluginfile.php/12/instructions.pdf">Instructions.pdf</a></div>
+            <div class="quizintro"><a href="/pluginfile.php/13/questions.pdf">Questions.pdf</a></div>
+            </main></body>""", item())
+        assertEquals(listOf("Instructions.pdf", "Questions.pdf"), detail.files.map { it.name })
+        assertTrue(detail.files.all { it.group == "Original files" })
+    }
+
     @Test(expected = IOException::class) fun rejectsActivityFromDifferentCourse() {
         OpenUAssignmentParser.detail("<body class=course-99><main id=region-main></main></body>", item())
     }

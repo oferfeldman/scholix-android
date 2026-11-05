@@ -103,6 +103,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":seamless-link"))
     constraints {
         // Keep app/test runtime constraints aligned with AndroidX Test 1.3 / Espresso 3.7.
         implementation("androidx.concurrent:concurrent-futures:1.2.0")
