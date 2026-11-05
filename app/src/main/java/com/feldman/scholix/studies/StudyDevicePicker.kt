@@ -51,7 +51,7 @@ internal fun StudyDevicePicker(payload: String, localPackage: String?, onLocal: 
         }
     }
     val access = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (it.resultCode == Activity.RESULT_OK) load()
+        if (it.resultCode == Activity.RESULT_OK) link.request("watch")
     }
     DisposableEffect(link) {
         if (!link.connect()) { loading = false; error = "Install or connect Seamless to open on another device." }
