@@ -54,6 +54,7 @@ sealed class AppDest : MotionDest {
     data object Home : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Home"
         @IgnoredOnParcel @Transient override val pane = MotionPaneType.LIST
+        @IgnoredOnParcel @Transient override val showNavigation = false
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_home
         @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_home
         @Composable

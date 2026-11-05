@@ -208,7 +208,7 @@ fun Platform.providerLabel(): String {
 }
 
 /** Only show a supporting label when the user deliberately gave this account a custom name. */
-private fun Platform.providerDescription(): String {
+internal fun Platform.providerDescription(): String {
     val canonical = providerLabel()
     val name = getName().trim()
     if (name.isBlank() || name == canonical) return ""
