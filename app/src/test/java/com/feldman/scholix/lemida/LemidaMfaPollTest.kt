@@ -14,8 +14,10 @@ class LemidaMfaPollTest {
         val calls = mutableListOf<Pair<String, (String?) -> Unit>>()
         val timeouts = mutableListOf<() -> Unit>()
         val statuses = mutableListOf<String>()
+        var smsAllowed = true
         val poll = LemidaMfaPoll(mfa, { time }, { true }, { document }, { receptionReady },
-            { script, callback -> calls += script to callback }, { timeouts += it }, { statuses += it })
+            { script, callback -> calls += script to callback }, { timeouts += it }, { statuses += it },
+            requestSms = { smsAllowed })
 
         fun buffer(code: String = "123456") {
             mfa.prepareSms(time)
@@ -24,6 +26,20 @@ class LemidaMfaPollTest {
         }
         fun answer(index: Int, value: String) = calls[index].second(value)
         fun selected(index: Int, value: String) = answer(index, JSONObject.quote(value))
+    }
+
+    @Test fun aRecentlyRequestedSmsIsNotResentButTheUserIsToldWhatToDo() {
+        val f = Fixture()
+        f.smsAllowed = false
+        f.poll.poll()
+        f.selected(0, "sms")
+        assertFalse("no automatic second SMS", f.mfa.smsSelected)
+        assertEquals("nothing is clicked", 1, f.calls.size)
+        assertTrue(f.statuses.single(), f.statuses.single().contains("Tap"))
+        // When the user taps Text, the code field appears and is still filled automatically.
+        f.poll.poll()
+        f.selected(1, "otp")
+        assertTrue(f.mfa.smsSelected)
     }
 
     @Test fun lostPickerCallbackRecoversWithoutAcceptingItsLateResult() {

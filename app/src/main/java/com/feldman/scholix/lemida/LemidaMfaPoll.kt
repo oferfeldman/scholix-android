@@ -36,7 +36,14 @@ internal class LemidaMfaPoll(
                     }
                 }
                 "sms" -> {
-                    if (!prepareReception() || mfa.smsSelected || !requestSms() || !mfa.prepareSms(now())) { finish(); return@selected }
+                    if (!prepareReception() || mfa.smsSelected) { finish(); return@selected }
+                    // A code was requested minutes ago (an earlier attempt). Never send another one
+                    // automatically, but say so: a silent refusal looked like a stuck sign-in.
+                    if (!requestSms()) {
+                        status("A verification text was already sent a few minutes ago. Tap \"Text\" to send another; Scholix fills in the code.")
+                        finish(); return@selected
+                    }
+                    if (!mfa.prepareSms(now())) { finish(); return@selected }
                     status("SMS requested. Waiting for the Microsoft verification code…")
                     evaluate(LemidaSms.chooseScript("sms")) {
                         if (current()) {
