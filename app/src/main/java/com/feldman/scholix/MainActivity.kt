@@ -620,9 +620,13 @@ fun MainScreen(
 
     val navigationOrder by remember(context) { context.navigationOrderFlow() }
         .collectAsState(initial = defaultNavigationOrder)
-    val globalNavigationPages = remember(destinations, navigationOrder, hasCourseProviders) {
+    // Lockerim is a service of its own; without an account its page has nothing to show, and its
+    // lock sat in the bar next to Locker's, reading as the same page twice.
+    val hasLockerim = platforms.any { it is com.feldman.scholix.api.platforms.LockerimPlatform }
+    val globalNavigationPages = remember(destinations, navigationOrder, hasCourseProviders, hasLockerim) {
         destinations.filter { it.parent == null && it !is ProviderGrades && it.label in navigationOrder &&
-            (it != AppDest.Home || hasCourseProviders) }.sortedBy { navigationOrder.indexOf(it.label) }
+            (it != AppDest.Home || hasCourseProviders) && (it != AppDest.Lockerim || hasLockerim) }
+            .sortedBy { navigationOrder.indexOf(it.label) }
     }
 
     val startDestination = rememberSaveable {
@@ -777,7 +781,9 @@ fun MainScreen(
                     snackbarHost = snackbarHost,
                     navigationDestinations = navigationPages,
                     selectedDestination = selectedNavbarDest,
-                    pinnedEndDestination = if (courseScope == null) AppDest.Settings else AppDest.Home,
+                    // Outside a course the bar's few slots go to the pages, in the user's order;
+                    // Settings is on Home's top bar, so pinning it cost Assignments or Messages a slot.
+                    pinnedEndDestination = if (courseScope == null) null else AppDest.Home,
                     replacePinnedEndWhenFull = true,
                     onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = dest.parent == null) },
                     contrastBlurEnabled = navigationBlurred,
