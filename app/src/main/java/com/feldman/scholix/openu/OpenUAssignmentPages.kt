@@ -154,7 +154,7 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
     val provider = remember(providerId) { PlatformStorage.loadPlatforms(context).filterIsInstance<OpenAUPlatform>().firstOrNull { it.id == providerId } }
     val repo = remember(provider) { provider?.let { OpenUAssignmentsRepository(context, it) } }
     var item by remember(repo, assignmentKey) { mutableStateOf(repo?.cachedAssignments()?.firstOrNull { it.key == assignmentKey }) }
-    var data by remember(item) { mutableStateOf(item?.let { repo?.cachedDetail(it) }) }
+    var data by remember(repo, assignmentKey) { mutableStateOf(item?.let { repo?.cachedDetail(it) }) }
     var drafts by remember(repo, assignmentKey) { mutableStateOf(item?.let { repo?.cachedDrafts(it) }.orEmpty()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }

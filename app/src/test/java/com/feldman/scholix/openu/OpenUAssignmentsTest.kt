@@ -75,6 +75,19 @@ class OpenUAssignmentsTest {
         assertTrue(detail.files.all { it.group == "Original files" })
     }
 
+    @Test fun findsTheLiveLinearAlgebraQuestionFile() {
+        val assignment = item().copy(courseId = "20109", semester = "2027a", moodleId = "55366",
+            number = "01", cmid = "7051294")
+        val url = "https://opal.openu.ac.il/pluginfile.php/8961328/ouilassigntype_file/assignfile/5375/matala%2001-%202027a-20109.pdf"
+        val detail = OpenUAssignmentParser.detail("""<body class="course-55366"><main id="region-main">
+            <div id="ouilassign_view_section_assignment" class="ouilassign_view_section">
+                <div class="ouilassign_section_content"><div class="ouilassign_assignfile_item_link">
+                    <img class="icon" alt="PDF"><a target="_blank" href="$url">matala 01- 2027a-20109.pdf</a>
+                </div></div>
+            </div></main></body>""", assignment)
+        assertEquals(OpenUAssignmentFile("matala 01- 2027a-20109.pdf", url, "Original files"), detail.files.single())
+    }
+
     @Test fun discoversEmbeddedAssignmentDocumentsAndSubmissionLinksWithoutTheOldWrapper() {
         val detail = OpenUAssignmentParser.detail("""<body class="course-54812"><main id="region-main">
             <div id="ouilassign_view_section_assignment">
