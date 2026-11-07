@@ -130,7 +130,7 @@ internal object OpenUAssignmentParser {
         fun files(selector: String, group: String) = root.select(selector)
             .select("a[href]:not([aria-hidden=true]), iframe[src], object[data], embed[src]").mapNotNull { element ->
             val attribute = when (element.tagName()) { "a" -> "href"; "object" -> "data"; else -> "src" }
-            val url = element.absUrl(attribute)
+            val url = element.absUrl(attribute).replace(" ", "%20")
             if (!fileUrl(url)) return@mapNotNull null
             val name = element.text().ifBlank { element.attr("title") }
                 .ifBlank { URI(url).path.substringAfterLast('/') }.ifBlank { "Attachment" }

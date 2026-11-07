@@ -82,7 +82,7 @@ class OpenUAssignmentsTest {
         val detail = OpenUAssignmentParser.detail("""<body class="course-55366"><main id="region-main">
             <div id="ouilassign_view_section_assignment" class="ouilassign_view_section">
                 <div class="ouilassign_section_content"><div class="ouilassign_assignfile_item_link">
-                    <img class="icon" alt="PDF"><a target="_blank" href="$url">matala 01- 2027a-20109.pdf</a>
+                    <img class="icon" alt="PDF"><a target="_blank" href="${url.replace("%20", " ")}">matala 01- 2027a-20109.pdf</a>
                 </div></div>
             </div></main></body>""", assignment)
         assertEquals(OpenUAssignmentFile("matala 01- 2027a-20109.pdf", url, "Original files"), detail.files.single())
