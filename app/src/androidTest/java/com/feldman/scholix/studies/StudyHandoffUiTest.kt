@@ -7,6 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
 import com.feldman.motion.MotionTheme
@@ -30,6 +31,22 @@ class StudyHandoffUiTest {
         compose.onNodeWithText("This device").assertDoesNotExist()
         compose.onNodeWithText("Cancel").performClick()
         assertTrue(dismissed)
+    }
+
+    @Test fun explicitConnectCanRequestSeamlessApprovalAgainAfterDenial() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue(context.packageName.endsWith(".seamlessapproval.qa"))
+        compose.setContent {
+            MotionTheme { StudyDevicePicker(DocumentsStudyContract.request(null), "com.example.notinstalled",
+                onLocal = {}, onSent = {}, onDismiss = {}) }
+        }
+        repeat(2) {
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("Connect Seamless").fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("Connect Seamless").performClick()
+            clickNativeText("Don't allow")
+        }
     }
 
     private fun findNativeText(node: AccessibilityNodeInfo?, text: String): AccessibilityNodeInfo? {
