@@ -127,9 +127,14 @@ internal object OpenUAssignmentParser {
                 if (label.isBlank() || value.isBlank()) null else label to value
             }
         }
-        fun files(selector: String, group: String) = root.select(selector).mapNotNull { a ->
-            val url = a.absUrl("href")
-            if (fileUrl(url)) OpenUAssignmentFile(a.text().ifBlank { "Attachment" }, url, group) else null
+        fun files(selector: String, group: String) = root.select(selector)
+            .select("a[href]:not([aria-hidden=true]), iframe[src], object[data], embed[src]").mapNotNull { element ->
+            val attribute = when (element.tagName()) { "a" -> "href"; "object" -> "data"; else -> "src" }
+            val url = element.absUrl(attribute)
+            if (!fileUrl(url)) return@mapNotNull null
+            val name = element.text().ifBlank { element.attr("title") }
+                .ifBlank { URI(url).path.substringAfterLast('/') }.ifBlank { "Attachment" }
+            OpenUAssignmentFile(name, url, group)
         }.distinctBy { it.url }
         val quizFields = if (item.module == "quiz") root.select("table.generaltable tr, .quizinfo tr").mapNotNull { row ->
             val cells = row.select("th,td")
@@ -138,9 +143,9 @@ internal object OpenUAssignmentParser {
         return OpenUAssignmentDetail(fields("#ouilassign_view_section_details [index-item]", ".ouilassign_inner_title"),
             fields("#ouilassign_view_submission_content .ouilassign_submission_info_row", ".ouilassign_section_row_title") + quizFields,
             root.select("#ouilassign_view_section_guide .ouilassign_section_content, #intro, .quizintro").joinToString("\n\n") { it.wholeText().trim() },
-            files("#ouilassign_view_section_assignment a[href], #ouilassign_view_section_guide a[href], #intro a[href], .quizintro a[href]", "Original files") +
-                files("#ouilassign_view_submission_content .ouilassign_section_row_file_item a[href]:not([aria-hidden=true])", "Submitted files") +
-                files("[id^=ouilassigntype_file_feedbacks_list] a[href], .ouilassign_view_section_feedback a[href]", "Checked files"),
+            files("#ouilassign_view_section_assignment, #ouilassign_view_section_guide, #intro, .quizintro", "Original files") +
+                files("#ouilassign_view_submission_content", "Submitted files") +
+                files("[id^=ouilassigntype_file_feedbacks_list], .ouilassign_view_section_feedback", "Checked files"),
             root.select(".alert, .notifyproblem").map(Element::text).filter(String::isNotBlank))
     }
 }

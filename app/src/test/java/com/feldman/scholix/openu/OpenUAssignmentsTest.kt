@@ -75,6 +75,25 @@ class OpenUAssignmentsTest {
         assertTrue(detail.files.all { it.group == "Original files" })
     }
 
+    @Test fun discoversEmbeddedAssignmentDocumentsAndSubmissionLinksWithoutTheOldWrapper() {
+        val detail = OpenUAssignmentParser.detail("""<body class="course-54812"><main id="region-main">
+            <div id="ouilassign_view_section_assignment">
+                <iframe src="/pluginfile.php/12/questions.pdf" title="Question sheet"></iframe>
+                <a href="/pluginfile.php/12/questions.pdf">Question sheet</a>
+                <object data="/pluginfile.php/12/appendix.pdf" type="application/pdf"></object>
+                <iframe src="https://example.test/other.pdf"></iframe>
+            </div>
+            <div id="ouilassign_view_submission_content">
+                <a aria-hidden="true" href="/pluginfile.php/13/answer.pdf">Icon</a>
+                <a href="/pluginfile.php/13/answer.pdf">Submitted answer</a>
+            </div>
+            <div class="ouilassign_view_section_feedback">
+                <embed src="/pluginfile.php/14/checked.pdf" type="application/pdf">
+            </div></main></body>""", item())
+        assertEquals(listOf("Question sheet", "appendix.pdf", "Submitted answer", "checked.pdf"), detail.files.map { it.name })
+        assertEquals(listOf("Original files", "Original files", "Submitted files", "Checked files"), detail.files.map { it.group })
+    }
+
     @Test(expected = IOException::class) fun rejectsActivityFromDifferentCourse() {
         OpenUAssignmentParser.detail("<body class=course-99><main id=region-main></main></body>", item())
     }
