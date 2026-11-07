@@ -1,5 +1,6 @@
 package com.feldman.scholix.lockerim
 
+import com.feldman.scholix.sms.ForwardedSmsEffect
 import android.Manifest
 import android.app.Activity
 import android.content.BroadcastReceiver
@@ -75,6 +76,10 @@ internal fun rememberLockerimSmsAutofill(enabled: Boolean, onCode: (String) -> U
             context.unregisterReceiver(directReceiver)
             context.unregisterReceiver(consentReceiver)
         }
+    }
+    // A Lockerim text forwarded from the user's phone by Seamless passes the same sender check.
+    ForwardedSmsEffect(if (active) requestedAt else 0L) { sms ->
+        if (listening()) lockerimSmsCode(sms.body, sms.sender)?.let(fillCode)
     }
     return {
         requestedAt = 0L

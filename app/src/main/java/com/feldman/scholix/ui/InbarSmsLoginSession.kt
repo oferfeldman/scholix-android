@@ -1,5 +1,7 @@
 package com.feldman.scholix.ui
 
+import android.content.pm.PackageManager
+import com.feldman.scholix.sms.ForwardedSmsWatcher
 import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -66,6 +68,11 @@ internal class InbarSmsLoginSession {
         val senderPermission = if (useDirect) Manifest.permission.BROADCAST_SMS else SmsRetriever.SEND_PERMISSION
         ContextCompat.registerReceiver(appContext, receiver, IntentFilter(action), senderPermission,
             null, ContextCompat.RECEIVER_EXPORTED)
+        // An Inbar text forwarded from the user's phone by Seamless passes the same sender check.
+        val forwarded = ForwardedSmsWatcher(appContext) { sms ->
+            if (requestedAt != 0L && SystemClock.elapsedRealtime() - requestedAt <= timeoutMs)
+                inbarAutomaticSmsCode(sms.body, sms.sender)?.let { codes.trySend(it) }
+        }
         try {
             if (!useDirect) {
                 val started = withTimeoutOrNull(5_000) {
@@ -75,9 +82,13 @@ internal class InbarSmsLoginSession {
                             .addOnFailureListener { if (continuation.isActive) continuation.resume(false) }
                     }
                 } == true
-                if (!started) throw IOException("SMS verification is unavailable. Please allow SMS access and try again.")
+                // A device that can't receive texts (a Wi-Fi tablet) can still get the code forwarded
+                // from the user's phone by Seamless; anywhere else, missing consent is an error.
+                if (!started && appContext.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY))
+                    throw IOException("SMS verification is unavailable. Please allow SMS access and try again.")
             }
             requestedAt = SystemClock.elapsedRealtime()
+            forwarded.start(requestedAt)
             withContext(Dispatchers.IO) {
                 Log.d("InbarLogin", "Requesting SMS")
                 account.requestSms(account.getUsername(), account.mobile) {
@@ -104,6 +115,7 @@ internal class InbarSmsLoginSession {
             Log.d("InbarLogin", "Sign-in verified and saved")
             account
         } finally {
+            forwarded.stop()
             appContext.unregisterReceiver(receiver)
             consentIntent.value = null
             codes.cancel()

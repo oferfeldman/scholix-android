@@ -1,5 +1,7 @@
 package com.feldman.scholix.ui
 
+import androidx.compose.runtime.mutableLongStateOf
+import com.feldman.scholix.sms.ForwardedSmsEffect
 import android.Manifest
 import android.app.Activity
 import android.content.BroadcastReceiver
@@ -77,6 +79,7 @@ fun HiddenMashovSmsLogin(
     val permission = remember(account.id) { CompletableDeferred<Boolean>() }
     val listening = remember(account.id) { AtomicBoolean(false) }
     val requestedAt = remember(account.id) { AtomicLong(0L) }
+    var forwardedSince by remember(account.id) { mutableLongStateOf(0L) }
     var waitingForCode by remember(account.id) { mutableStateOf(false) }
     var manualCode by remember(account.id) { mutableStateOf(false) }
     var code by remember(account.id) { mutableStateOf("") }
@@ -175,6 +178,13 @@ fun HiddenMashovSmsLogin(
         }
     }
 
+    // A Mashov text forwarded from the user's phone by Seamless passes the same sender check.
+    ForwardedSmsEffect(forwardedSince) { sms ->
+        val started = requestedAt.get()
+        if (listening.get() && started != 0L && SystemClock.elapsedRealtime() - started <= timeoutMs)
+            mashovSmsCode(sms.body, sms.sender)?.let(codes::trySend)
+    }
+
     LaunchedEffect(account.id, account.getUsername(), account.mobile) {
         try {
             mashovSmsLoginMutex.withLock {
@@ -211,6 +221,7 @@ fun HiddenMashovSmsLogin(
 
                 listening.set(true)
                 requestedAt.set(SystemClock.elapsedRealtime())
+                forwardedSince = requestedAt.get()
                 updateStatus(requestingCode)
                 try {
                     withContext(Dispatchers.IO) { account.requestSms() }
