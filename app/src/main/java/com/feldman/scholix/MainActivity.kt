@@ -625,20 +625,20 @@ fun MainScreen(
     val hasLockerim = platforms.any { it is com.feldman.scholix.api.platforms.LockerimPlatform }
     val globalNavigationPages = remember(destinations, navigationOrder, hasCourseProviders, hasLockerim) {
         destinations.filter { it.parent == null && it !is ProviderGrades && it.label in navigationOrder &&
-            (it != AppDest.Home || hasCourseProviders) && (it != AppDest.Lockerim || hasLockerim) }
+            it != AppDest.Home && (it != AppDest.Lockerim || hasLockerim) }
             .sortedBy { navigationOrder.indexOf(it.label) }
     }
 
+    val mainDestination = if (hasGrades) AppDest.Grades else if (hasCourseProviders) AppDest.Homework else AppDest.Tiktek
     val startDestination = rememberSaveable {
         val activity = context as? android.app.Activity
         if (activity?.intent?.getBooleanExtra("open_crash_logs", false) == true) AppDest.CrashLogs
         else if (activity?.intent?.getBooleanExtra("open_messages", false) == true) AppDest.Messages
         else if (activity?.intent?.getBooleanExtra("open_homework", false) == true) {
-            if (requestedAssignment != null) AppDest.Home else AppDest.Homework
+            if (requestedAssignment != null) mainDestination else AppDest.Homework
         }
         else if (activity?.intent?.getBooleanExtra("open_schedule", false) == true && hasSchedule) AppDest.Schedule
-        else if (hasCourseProviders) AppDest.Home
-        else if (hasGrades) AppDest.Grades else AppDest.Tiktek
+        else mainDestination
     }
 
     val backStack = rememberMotionDestBackStack(startDestination)
@@ -650,13 +650,13 @@ fun MainScreen(
         }
         if (destination is CourseSection) {
             // Close the old course item before replacing the section; identities live in routes.
-            backStack.navigateTop(AppDest.Home)
+            backStack.navigateTop(mainDestination)
             while (backStack.backStack.lastOrNull()?.courseScope() != null &&
                 backStack.backStack.lastOrNull() !is CourseSection) backStack.pop()
             backStack.navigateTo(destination)
         } else if (topLevel) {
             backStack.navigateTop(destination)
-            if (destination == AppDest.Home || destination == AppDest.Grades) {
+            if (destination == mainDestination || destination == AppDest.Grades) {
                 while (backStack.backStack.lastOrNull() != destination) {
                     if (!backStack.pop()) break
                 }
@@ -683,13 +683,13 @@ fun MainScreen(
     }
     val currentScreen = backStack.backStack.lastOrNull() ?: startDestination
     LaunchedEffect(currentScreen) {
-        if (currentScreen == AppDest.Home) courseCacheEpoch++
+        if (currentScreen == mainDestination) courseCacheEpoch++
     }
     val courseScope = currentScreen.courseScope()
     val scopeCourse = courseScope?.let { scope -> courseCatalog.singleOrNull { scope.matches(it) } }
     val navigationPages = if (courseScope != null && scopeCourse != null) {
         courseSections(platforms.firstOrNull { it.id == courseScope.providerId }, scopeCourse)
-            .map { courseScope.copy(section = it) } + AppDest.Home
+            .map { courseScope.copy(section = it) } + mainDestination
     } else globalNavigationPages
     val activeNavigationPage = if (generateSequence<MotionDest>(currentScreen) { it.parent }.any { it is ProviderGrades })
         AppDest.Grades else backStack.backStack.asReversed().firstNotNullOfOrNull { screen ->
@@ -744,9 +744,9 @@ fun MainScreen(
             onScopeSelected = { destination -> navigateFromUser(destination,
                 topLevel = destination.parent == null) },
             onCourseResumed = { course ->
-                backStack.navigateTop(AppDest.Home)
+                backStack.navigateTop(mainDestination)
                 if (backStack.backStack.lastOrNull()?.courseScope()?.sameCourse(course) != true) {
-                    while (backStack.backStack.lastOrNull() != AppDest.Home) { if (!backStack.pop()) break }
+                    while (backStack.backStack.lastOrNull() != mainDestination) { if (!backStack.pop()) break }
                     backStack.navigateTo(courseLocations.firstOrNull { it.courseScope()?.sameCourse(course) == true } ?: course)
                 }
             },
@@ -756,9 +756,8 @@ fun MainScreen(
         listOf(scopeCourse.optString("name"), provider, courseScope?.term.orEmpty())
             .filter { it.isNotBlank() }.joinToString(" \u00b7 ")
     } else null
-    val scopeControl = if (courseScope != null || currentScreen == AppDest.Home ||
-        currentScreen == AppDest.Grades || currentScreen is ProviderGrades) ScopeControl(scopeLabel) {
-        backStack.navigateTo(ScopeSwitcher(currentScreen as? AppDest ?: AppDest.Home))
+    val scopeControl = if (courseScope != null || currentScreen == AppDest.Grades || currentScreen is ProviderGrades) ScopeControl(scopeLabel) {
+        backStack.navigateTo(ScopeSwitcher(currentScreen as? AppDest ?: mainDestination))
     } else null
 
     CompositionLocalProvider(LocalAppState provides appState, LocalScopeControl provides scopeControl,
@@ -782,8 +781,8 @@ fun MainScreen(
                     navigationDestinations = navigationPages,
                     selectedDestination = selectedNavbarDest,
                     // Outside a course the bar's few slots go to the pages, in the user's order;
-                    // Settings is on Home's top bar, so pinning it cost Assignments or Messages a slot.
-                    pinnedEndDestination = if (courseScope == null) null else AppDest.Home,
+                    // Course navigation returns to the original main page.
+                    pinnedEndDestination = if (courseScope == null) null else mainDestination,
                     replacePinnedEndWhenFull = true,
                     onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = dest.parent == null) },
                     contrastBlurEnabled = navigationBlurred,

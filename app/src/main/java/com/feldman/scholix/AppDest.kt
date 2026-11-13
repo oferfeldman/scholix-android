@@ -61,7 +61,9 @@ sealed class AppDest : MotionDest {
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
                              onFabAction: ((() -> Unit) -> Unit) -> Unit) {
-            com.feldman.scholix.pages.HomePage(onNavigate)
+            // Saved Home routes open the original main page.
+            val destination = if (LocalAppState.current.platforms.any { it.suportsGrades }) Grades else Homework
+            destination.Content(onNavigate, onBack, searchQuery, onFabAction)
         }
     }
 

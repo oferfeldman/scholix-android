@@ -33,7 +33,7 @@ fun PlatformSwitcherButton(modifier: Modifier = Modifier) {
 
 @Serializable
 @Parcelize
-data class ScopeSwitcher(val origin: AppDest = AppDest.Home) : AppDest() {
+data class ScopeSwitcher(val origin: AppDest = AppDest.Grades) : AppDest() {
     @IgnoredOnParcel @Transient override val label = "All platforms"
     @IgnoredOnParcel @Transient override val parent: MotionDest = origin
     @IgnoredOnParcel @Transient override val pane = MotionPaneType.BOTTOM_SHEET
@@ -60,7 +60,6 @@ data class ScopeSwitcher(val origin: AppDest = AppDest.Home) : AppDest() {
             }
             Title("All Scholix")
             Section {
-                PageItem(title = "Home", onClick = { open(AppDest.Home) })
                 if (state.platforms.any { it.suportsGrades }) {
                     PageItem(title = "All grades", onClick = { open(AppDest.Grades) })
                 }
