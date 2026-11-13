@@ -34,7 +34,7 @@ import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LockerimPage(searchQuery: String = "", onConnect: () -> Unit) {
+fun LockerimPage(searchQuery: String = "", onBack: (() -> Unit)? = null, onConnect: () -> Unit) {
     val context = LocalContext.current
     val webLinks = androidx.compose.ui.platform.LocalUriHandler.current
     val state = LocalAppState.current
@@ -117,7 +117,9 @@ fun LockerimPage(searchQuery: String = "", onConnect: () -> Unit) {
     MotionScaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            CenterAlignedTopAppBar(title = { Text("לוקרים") }, actions = {
+            CenterAlignedTopAppBar(title = { Text("לוקרים") }, navigationIcon = {
+                if (onBack != null) com.feldman.motion.MotionBackButton(onClick = onBack)
+            }, actions = {
                 if (account != null) IconButton(enabled = !busy, onClick = { scope.launch { refresh(account) } }) {
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh lockers")
                 }

@@ -53,7 +53,7 @@ fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNa
     val context = LocalContext.current
     val repo = remember(context) { LemidaRepository(context) }
     val app = LocalAppState.current
-    val providers = app.platforms.filter { it is GoogleClassroomPlatform || it is OpenAUPlatform }
+    val providers = (if (courseProviderId == null) app.scopedPlatforms else app.platforms).filter { it is GoogleClassroomPlatform || it is OpenAUPlatform }
     val snapshot by repo.snapshots.collectAsStateWithLifecycle(initialValue = LemidaSnapshot())
     if (courseProviderId != null) {
         if (courseProviderId.startsWith("lemida:")) {
@@ -76,7 +76,7 @@ fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNa
         return
     }
     val refreshedCourses = remember { mutableStateMapOf<String, List<JSONObject>>() }
-    val cachedCourses = remember(app.preloadedCourses, app.platforms) {
+    val cachedCourses = remember(app.preloadedCourses, app.platforms, app.selectedProviderId) {
         providers.associate { provider ->
             val saved = if (provider is OpenAUPlatform) OpenUAssignmentsRepository(context, provider).cachedCourses()
                 else (provider as GoogleClassroomPlatform).coursesList.toList()
@@ -89,11 +89,12 @@ fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNa
                 .put("courseKey", course.optString("courseKey").ifBlank { course.optString("id") })
         }.ifEmpty { listOf(JSONObject().put("platformId", provider.id).put("courseKey", "")
             .put("name", provider.getName()).put("status", "Refresh to load courses")) }
-    } + snapshot.courses.map { course ->
+    } + (if (app.selectedProviderId.isBlank() || app.selectedProviderId == "lemida") snapshot.courses.map { course ->
         JSONObject().put("platformId", "lemida").put("platformName", "Lemida")
             .put("courseKey", course.id.toString()).put("name", course.name)
     }.ifEmpty { listOf(JSONObject().put("platformId", "lemida").put("courseKey", "")
-        .put("name", "Lemida").put("status", "Sign in to load courses")) }
+        .put("name", "Lemida").put("status", "Sign in to load courses")) } else emptyList())
+    if (courses.isEmpty()) return
     var selectedKey by rememberSaveable { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     val selectedIndex = courses.indexOfFirst { "${it.optString("platformId")}|${it.optString("courseKey")}" == selectedKey }.coerceAtLeast(0)
@@ -197,8 +198,11 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         (typeFilter == "all" || LemidaActivities.group(it.type) == typeFilter) &&
         (!filesOnly || repo.cachedDetail(it)?.pdfs?.isNotEmpty() == true) &&
         it.matchesSearch(query, searchQuery) } }
-    MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = {
-        SettingsTopBar(if (filesOnly) "Files" else "Assignments", onBack, actions = {
+    MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = { if (filesOnly) SettingsTopBar("Files", onBack) }) {
+        if (!filesOnly && onBack != null) Item { com.feldman.motion.MotionBackButton(onClick = onBack) }
+        if (coursePicker != null) Item { coursePicker() }
+        Item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             IconButton(onClick = { LemidaSyncWorker.refresh(context, manual = true) }, enabled = updated > 0L && !syncing && !needsLogin) {
                 if (syncing) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Default.Refresh, "Refresh")
@@ -237,9 +241,8 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                     })
                 })
             }
-        })
-    }) {
-        if (coursePicker != null) Item { coursePicker() }
+            }
+        }
         if (filesOnly) Item {
             Column(Modifier.padding(12.dp)) {
                 Text("Saved PDF attachments from assignments. Open an assignment and refresh its details to find its files.")

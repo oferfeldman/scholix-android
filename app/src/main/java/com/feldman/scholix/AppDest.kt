@@ -62,7 +62,7 @@ sealed class AppDest : MotionDest {
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
                              onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             // Saved Home routes open the original main page.
-            val destination = if (LocalAppState.current.platforms.any { it.suportsGrades }) Grades else Homework
+            val destination = if (LocalAppState.current.scopedPlatforms.any { it.suportsGrades }) Grades else Homework
             destination.Content(onNavigate, onBack, searchQuery, onFabAction)
         }
     }
@@ -84,6 +84,8 @@ sealed class AppDest : MotionDest {
     @Serializable
     @Parcelize
     data object Lockerim : AppDest() {
+        @IgnoredOnParcel @Transient override val parent: MotionDest = Locker
+        @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
         @IgnoredOnParcel @Transient override val label = "לוקרים"
         @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Inventory2
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_lock
@@ -91,7 +93,7 @@ sealed class AppDest : MotionDest {
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
                              onFabAction: ((() -> Unit) -> Unit) -> Unit) {
-            com.feldman.scholix.lockerim.LockerimPage(searchQuery, onConnect = { onNavigate(AddPlatform) })
+            com.feldman.scholix.lockerim.LockerimPage(searchQuery, onBack = onBack, onConnect = { onNavigate(AddPlatform) })
         }
     }
 
@@ -251,13 +253,16 @@ sealed class AppDest : MotionDest {
             onFabAction: ((() -> Unit) -> Unit) -> Unit
         ) {
             val state = LocalAppState.current
+            key(state.selectedProviderId) {
             GradesScreen(
+                focusedProviderId = state.selectedProviderId.takeIf { it.isNotBlank() },
                 preloadedCourses = state.preloadedCourses,
                 modifier = Modifier.fillMaxSize(),
                 inbarAccessRequested = Grades in state.userOpenedPages,
                 isActive = state.activePage == Grades,
                 onOpenCourse = { state.onScopeSelected(it) }
             )
+            }
         }
     }
 
@@ -283,7 +288,7 @@ sealed class AppDest : MotionDest {
             onFabAction: ((() -> Unit) -> Unit) -> Unit
         ) {
             SchedulePage(
-                platforms = LocalAppState.current.platforms,
+                platforms = LocalAppState.current.scopedPlatforms,
                 modifier = Modifier.fillMaxSize(),
                 inbarAccessRequested = Schedule in LocalAppState.current.userOpenedPages,
                 isActive = LocalAppState.current.activePage == Schedule
@@ -452,6 +457,7 @@ sealed class AppDest : MotionDest {
     @Serializable
     @Parcelize
     data object Locker : AppDest() {
+        @IgnoredOnParcel @Transient override val pane = MotionPaneType.LIST
         @IgnoredOnParcel
         @Transient
         override val label = "Locker"
@@ -473,15 +479,39 @@ sealed class AppDest : MotionDest {
             searchQuery: String,
             onFabAction: ((() -> Unit) -> Unit) -> Unit
         ) {
+            com.feldman.scholix.lockerim.LockerCodesPage(onNavigate)
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data object LockerContents : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Contents"
+        @IgnoredOnParcel @Transient override val parent: MotionDest = Locker
+        @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
             val state = LocalAppState.current
             val vm = state.lockerViewModel ?: androidx.lifecycle.viewmodel.compose.viewModel(
-                factory = com.feldman.scholix.pages.LockerViewModelFactory(state.repository)
-            )
-            LockerApp(
-                modifier = Modifier.fillMaxSize(),
-                viewModel = vm,
-                platforms = state.platforms
-            )
+                factory = com.feldman.scholix.pages.LockerViewModelFactory(state.repository))
+            androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+                com.feldman.scholix.ui.components.SettingsTopBar("Contents", onBack)
+                LockerApp(Modifier.weight(1f), vm, state.platforms, includeTopInset = false)
+            }
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data class LockerCodeEditor(val id: String = "") : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Locker code"
+        @IgnoredOnParcel @Transient override val parent: MotionDest = Locker
+        @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.lockerim.LockerCodeEditorPage(id, onBack)
         }
     }
 

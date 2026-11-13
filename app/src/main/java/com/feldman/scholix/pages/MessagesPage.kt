@@ -355,7 +355,7 @@ private fun MessageCard(
 fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
     val state = LocalAppState.current
     val vm = requireNotNull(state.messagesViewModel)
-    val providers = state.platforms.filter { it is WebtopPlatform || it is com.feldman.scholix.api.platforms.GoogleClassroomPlatform }
+    val providers = state.scopedPlatforms.filter { it is WebtopPlatform || it is com.feldman.scholix.api.platforms.GoogleClassroomPlatform }
     val classroom = vm.classroom()
     val selecting = vm.selecting && classroom == null
     val platform = state.platforms.firstOrNull { it.id == vm.providerId } as? WebtopPlatform

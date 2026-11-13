@@ -326,7 +326,8 @@ fun ManualTabContent(tab: LockerTabEntity, viewModel: LockerViewModel) {
 fun LockerApp(
     modifier: Modifier,
     viewModel: LockerViewModel,
-    platforms: List<Platform>
+    platforms: List<Platform>,
+    includeTopInset: Boolean = true
 ) {
     val items by viewModel.items.collectAsState()
     val customTabs by viewModel.tabs.collectAsState()
@@ -450,7 +451,7 @@ fun LockerApp(
     ) { padding ->
 
         Column(Modifier.fillMaxSize()) {
-            Spacer(Modifier.height(TopBarSpacing()))
+            if (includeTopInset) Spacer(Modifier.height(TopBarSpacing()))
             if (allTabs.isNotEmpty()) {
                 PrimaryScrollableTabRow(
                     selectedTabIndex = selectedTabIndex,

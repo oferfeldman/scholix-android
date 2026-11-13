@@ -20,13 +20,16 @@ class AppState(
     val messagesViewModel: MessagesViewModel? = null,
     val homeworkOpenRequest: Int = 0,
     val userOpenedPages: Set<AppDest> = emptySet(),
+    val selectedProviderId: String = "",
     val activePage: com.feldman.motion.MotionDest? = null,
     val courseCatalog: List<JSONObject> = emptyList(),
     val recentCourses: List<CourseSection> = emptyList(),
     val onScopeSelected: (AppDest) -> Unit = {},
     val onCourseResumed: (CourseSection) -> Unit = {},
     val onCourseCacheChanged: () -> Unit = {},
-)
+) {
+    val scopedPlatforms get() = platforms.filter { selectedProviderId.isBlank() || it.id == selectedProviderId }
+}
 
 val LocalAppState = compositionLocalOf<AppState> {
     error("No AppState provided")

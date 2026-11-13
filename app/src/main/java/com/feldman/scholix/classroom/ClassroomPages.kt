@@ -75,7 +75,8 @@ fun ClassroomHomeworkPage(provider: GoogleClassroomPlatform, searchQuery: String
                 "${item.optString("title")} ${item.optString("description")} ${item.optString("courseName")}".contains(it, ignoreCase = true)
             } }
     }
-    MotionScaffold(topBar = { SettingsTopBar(if (materialsOnly) "Files" else "Assignments", onBack) }) {
+    MotionScaffold(topBar = { if (materialsOnly) SettingsTopBar("Files", onBack) }) {
+        if (!materialsOnly && onBack != null) Item { com.feldman.motion.MotionBackButton(onClick = onBack) }
         if (coursePicker != null) Item { coursePicker() }
         Item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), singleLine = true,

@@ -209,10 +209,12 @@ fun AttendancePage(
     var platformPickerExpanded by remember { mutableStateOf(false) }
     var providersLoaded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    val selectedAccountId = com.feldman.scholix.LocalAppState.current.selectedProviderId
+    LaunchedEffect(selectedAccountId) {
+        selectedPlatformIndex = 0
         attendancePlatforms = withContext(Dispatchers.IO) {
             runCatching {
-                PlatformStorage.loadPlatforms(context).filter { it.supportsAttendance }
+                PlatformStorage.loadPlatforms(context).filter { it.supportsAttendance && (selectedAccountId.isBlank() || it.id == selectedAccountId) }
             }.getOrDefault(emptyList())
         }
         providersLoaded = true

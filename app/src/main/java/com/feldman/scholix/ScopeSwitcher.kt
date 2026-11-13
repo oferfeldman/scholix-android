@@ -66,7 +66,6 @@ data class ScopeSwitcher(val origin: AppDest = AppDest.Grades) : AppDest() {
                 if (state.platforms.any { it.supportsSchedule }) PageItem(title = "Schedule", onClick = { open(AppDest.Schedule) })
                 PageItem(title = "Messages", onClick = { open(AppDest.Messages) })
                 PageItem(title = "All assignments", onClick = { open(AppDest.Homework) })
-                PageItem(title = "Studies", onClick = { open(AppDest.Studies) })
                 PageItem(title = "Settings", onClick = { open(AppDest.Settings) })
             }
             if (state.recentCourses.isNotEmpty()) {

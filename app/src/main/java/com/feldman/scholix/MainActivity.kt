@@ -64,6 +64,9 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -144,10 +147,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.feldman.scholix.ui.components.providerLabel
 import org.json.JSONObject
+
+val LocalProviderHeaderVisible = compositionLocalOf { false }
 
 @Composable
 fun TopBarSpacing(): Dp {
+    if (LocalProviderHeaderVisible.current) return 0.dp
     return WindowInsets.statusBars
         .asPaddingValues()
         .calculateTopPadding()
@@ -573,6 +580,12 @@ fun MainScreen(
                     .put("courseKey", course.id.toString()).put("name", course.name)
             } else emptyList()
     }
+    val providerOptions = platforms.filter { com.feldman.scholix.courses.supportedProviderPages(it).isNotEmpty() }.map { it.id } + listOf("lemida")
+    var selectedProviderId by rememberSaveable { mutableStateOf(platforms.firstOrNull { it.suportsGrades }?.id ?: providerOptions.firstOrNull().orEmpty()) }
+    val activeProviderId = selectedProviderId.takeIf { it in providerOptions } ?: providerOptions.firstOrNull().orEmpty()
+    val activeProvider = platforms.firstOrNull { it.id == activeProviderId }
+    val supportedPages = com.feldman.scholix.courses.supportedProviderPages(activeProvider, activeProviderId == "lemida")
+    var providerPickerExpanded by remember { mutableStateOf(false) }
     val requestedAssignment by HomeworkLinks.pending.collectAsState()
 
     val destinations = remember(hasGrades, hasSchedule, hasAttendance) {
@@ -589,6 +602,8 @@ fun MainScreen(
             AppDest.TiktekSolution(imageUrl = ""),
             AppDest.Locker,
             AppDest.Lockerim,
+            AppDest.LockerContents,
+            AppDest.LockerCodeEditor(),
             AppDest.Homework,
             AppDest.Materials,
             AppDest.Studies,
@@ -622,14 +637,13 @@ fun MainScreen(
         .collectAsState(initial = defaultNavigationOrder)
     // Lockerim is a service of its own; without an account its page has nothing to show, and its
     // lock sat in the bar next to Locker's, reading as the same page twice.
-    val hasLockerim = platforms.any { it is com.feldman.scholix.api.platforms.LockerimPlatform }
-    val globalNavigationPages = remember(destinations, navigationOrder, hasCourseProviders, hasLockerim) {
+    val globalNavigationPages = remember(destinations, navigationOrder, hasCourseProviders, supportedPages) {
         destinations.filter { it.parent == null && it !is ProviderGrades && it.label in navigationOrder &&
-            it != AppDest.Home && (it != AppDest.Lockerim || hasLockerim) }
+            it != AppDest.Home && (it !in com.feldman.scholix.courses.providerDependentPages || it in supportedPages) }
             .sortedBy { navigationOrder.indexOf(it.label) }
     }
 
-    val mainDestination = if (hasGrades) AppDest.Grades else if (hasCourseProviders) AppDest.Homework else AppDest.Tiktek
+    val mainDestination = supportedPages.firstOrNull() ?: AppDest.Tiktek
     val startDestination = rememberSaveable {
         val activity = context as? android.app.Activity
         if (activity?.intent?.getBooleanExtra("open_crash_logs", false) == true) AppDest.CrashLogs
@@ -645,12 +659,22 @@ fun MainScreen(
     // Opening the app on its default Grades page is not a request for an Inbar SMS.
     var userOpenedPages by remember { mutableStateOf<Set<AppDest>>(emptySet()) }
     fun navigateFromUser(destination: MotionDest, topLevel: Boolean = false) {
+        if (destination is ProviderGrades) {
+            selectedProviderId = destination.providerId
+            userOpenedPages = userOpenedPages + AppDest.Grades
+            backStack.navigateTop(AppDest.Grades)
+            return
+        }
         if (destination == AppDest.Grades || destination == AppDest.Schedule) {
             userOpenedPages = userOpenedPages + (destination as AppDest)
         }
         if (destination is CourseSection) {
+            val providerId = if (destination.providerId.startsWith("lemida:")) "lemida" else destination.providerId
+            selectedProviderId = providerId
+            val courseMainPage = com.feldman.scholix.courses.supportedProviderPages(
+                platforms.firstOrNull { it.id == providerId }, providerId == "lemida").firstOrNull() ?: AppDest.Tiktek
             // Close the old course item before replacing the section; identities live in routes.
-            backStack.navigateTop(mainDestination)
+            backStack.navigateTop(courseMainPage)
             while (backStack.backStack.lastOrNull()?.courseScope() != null &&
                 backStack.backStack.lastOrNull() !is CourseSection) backStack.pop()
             backStack.navigateTo(destination)
@@ -682,7 +706,11 @@ fun MainScreen(
         }
     }
     val currentScreen = backStack.backStack.lastOrNull() ?: startDestination
-    LaunchedEffect(currentScreen) {
+    LaunchedEffect(currentScreen, activeProviderId) {
+        if (currentScreen == AppDest.Home ||
+            (currentScreen in com.feldman.scholix.courses.providerDependentPages && currentScreen !in supportedPages)) {
+            backStack.navigateTop(mainDestination)
+        }
         if (currentScreen == mainDestination) courseCacheEpoch++
     }
     val courseScope = currentScreen.courseScope()
@@ -722,7 +750,7 @@ fun MainScreen(
         factory = LockerViewModelFactory(repository)
     )
     val messagesViewModel: MessagesViewModel = viewModel()
-    LaunchedEffect(platforms) { messagesViewModel.configure(platforms) }
+    LaunchedEffect(platforms, activeProviderId) { messagesViewModel.configure(platforms.filter { it.id == activeProviderId }) }
 
     val appState = AppState(
             preloadedCourses = preloadedCourses,
@@ -738,15 +766,20 @@ fun MainScreen(
             homeworkOpenRequest = homeworkOpenRequest,
             userOpenedPages = userOpenedPages,
             activePage = currentScreen,
+            selectedProviderId = activeProviderId,
             courseCatalog = courseCatalog,
             recentCourses = recentCourses,
             onCourseCacheChanged = { courseCacheEpoch++ },
             onScopeSelected = { destination -> navigateFromUser(destination,
                 topLevel = destination.parent == null) },
             onCourseResumed = { course ->
-                backStack.navigateTop(mainDestination)
+                val providerId = if (course.providerId.startsWith("lemida:")) "lemida" else course.providerId
+                selectedProviderId = providerId
+                val courseMainPage = com.feldman.scholix.courses.supportedProviderPages(
+                    platforms.firstOrNull { it.id == providerId }, providerId == "lemida").firstOrNull() ?: AppDest.Tiktek
+                backStack.navigateTop(courseMainPage)
                 if (backStack.backStack.lastOrNull()?.courseScope()?.sameCourse(course) != true) {
-                    while (backStack.backStack.lastOrNull() != mainDestination) { if (!backStack.pop()) break }
+                    while (backStack.backStack.lastOrNull() != courseMainPage) { if (!backStack.pop()) break }
                     backStack.navigateTo(courseLocations.firstOrNull { it.courseScope()?.sameCourse(course) == true } ?: course)
                 }
             },
@@ -762,12 +795,33 @@ fun MainScreen(
 
     CompositionLocalProvider(LocalAppState provides appState, LocalScopeControl provides scopeControl,
         LocalCourseStateHolder provides courseStateHolder) {
+        val showProviderHeader = courseScope == null && currentScreen in com.feldman.scholix.courses.providerDependentPages
+        Column(Modifier.fillMaxSize()) {
+        if (showProviderHeader && providerOptions.isNotEmpty()) {
+            com.feldman.scholix.ui.components.PickerBar(
+                options = providerOptions, selectedIndex = providerOptions.indexOf(activeProviderId).coerceAtLeast(0),
+                onSelected = { index ->
+                    val id = providerOptions[index]
+                    selectedProviderId = id
+                    providerPickerExpanded = false
+                    val pages = com.feldman.scholix.courses.supportedProviderPages(platforms.firstOrNull { it.id == id }, id == "lemida")
+                    val target = (currentScreen as? AppDest)?.takeIf { it in pages } ?: pages.firstOrNull() ?: AppDest.Tiktek
+                    navigateFromUser(target, topLevel = true)
+                },
+                expanded = providerPickerExpanded, onExpandedChange = { providerPickerExpanded = it },
+                optionLabel = { id -> platforms.firstOrNull { it.id == id }?.let { it.providerLabel() } ?: "Lemida" },
+                optionKey = { it }, optionDescription = { id -> platforms.firstOrNull { it.id == id }?.getUsername().orEmpty() },
+                optionIcon = { id -> platforms.firstOrNull { it.id == id }?.let { com.feldman.scholix.ui.components.ProviderIcon(it) } },
+                contentDescription = "Choose provider", previousDescription = "Previous provider", nextDescription = "Next provider",
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp))
+        }
+        CompositionLocalProvider(LocalProviderHeaderVisible provides showProviderHeader) {
         // Motion owns the shell: bar, rail, the bar's slide and predictive back, and the overflow
         // menu on the bar's button slot. The app keeps the back stack for its deep links.
         MotionNavFlow(
             startDestination = startDestination,
             destinations = destinations,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.weight(1f),
             backStack = backStack,
             motionLevel = motionLevel,
             backNavigationBehavior = if (courseScope != null) MotionBackNavigationBehavior.PopLatest
@@ -790,5 +844,7 @@ fun MainScreen(
                 )
             }
         )
+        }
+        }
     }
 }
