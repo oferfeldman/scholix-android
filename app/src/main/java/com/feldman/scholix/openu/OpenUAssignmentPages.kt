@@ -190,7 +190,6 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
             MotionBackButton(onClick = onBack)
             Text(item?.courseName.orEmpty(), Modifier.weight(1f).padding(horizontal = 12.dp),
                 style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            com.feldman.scholix.PlatformSwitcherButton()
             IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh assignment") }
         }
         val assignment = item

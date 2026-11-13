@@ -799,8 +799,6 @@ fun GradesScreen(
 
     if (courses.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (includeTopInset) com.feldman.scholix.PlatformSwitcherButton(
-                Modifier.align(Alignment.TopEnd).padding(top = TopBarSpacing(), end = 16.dp))
             if (!courseLoadFinished || inbarRelogin != null || isLoading) {
                 GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
             } else if (!canAccessInbar && providersById.values.any { it is InbarPlatform && it.hasSavedLoginDetails() }) {
@@ -883,7 +881,6 @@ fun GradesScreen(
                         Text("Open course \u203a")
                     }
                 }
-                if (includeTopInset) com.feldman.scholix.PlatformSwitcherButton()
             }
 
             val pullRefreshState = rememberPullToRefreshState()
