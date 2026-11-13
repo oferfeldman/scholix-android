@@ -97,7 +97,6 @@ fun SettingsTopBar(
                     Icon(painterResource(AppDest.Home.outlineIcon), contentDescription = "Home")
                 }
             }
-            com.feldman.scholix.PlatformSwitcherButton()
             actions()
         }
     )
