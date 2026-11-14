@@ -23,11 +23,15 @@ object AttendancePortionsStorage {
     private const val KEY_LATENESS_CONVERSION = "portions_lateness_conversion"
     private const val KEY_SUBJECT_HOURS_JSON = "portions_subject_hours_json"
 
-    private fun getPrefs(context: Context): SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private fun getPrefs(context: Context, providerId: String = "", subject: String = ""): SharedPreferences {
+        val scope = if (providerId.isBlank()) "" else "_" + java.security.MessageDigest.getInstance("SHA-256")
+            .digest("$providerId\u0000$subject".toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        return context.getSharedPreferences(PREFS_NAME + scope, Context.MODE_PRIVATE)
+    }
 
-    fun getPortionsConfig(context: Context): PortionsConfig {
-        val prefs = getPrefs(context)
+    fun getPortionsConfig(context: Context, providerId: String = "", subject: String = ""): PortionsConfig {
+        val scoped = getPrefs(context, providerId, subject)
+        val prefs = if (scoped.contains(KEY_ENABLED) || providerId.isBlank()) scoped else getPrefs(context)
         val subjectHoursJson = prefs.getString(KEY_SUBJECT_HOURS_JSON, null)
         val subjectHours = mutableMapOf<String, Int>()
         if (!subjectHoursJson.isNullOrBlank()) {
@@ -56,12 +60,12 @@ object AttendancePortionsStorage {
         )
     }
 
-    fun savePortionsConfig(context: Context, config: PortionsConfig) {
+    fun savePortionsConfig(context: Context, config: PortionsConfig, providerId: String = "", subject: String = "") {
         val json = JSONObject()
         config.subjectWeeklyHours.forEach { (sub, hours) ->
             json.put(sub, hours)
         }
-        getPrefs(context).edit {
+        getPrefs(context, providerId, subject).edit {
             putBoolean(KEY_ENABLED, config.enabled)
             putInt(KEY_BONUS_POINTS, config.bonusPoints)
             putFloat(KEY_BONUS_THRESHOLD, config.bonusThresholdPortions)
@@ -87,16 +91,16 @@ object AttendancePortionsStorage {
         savePortionsConfig(context, current.copy(subjectWeeklyHours = updatedMap))
     }
 
-    fun resetToDefaults(context: Context) {
-        getPrefs(context).edit { clear() }
+    fun resetToDefaults(context: Context, providerId: String, subject: String) {
+        savePortionsConfig(context, PortionsConfig(), providerId, subject)
     }
 
-    fun configFlow(context: Context): Flow<PortionsConfig> = callbackFlow {
-        val prefs = getPrefs(context)
+    fun configFlow(context: Context, providerId: String = "", subject: String = ""): Flow<PortionsConfig> = callbackFlow {
+        val prefs = getPrefs(context, providerId, subject)
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-            trySend(getPortionsConfig(context))
+            trySend(getPortionsConfig(context, providerId, subject))
         }
-        trySend(getPortionsConfig(context))
+        trySend(getPortionsConfig(context, providerId, subject))
         prefs.registerOnSharedPreferenceChangeListener(listener)
         awaitClose {
             prefs.unregisterOnSharedPreferenceChangeListener(listener)

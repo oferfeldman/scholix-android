@@ -17,6 +17,7 @@ class ProviderPagesTest {
     @Test fun openUniversityOffersAssignmentsWithoutSchoolAttendanceOrSchedule() {
         val pages = supportedProviderPages(OpenAUPlatform())
         assertTrue(AppDest.Homework in pages)
+        assertTrue(AppDest.Materials in pages)
         assertTrue(AppDest.Grades in pages)
         assertFalse(AppDest.Attendance in pages)
         assertFalse(AppDest.Schedule in pages)
@@ -30,12 +31,13 @@ class ProviderPagesTest {
         assertTrue(AppDest.Grades in pages)
         assertTrue(AppDest.Messages in pages)
         assertFalse(AppDest.Homework in pages)
+        assertFalse(AppDest.Materials in pages)
     }
 
     @Test fun classroomAndLemidaKeepTheirSupportedWorkPages() {
         assertTrue(AppDest.Homework in supportedProviderPages(GoogleClassroomPlatform()))
         assertFalse(AppDest.Attendance in supportedProviderPages(GoogleClassroomPlatform()))
-        assertEquals(listOf(AppDest.Homework), supportedProviderPages(null, lemida = true))
+        assertEquals(listOf(AppDest.Homework, AppDest.Materials), supportedProviderPages(null, lemida = true))
         assertTrue(supportedProviderPages(null).isEmpty())
     }
 }

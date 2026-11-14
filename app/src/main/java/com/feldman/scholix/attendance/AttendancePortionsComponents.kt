@@ -62,7 +62,6 @@ fun portionsStatusColors(status: GradeImpactStatus): PortionsStatusColors {
 fun PortionsSummaryBanner(
     summaries: List<SubjectPortionsSummary>,
     onOpenTable: () -> Unit,
-    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val counts = remember(summaries) { summaries.groupingBy { it.status }.eachCount() }
@@ -105,13 +104,7 @@ fun PortionsSummaryBanner(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(
-                        painter = rememberSymbolPainter(MotionSymbols.ic_settings),
-                        contentDescription = stringResource(R.string.portions_settings),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+
             }
 
             Spacer(Modifier.height(16.dp))

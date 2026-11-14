@@ -3,6 +3,7 @@ package com.feldman.scholix.pages
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.items
 import com.feldman.motion.MotionLazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
@@ -196,13 +197,16 @@ fun AttendancePage(
     var sortBy by rememberSaveable { mutableStateOf("Date") }
     var viewMode by rememberSaveable { mutableStateOf("events") } // "events" or "portions"
 
-    var editingSubject by remember { mutableStateOf<String?>(null) }
-    var editingSubjectHours by remember { mutableIntStateOf(2) }
-
-    // Remembered: a new flow every recomposition restarts the collection and re-reads prefs.
-    val portionsConfigFlow = remember(context) { AttendancePortionsStorage.configFlow(context) }
-    val initialPortionsConfig = remember(context) { AttendancePortionsStorage.getPortionsConfig(context) }
-    val portionsConfig by portionsConfigFlow.collectAsState(initial = initialPortionsConfig)
+    val portionsConfig = com.feldman.scholix.attendance.PortionsConfig()
+    val accountId = com.feldman.scholix.LocalAppState.current.selectedProviderId
+    val subjects = remember(events) { events.values.flatten().map { it.optString("subject").trim() }.filter { it.isNotBlank() }.toSet() }
+    val subjectConfigsFlow = remember(context, accountId, subjects) {
+        if (subjects.isEmpty()) kotlinx.coroutines.flow.flowOf(emptyMap())
+        else kotlinx.coroutines.flow.combine(subjects.map { subject ->
+            AttendancePortionsStorage.configFlow(context, accountId, subject)
+        }) { configs -> subjects.zip(configs).toMap() }
+    }
+    val subjectConfigs by subjectConfigsFlow.collectAsState(initial = emptyMap())
 
     var attendancePlatforms by remember { mutableStateOf<List<Platform>>(emptyList()) }
     var selectedPlatformIndex by remember { mutableIntStateOf(0) }
@@ -211,6 +215,9 @@ fun AttendancePage(
 
     val selectedAccountId = com.feldman.scholix.LocalAppState.current.selectedProviderId
     LaunchedEffect(selectedAccountId) {
+        events = emptyMap()
+        isLoading = true
+        providersLoaded = false
         selectedPlatformIndex = 0
         attendancePlatforms = withContext(Dispatchers.IO) {
             runCatching {
@@ -224,6 +231,7 @@ fun AttendancePage(
 
     var scheduleHoursBySubject by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     LaunchedEffect(selectedPlatform?.id) {
+        scheduleHoursBySubject = emptyMap()
         val platform = selectedPlatform ?: return@LaunchedEffect
         if (platform.supportsSchedule) {
             withContext(Dispatchers.IO) {
@@ -252,8 +260,8 @@ fun AttendancePage(
         }
     }
 
-    val portionsSummaries = remember(events, portionsConfig, scheduleHoursBySubject) {
-        AttendancePortionsCalculator.parseEvents(events, portionsConfig, scheduleHoursBySubject)
+    val portionsSummaries = remember(events, subjectConfigs, scheduleHoursBySubject) {
+        AttendancePortionsCalculator.parseEvents(events, portionsConfig, scheduleHoursBySubject, subjectConfigs)
     }
 
     val groupedEvents = remember(events, sortBy) {
@@ -373,20 +381,6 @@ fun AttendancePage(
         }
     }
 
-    if (editingSubject != null) {
-        EditSubjectHoursDialog(
-            subject = editingSubject.orEmpty(),
-            initialHours = editingSubjectHours,
-            onDismiss = { editingSubject = null },
-            onConfirm = { newHours ->
-                editingSubject?.let { sub ->
-                    AttendancePortionsStorage.setSubjectWeeklyHours(context, sub, newHours)
-                }
-                editingSubject = null
-            }
-        )
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -443,9 +437,14 @@ fun AttendancePage(
                         PortionsSummaryBanner(
                             summaries = portionsSummaries,
                             onOpenTable = { onNavigate?.invoke(AppDest.SchoolPortionsTable()) },
-                            onOpenSettings = { onNavigate?.invoke(AppDest.PortionsSettings) },
                             modifier = Modifier.padding(bottom = 14.dp)
                         )
+                    }
+
+                    items(subjects.filter { subjectConfigs[it]?.enabled == false }.sorted()) { subject ->
+                        com.feldman.motion.MotionButton(text = subject, onClick = {
+                            selectedPlatform?.let { onNavigate?.invoke(AppDest.SubjectPortionsSettings(it.id, subject, scheduleHoursBySubject[subject])) }
+                        })
                     }
 
                     if (portionsSummaries.isEmpty()) {
@@ -462,11 +461,10 @@ fun AttendancePage(
                         itemsIndexed(portionsSummaries, key = { _, it -> "subject:${it.subject}" }) { index, summary ->
                             SubjectPortionCard(
                                 summary = summary,
-                                config = portionsConfig,
+                                config = subjectConfigs[summary.subject] ?: portionsConfig,
                                 position = itemPosition(index, portionsSummaries.size),
                                 onEditHours = {
-                                    editingSubject = summary.subject
-                                    editingSubjectHours = summary.weeklyHours
+                                    selectedPlatform?.let { onNavigate?.invoke(AppDest.SubjectPortionsSettings(it.id, summary.subject, summary.weeklyHours)) }
                                 }
                             )
                         }

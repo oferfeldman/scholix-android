@@ -46,6 +46,10 @@ fun SettingsTopBar(
     val courses = state?.courseCatalog.orEmpty().filter { it.optString("platformId") == courseScope?.providerId }
     val selectedCourseIndex = courses.indexOfFirst { courseScope?.matches(it) == true }
     var courseMenuExpanded by remember(courseScope) { mutableStateOf(false) }
+    if (com.feldman.scholix.LocalProviderHeaderVisible.current && courseScope != null) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, content = actions)
+        return
+    }
     if (selectedCourseIndex >= 0 && state?.activePage is CourseSection) {
         Row(
             modifier = Modifier.fillMaxWidth().background(chromeColor).statusBarsPadding()

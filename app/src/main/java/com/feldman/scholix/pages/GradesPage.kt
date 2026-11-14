@@ -857,7 +857,7 @@ fun GradesScreen(
         ) {
             if (includeTopInset) Spacer(Modifier.height(TopBarSpacing()))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (!isLandscape && courses.size > 1) {
+                if (!com.feldman.scholix.LocalProviderHeaderVisible.current && !isLandscape && courses.size > 1) {
                     Box(Modifier.weight(1f)) {
                         CoursePickerBar(
                             courses = courses, selectedIndex = selectedTab,

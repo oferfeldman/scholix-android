@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 import com.feldman.scholix.LocalAppState
 import com.feldman.scholix.api.platforms.GoogleClassroomPlatform
 import com.feldman.scholix.api.platforms.OpenAUPlatform
@@ -29,10 +31,14 @@ import com.feldman.scholix.ui.components.SettingsTopBar
 /** Used by assignments and the general catalog; no upload or provider submission is performed. */
 @Composable
 fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? = null, courseKey: String? = null,
-                 courseAssignmentKeys: Set<String> = emptySet()) {
+                 courseAssignmentKeys: Set<String> = emptySet(), prepareContent: (suspend () -> java.io.File)? = null) {
     val context = LocalContext.current
     val catalog = remember(context) { StudyCatalog(context) }
     var entries by remember(assignment?.key, courseProviderId, courseKey) { mutableStateOf(catalog.entries()) }
+    val scope = rememberCoroutineScope()
+    var contentPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var preparing by remember { mutableStateOf(false) }
+    var transfer by remember { mutableStateOf<StudyContentTransfer?>(null) }
     var pending by rememberSaveable { mutableStateOf<String?>(null) }
     var targetPackage by rememberSaveable { mutableStateOf<String?>(null) }
     var picker by remember { mutableStateOf(false) }
@@ -59,8 +65,15 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
     }
     fun launch(component: ComponentName) {
         targetPackage = component.packageName
-        runCatching { launcher.launch(Intent(DocumentsStudyContract.ACTION).setComponent(component)
-            .putExtra(DocumentsStudyContract.EXTRA, pending)) }
+        runCatching { launcher.launch(Intent(if (contentPath != null) DocumentsStudyContract.CONTENT_ACTION else DocumentsStudyContract.ACTION).setComponent(component)
+            .putExtra(DocumentsStudyContract.EXTRA, pending).apply {
+                contentPath?.let { path ->
+                    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.provider", java.io.File(path))
+                    clipData = android.content.ClipData.newRawUri("Assignment study", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    putExtra("com.feldman.documents.STUDY_CONTENT", uri.toString())
+                }
+            }) }
             .onFailure { pending = null; targetPackage = null; error = "Update Documents to use study links." }
     }
     fun request(reference: StudyReference? = null, choose: Boolean = false) {
@@ -68,9 +81,36 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
         message = null
         pending = DocumentsStudyContract.request(assignment, reference, choose)
         localPackage = reference?.documentsPackage
-        picker = true
+        preparing = true
+        scope.launch {
+            try {
+                contentPath = prepareContent?.invoke()?.absolutePath
+                if (contentPath != null) pending = JSONObject(requireNotNull(pending)).put("content", true).toString()
+                picker = true
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Exception) { pending = null; error = e.message ?: "Could not prepare assignment files."
+            } finally { preparing = false }
+        }
     }
     if (picker && pending != null) StudyDevicePicker(pending!!, localPackage,
+        prepareRemote = {
+            val request = requireNotNull(pending)
+            val json = JSONObject(request)
+            contentPath?.let { path ->
+                transfer?.close()
+                val next = StudyContentTransfer(context, java.io.File(path)) { raw ->
+                    runCatching {
+                        val receipt = DocumentsStudyContract.receipt(raw, JSONObject(request).apply { remove("catalogId") }.toString(), "remote")
+                        catalog.save(receipt.copy(documentsPackage = null, courseProviderId = courseProviderId, courseKey = courseKey))
+                        entries = catalog.entries()
+                    }.onFailure { error = it.message ?: "Could not save the remote study link." }
+                }
+                transfer = next
+                val source = next.publish()
+                source.keys().forEach { key -> json.put(key, source.get(key)) }
+            }
+            json.toString()
+        },
         onLocal = { picker = false; launch(it) },
         onSent = { picker = false; pending = null; message = "Opened Documents on $it" },
         onDismiss = { picker = false; pending = null })
@@ -82,11 +122,12 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
         }.forEach { reference ->
             MotionButton(text = "Open ${reference.title}", enabled = pending == null,
                 onClick = { request(reference) })
-            if (!reference.isLocal) Text("This published study has not been downloaded. Download support is not available yet.")
+            if (!reference.isLocal && reference.publication != null) Text("This published study has not been downloaded. Download support is not available yet.")
         }
         MotionButton(text = "Open fstudy", enabled = pending == null, onClick = {
             request(assignment?.let { item -> entries.firstOrNull { it.assignmentKey == item.key } })
         })
+        if (preparing) LinearProgressIndicator(Modifier.fillMaxWidth())
         message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }

@@ -574,7 +574,8 @@ fun MainScreen(
                         }
                     }
             }
-        }.filter { it.stableCourseKey().isNotBlank() }.distinctBy { it.courseDestination() } +
+        }.plus(preloadedCourses.filter { course -> platforms.any { it.id == course.optString("platformId") && it !is OpenAUPlatform && it !is GoogleClassroomPlatform } })
+            .filter { it.stableCourseKey().isNotBlank() }.distinctBy { it.courseDestination() } +
             if (lemidaSnapshot.account.isNotBlank()) lemidaSnapshot.courses.map { course ->
                 JSONObject().put("platformId", "lemida:${lemidaSnapshot.account}")
                     .put("courseKey", course.id.toString()).put("name", course.name)
@@ -627,6 +628,7 @@ fun MainScreen(
             AppDest.NavigationSettings,
             AppDest.CrashLogs,
             AppDest.PortionsSettings,
+            AppDest.SubjectPortionsSettings(),
             AppDest.SchoolPortionsTable(),
             AppDest.Login,
             AppDest.Appearance
@@ -717,7 +719,7 @@ fun MainScreen(
     val scopeCourse = courseScope?.let { scope -> courseCatalog.singleOrNull { scope.matches(it) } }
     val navigationPages = if (courseScope != null && scopeCourse != null) {
         courseSections(platforms.firstOrNull { it.id == courseScope.providerId }, scopeCourse)
-            .map { courseScope.copy(section = it) } + mainDestination
+            .map { courseScope.copy(section = it) } + listOf(mainDestination, AppDest.Settings)
     } else globalNavigationPages
     val activeNavigationPage = if (generateSequence<MotionDest>(currentScreen) { it.parent }.any { it is ProviderGrades })
         AppDest.Grades else backStack.backStack.asReversed().firstNotNullOfOrNull { screen ->
@@ -795,24 +797,48 @@ fun MainScreen(
 
     CompositionLocalProvider(LocalAppState provides appState, LocalScopeControl provides scopeControl,
         LocalCourseStateHolder provides courseStateHolder) {
-        val showProviderHeader = courseScope == null && currentScreen in com.feldman.scholix.courses.providerDependentPages
+        val showProviderHeader = currentScreen is CourseSection || (courseScope == null && currentScreen in com.feldman.scholix.courses.providerDependentPages)
+        val pickerCourses = providerOptions.flatMap { id ->
+            val provider = platforms.firstOrNull { it.id == id }
+            val catalogId = if (id == "lemida" && lemidaSnapshot.account.isNotBlank()) "lemida:${lemidaSnapshot.account}" else id
+            listOf(JSONObject().put("platformId", catalogId).put("providerRoot", true)
+                .put("platformName", provider?.providerLabel() ?: "Lemida")
+                .put("name", provider?.providerLabel() ?: "Lemida").put("status", "All courses")) +
+                courseCatalog.filter { it.optString("platformId") == catalogId }
+        }
+        val pickerIndex = pickerCourses.indexOfFirst { course ->
+            if (courseScope != null) courseScope.matches(course)
+            else course.optBoolean("providerRoot") &&
+                (course.optString("platformId") == activeProviderId || activeProviderId == "lemida" && course.optString("platformId").startsWith("lemida:"))
+        }.coerceAtLeast(0)
         Column(Modifier.fillMaxSize()) {
-        if (showProviderHeader && providerOptions.isNotEmpty()) {
-            com.feldman.scholix.ui.components.PickerBar(
-                options = providerOptions, selectedIndex = providerOptions.indexOf(activeProviderId).coerceAtLeast(0),
+        if (showProviderHeader && pickerCourses.isNotEmpty()) {
+            com.feldman.scholix.ui.components.CoursePickerBar(
+                courses = pickerCourses, selectedIndex = pickerIndex,
                 onSelected = { index ->
-                    val id = providerOptions[index]
+                    val course = pickerCourses[index]
+                    val rawId = course.optString("platformId")
+                    val id = if (rawId.startsWith("lemida:")) "lemida" else rawId
                     selectedProviderId = id
                     providerPickerExpanded = false
-                    val pages = com.feldman.scholix.courses.supportedProviderPages(platforms.firstOrNull { it.id == id }, id == "lemida")
-                    val target = (currentScreen as? AppDest)?.takeIf { it in pages } ?: pages.firstOrNull() ?: AppDest.Tiktek
-                    navigateFromUser(target, topLevel = true)
+                    val provider = platforms.firstOrNull { it.id == id }
+                    val pages = com.feldman.scholix.courses.supportedProviderPages(provider, id == "lemida")
+                    if (course.optBoolean("providerRoot")) {
+                        val target = (currentScreen as? AppDest)?.takeIf { it in pages } ?: pages.firstOrNull() ?: AppDest.Tiktek
+                        navigateFromUser(target, topLevel = true)
+                    } else {
+                        val sections = courseSections(provider, course)
+                        val preferred = courseScope?.section ?: when (currentScreen) {
+                            AppDest.Grades -> com.feldman.scholix.courses.CourseSectionKind.GRADES
+                            AppDest.Homework -> com.feldman.scholix.courses.CourseSectionKind.ASSIGNMENTS
+                            AppDest.Materials -> com.feldman.scholix.courses.CourseSectionKind.FILES
+                            else -> com.feldman.scholix.courses.CourseSectionKind.OVERVIEW
+                        }
+                        navigateFromUser(course.courseDestination(preferred.takeIf { it in sections } ?: sections.first()))
+                    }
                 },
                 expanded = providerPickerExpanded, onExpandedChange = { providerPickerExpanded = it },
-                optionLabel = { id -> platforms.firstOrNull { it.id == id }?.let { it.providerLabel() } ?: "Lemida" },
-                optionKey = { it }, optionDescription = { id -> platforms.firstOrNull { it.id == id }?.getUsername().orEmpty() },
-                optionIcon = { id -> platforms.firstOrNull { it.id == id }?.let { com.feldman.scholix.ui.components.ProviderIcon(it) } },
-                contentDescription = "Choose provider", previousDescription = "Previous provider", nextDescription = "Next provider",
+                providersById = platforms.associateBy { it.id }, groupAllProviders = true,
                 modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp))
         }
         CompositionLocalProvider(LocalProviderHeaderVisible provides showProviderHeader) {
@@ -836,8 +862,8 @@ fun MainScreen(
                     selectedDestination = selectedNavbarDest,
                     // Outside a course the bar's few slots go to the pages, in the user's order;
                     // Course navigation returns to the original main page.
-                    pinnedEndDestination = if (courseScope == null) null else mainDestination,
-                    replacePinnedEndWhenFull = true,
+                    pinnedEndDestination = AppDest.Settings,
+                    replacePinnedEndWhenFull = false,
                     onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = dest.parent == null) },
                     contrastBlurEnabled = navigationBlurred,
                     onOverflowChanged = { overflowPagesList = it.filterIsInstance<AppDest>() },

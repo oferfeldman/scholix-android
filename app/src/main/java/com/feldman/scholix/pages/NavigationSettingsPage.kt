@@ -58,7 +58,7 @@ fun NavigationSettingsPage(onBack: () -> Unit) {
             )
         }
     ) {
-        Item { Text("Set the page order. The selected page stays visible. Settings stays at the end; when the bar is full, an overflow page temporarily takes its slot. The rest remain in More.") }
+        Item { Text("Set the page order. Settings stays visible at the end.") }
         Section {
             orderedPages.forEachIndexed { index, page ->
                 Item(key = page.label) {

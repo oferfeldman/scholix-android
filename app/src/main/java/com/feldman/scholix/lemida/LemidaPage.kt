@@ -115,17 +115,21 @@ fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNa
         else HomeworkLinks.consume(request) // Not a Lemida assignment of this account: show the homework list.
     }
     val coursePicker: @Composable () -> Unit = {
-        CoursePickerBar(courses, selectedIndex, onSelected = { index ->
+        if (!com.feldman.scholix.LocalProviderHeaderVisible.current) CoursePickerBar(courses, selectedIndex, onSelected = { index ->
             courses.getOrNull(index)?.let { selectedKey = "${it.optString("platformId")}|${it.optString("courseKey")}" }
         }, expanded = expanded, onExpandedChange = { expanded = it }, providersById = providers.associateBy { it.id })
     }
     key(providerId) {
         when (val selected = providers.firstOrNull { it.id == providerId }) {
-            is OpenAUPlatform -> com.feldman.scholix.openu.OpenUAssignmentsPage(selected, searchQuery, onNavigate,
-                courseKey, coursePicker, onCoursesChanged = { refreshedCourses[providerId] = it })
+            is OpenAUPlatform -> if (filesOnly && courseKey != null) {
+                com.feldman.scholix.openu.course.OpenUCourseSection(selected, courseKey,
+                    com.feldman.scholix.courses.CourseSectionKind.FILES, onNavigate, onBack ?: {},
+                    coursePicker = coursePicker)
+            } else com.feldman.scholix.openu.OpenUAssignmentsPage(selected, searchQuery, onNavigate,
+                courseKey, coursePicker, onCoursesChanged = { refreshedCourses[providerId] = it; app.onCourseCacheChanged() })
             is GoogleClassroomPlatform -> com.feldman.scholix.classroom.ClassroomHomeworkPage(selected, searchQuery,
-                coursePicker, selectedCourseId = courseKey, onCoursesChanged = { refreshedCourses[providerId] = it })
-            else -> LemidaPageContent(repo, searchQuery, coursePicker, selectedCourseId = courseKey?.toIntOrNull())
+                coursePicker, selectedCourseId = courseKey, materialsOnly = filesOnly, onCoursesChanged = { refreshedCourses[providerId] = it; app.onCourseCacheChanged() })
+            else -> LemidaPageContent(repo, searchQuery, coursePicker, selectedCourseId = courseKey?.toIntOrNull(), filesOnly = filesOnly)
         }
     }
 }
@@ -198,9 +202,9 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         (typeFilter == "all" || LemidaActivities.group(it.type) == typeFilter) &&
         (!filesOnly || repo.cachedDetail(it)?.pdfs?.isNotEmpty() == true) &&
         it.matchesSearch(query, searchQuery) } }
-    MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = { if (filesOnly) SettingsTopBar("Files", onBack) }) {
+    MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = { if (filesOnly && !com.feldman.scholix.LocalProviderHeaderVisible.current) SettingsTopBar("Files", onBack) }) {
         if (!filesOnly && onBack != null) Item { com.feldman.motion.MotionBackButton(onClick = onBack) }
-        if (coursePicker != null) Item { coursePicker() }
+        if (coursePicker != null && !com.feldman.scholix.LocalProviderHeaderVisible.current) Item { coursePicker() }
         Item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             IconButton(onClick = { LemidaSyncWorker.refresh(context, manual = true) }, enabled = updated > 0L && !syncing && !needsLogin) {
@@ -406,7 +410,15 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, accoun
                 status = detail?.tables?.flatten()?.filter { row -> row.firstOrNull()?.contains("status", ignoreCase = true) == true }
                     ?.joinToString("; ") { it.joinToString(" · ") }.orEmpty().take(2000),
                 checkedAt = detailCheckedAt)
-            com.feldman.scholix.studies.StudyActions(assignment)
+            com.feldman.scholix.studies.StudyActions(assignment, prepareContent = {
+                val current = detail ?: repo.detail(item)
+                val sources = current.pdfs.map { pdf ->
+                    com.feldman.scholix.studies.AssignmentStudySource(pdf.name, repo.openPdf(item, pdf),
+                        Regex("solution|answer|\u05e4\u05ea\u05e8\u05d5\u05df|\u05e4\u05ea\u05e8\u05d5\u05e0\u05d5\u05ea", RegexOption.IGNORE_CASE).containsMatchIn(pdf.name))
+                }
+                com.feldman.scholix.studies.AssignmentStudyBundle.build(context, assignment, sources,
+                    org.jsoup.Jsoup.parse(current.description).text().ifBlank { current.text })
+            })
         }
         // The official hand-in: Lemida's own page in Scholix's browser, already signed in. Scholix never submits.
         if (item.url.startsWith("${LemidaParser.BASE}/") && com.feldman.scholix.browser.ScholixLinks.loadable(item.url)) Section {

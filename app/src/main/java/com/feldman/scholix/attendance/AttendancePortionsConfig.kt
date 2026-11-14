@@ -251,15 +251,17 @@ object AttendancePortionsCalculator {
     fun parseEvents(
         eventsMap: Map<String, List<JSONObject>>,
         config: PortionsConfig,
-        scheduleHoursBySubject: Map<String, Int> = emptyMap()
+        scheduleHoursBySubject: Map<String, Int> = emptyMap(),
+        subjectConfigs: Map<String, PortionsConfig> = emptyMap()
     ): List<SubjectPortionsSummary> {
         val allEvents = eventsMap.flatMap { it.value }
         if (allEvents.isEmpty()) return emptyList()
 
         val bySubject = allEvents.groupBy { it.optString("subject").trim() }
-            .filterKeys { it.isNotBlank() }
+            .filterKeys { it.isNotBlank() && subjectConfigs[it]?.enabled != false }
 
         return bySubject.map { (subject, subjectEvents) ->
+            val subjectConfig = subjectConfigs[subject] ?: config
             var unjustified = 0
             var justified = 0
             var lateness = 0
@@ -290,9 +292,9 @@ object AttendancePortionsCalculator {
                 }
             }
 
-            val weeklyHours = config.subjectWeeklyHours[subject]
+            val weeklyHours = subjectConfig.subjectWeeklyHours[subject]
                 ?: scheduleHoursBySubject[subject]
-                ?: config.defaultWeeklyHours
+                ?: subjectConfig.defaultWeeklyHours
 
             calculate(
                 subject = subject,
@@ -300,7 +302,7 @@ object AttendancePortionsCalculator {
                 justifiedHours = justified,
                 latenesses = lateness,
                 weeklyHours = weeklyHours,
-                config = config
+                config = subjectConfig
             )
         }.sortedWith(
             compareByDescending<SubjectPortionsSummary> { it.isFailing }

@@ -44,7 +44,8 @@ object OpenUCourseSections {
 
 @Composable
 fun OpenUCourseSection(platform: OpenAUPlatform, courseKey: String, section: CourseSectionKind,
-                       onNavigate: MotionNavigator, onBack: () -> Unit, term: String = "") {
+                       onNavigate: MotionNavigator, onBack: () -> Unit, term: String = "",
+                       coursePicker: (@Composable () -> Unit)? = null) {
     if (section == CourseSectionKind.ASSIGNMENTS) {
         MotionScaffold(scrollable = false, contentPadding = PaddingValues(0.dp),
             topBar = { SettingsTopBar(section.label, onBack) }) {
@@ -80,7 +81,10 @@ fun OpenUCourseSection(platform: OpenAUPlatform, courseKey: String, section: Cou
         catch (e: Exception) { error = e.message ?: "Could not update this OpenU section." }
         finally { loading = false }
     }
-    MotionScaffold(topBar = { SettingsTopBar(section.label, onBack, actions = {
+    MotionScaffold(topBar = { if (coursePicker != null) Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) { coursePicker() }
+        IconButton(onClick = { retry++ }, enabled = !loading) { Icon(rememberSymbolPainter(MotionSymbols.ic_refresh), "Refresh") }
+    } else SettingsTopBar(section.label, onBack, actions = {
         IconButton(onClick = { retry++ }, enabled = !loading && section != CourseSectionKind.ARCHIVE) {
             Icon(rememberSymbolPainter(MotionSymbols.ic_refresh), contentDescription = "Refresh")
         }

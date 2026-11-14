@@ -5,6 +5,8 @@ import java.util.UUID
 
 object DocumentsStudyContract {
     const val ACTION = "com.feldman.documents.action.STUDY"
+    const val CONTENT_ACTION = "com.feldman.documents.action.STUDY_CONTENT"
+    const val REMOTE_CONTENT_ACTION = "com.feldman.documents.action.REMOTE_STUDY_CONTENT"
     const val EXTRA = "com.feldman.documents.STUDY_HANDOFF"
 
     fun request(assignment: StudyAssignment?, reference: StudyReference? = null, choose: Boolean = false): String =

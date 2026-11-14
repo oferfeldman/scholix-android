@@ -17,21 +17,26 @@ import androidx.compose.ui.unit.dp
 import com.seamless.link.api.SeamlessLink
 import com.seamless.link.protocol.LinkErrors
 import org.json.JSONObject
+import kotlinx.coroutines.launch
 
 private const val REMOTE_STUDY = "com.feldman.documents.action.REMOTE_STUDY"
 
 @Composable
-internal fun StudyDevicePicker(payload: String, localPackage: String?, onLocal: (ComponentName) -> Unit,
+internal fun StudyDevicePicker(payload: String, localPackage: String?, prepareRemote: suspend () -> String = { payload }, onLocal: (ComponentName) -> Unit,
                                onSent: (String) -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val hasContent = remember(payload) { JSONObject(payload).optBoolean("content") }
+    val localAction = if (hasContent) DocumentsStudyContract.CONTENT_ACTION else DocumentsStudyContract.ACTION
+    val remoteAction = if (hasContent) DocumentsStudyContract.REMOTE_CONTENT_ACTION else REMOTE_STUDY
     var devices by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var sending by remember { mutableStateOf(false) }
     var approval by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var connected by remember { mutableStateOf(false) }
-    val local = remember(localPackage) {
-        context.packageManager.queryIntentActivities(Intent(DocumentsStudyContract.ACTION), PackageManager.MATCH_DEFAULT_ONLY)
+    val local = remember(localPackage, localAction) {
+        context.packageManager.queryIntentActivities(Intent(localAction), PackageManager.MATCH_DEFAULT_ONLY)
             .filter { it.activityInfo.exported && (localPackage == null || it.activityInfo.packageName == localPackage) }
     }
     val link = remember { SeamlessLink(context) { state ->
@@ -40,7 +45,7 @@ internal fun StudyDevicePicker(payload: String, localPackage: String?, onLocal: 
     } }
     fun load() {
         loading = true; error = null; approval = false
-        link.appDevices(REMOTE_STUDY) { result ->
+        link.appDevices(remoteAction) { result ->
             loading = false
             if (result.getString(SeamlessLink.ERROR_CODE) == LinkErrors.APPROVAL_REQUIRED) approval = true
             else if (result.containsKey(SeamlessLink.ERROR)) error = "Connect or update Seamless to find your devices."
@@ -73,11 +78,16 @@ internal fun StudyDevicePicker(payload: String, localPackage: String?, onLocal: 
                     TextButton(enabled = !sending && !loading, onClick = {
                         sending = true; error = null
                         // A remote study is resolved on that device by assignment identity, never a phone-local study ID.
-                        val request = JSONObject(payload).apply { remove("studyId"); put("choose", false) }.toString()
-                        link.launchApp(device.getString("id"), component, REMOTE_STUDY, request) { result ->
-                            sending = false
-                            if (result.containsKey(SeamlessLink.ERROR)) error = "Could not open Documents. Refresh devices and try again."
-                            else onSent(device.getString("name"))
+                        scope.launch {
+                            try {
+                                val request = JSONObject(prepareRemote()).apply { remove("studyId"); put("choose", false) }.toString()
+                                link.launchApp(device.getString("id"), component, remoteAction, request) { result ->
+                                    sending = false
+                                    if (result.containsKey(SeamlessLink.ERROR)) error = "Could not open Documents. Refresh devices and try again."
+                                    else onSent(device.getString("name"))
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+                            } catch (e: Exception) { sending = false; error = e.message ?: "Could not transfer study files." }
                         }
                     }) { Text(device.getString("name") + if (components.length() > 1) " · ${component.substringBefore('/')}" else "") }
                 }

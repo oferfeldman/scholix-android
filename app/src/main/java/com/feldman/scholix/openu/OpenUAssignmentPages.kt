@@ -220,7 +220,17 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                 error?.let { Text(it, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.error) }
                 Spacer(Modifier.height(16.dp))
                 StudyActions(StudyAssignment.create("https://opal.openu.ac.il", provider.id, assignment.courseKey,
-                    assignment.module, assignment.cmid, assignment.label, assignment.courseName, assignment.status, repo.checkedAt(assignment)))
+                    assignment.module, assignment.cmid, assignment.label, assignment.courseName, assignment.status, repo.checkedAt(assignment)),
+                    prepareContent = {
+                        val detail = data ?: repo.detail(assignment)
+                        val sources = detail.files.filter { it.group == "Original files" }.map { file ->
+                            com.feldman.scholix.studies.AssignmentStudySource(file.name, repo.openFile(file).file,
+                                Regex("solution|answer|פתרון|פתרונות", RegexOption.IGNORE_CASE).containsMatchIn(file.name))
+                        }
+                        com.feldman.scholix.studies.AssignmentStudyBundle.build(context,
+                            StudyAssignment.create("https://opal.openu.ac.il", provider.id, assignment.courseKey,
+                                assignment.module, assignment.cmid, assignment.label, assignment.courseName), sources, detail.instructions)
+                    })
                 if (assignment.module == "ouilassign") {
                     Spacer(Modifier.height(8.dp))
                     MotionButton(text = if (openingUpload) "Opening…" else "Upload files", enabled = !openingUpload, onClick = {

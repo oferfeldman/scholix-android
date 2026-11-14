@@ -23,10 +23,10 @@ fun CourseSection.matches(course: JSONObject): Boolean = providerId == course.op
 fun courseSections(provider: Platform?, course: JSONObject): List<CourseSectionKind> = (when {
     provider is OpenAUPlatform -> com.feldman.scholix.openu.course.OpenUCourseSections.available(course)
     provider is GoogleClassroomPlatform -> listOf(CourseSectionKind.OVERVIEW, CourseSectionKind.ASSIGNMENTS,
-        CourseSectionKind.FILES, CourseSectionKind.GRADES, CourseSectionKind.STUDIES)
+        CourseSectionKind.GRADES, CourseSectionKind.STUDIES)
     course.optString("platformId").startsWith("lemida:") -> listOf(CourseSectionKind.OVERVIEW,
         CourseSectionKind.ASSIGNMENTS, CourseSectionKind.FILES, CourseSectionKind.STUDIES)
-    else -> emptyList()
+    else -> if (provider?.suportsGrades == true) listOf(CourseSectionKind.GRADES) else emptyList()
 }).filterNot { it == CourseSectionKind.STUDIES }
 
 val LocalCourseStateHolder = compositionLocalOf<SaveableStateHolder?> { null }

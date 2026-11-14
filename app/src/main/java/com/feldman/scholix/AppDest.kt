@@ -107,7 +107,7 @@ sealed class AppDest : MotionDest {
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
                              onFabAction: ((() -> Unit) -> Unit) -> Unit) {
-            com.feldman.scholix.drive.DriveMaterialsPage(searchQuery)
+            com.feldman.scholix.lemida.LemidaPage(searchQuery, onNavigate, filesOnly = true)
         }
     }
 
@@ -592,6 +592,7 @@ sealed class AppDest : MotionDest {
     @Serializable
     @Parcelize
     data object Settings : AppDest() {
+        @IgnoredOnParcel @Transient override val showNavigation = false
         @IgnoredOnParcel
         @Transient
         override val label = "Settings"
@@ -615,7 +616,7 @@ sealed class AppDest : MotionDest {
                 onOpenAppearance = { onNavigate(Appearance) },
                 onOpenNavigation = { onNavigate(NavigationSettings) },
                 onOpenCrashLogs = { onNavigate(CrashLogs) },
-                onOpenPortions = { onNavigate(PortionsSettings) },
+                onBack = onBack,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -656,7 +657,23 @@ sealed class AppDest : MotionDest {
 
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
-            PortionsSettingsPage(onNavigate, onBack)
+            LaunchedEffect(Unit) { onBack() }
+        }
+    }
+
+    @Serializable
+    @Parcelize
+    data class SubjectPortionsSettings(val providerId: String = "", val subject: String = "", val weeklyHours: Int? = null) : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Portions"
+        @IgnoredOnParcel @Transient override val parent: MotionDest = Attendance
+        @IgnoredOnParcel @Transient override val showNavigation = false
+
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String, onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            val provider = LocalAppState.current.platforms.firstOrNull { it.id == providerId }
+            if (provider?.supportsAttendance == true && subject.isNotBlank()) {
+                PortionsSettingsPage(providerId, subject, onNavigate, onBack, weeklyHours)
+            }
         }
     }
 
