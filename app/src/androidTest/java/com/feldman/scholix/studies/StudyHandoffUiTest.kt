@@ -8,6 +8,8 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.hasText
 import androidx.test.platform.app.InstrumentationRegistry
@@ -46,8 +48,8 @@ class StudyHandoffUiTest {
                 AssignmentStudyBundle.build(context, assignment, listOf(AssignmentStudySource("Questions.pdf", file)))
                     .also { assertTrue(it.length() > 8192) }
             }) } }
-            compose.onNodeWithText("Open fstudy").performClick()
-            compose.waitUntil(20_000) {
+            compose.onNodeWithText("Open in Documents").performClick()
+            compose.waitUntil(60_000) {
                 compose.onAllNodesWithText("Connect Seamless").fetchSemanticsNodes().isNotEmpty() ||
                     compose.onAllNodes(hasText("Fold", substring = true)).fetchSemanticsNodes().isNotEmpty()
             }
@@ -74,9 +76,9 @@ class StudyHandoffUiTest {
             MotionTheme { StudyDevicePicker(DocumentsStudyContract.request(null), "com.example.notinstalled",
                 onLocal = { fail("An unavailable local app was offered") }, onSent = {}, onDismiss = { dismissed = true }) }
         }
-        compose.onNodeWithText("Open fstudy").assertExists()
+        compose.onNodeWithText("Open in Documents").assertExists()
         compose.onNodeWithText("This device").assertDoesNotExist()
-        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithContentDescription("Cancel").performClick()
         assertTrue(dismissed)
     }
 
@@ -153,11 +155,9 @@ class StudyHandoffUiTest {
                 finally { source.delete() }
             }) }
         }
-        compose.onNodeWithText("Open fstudy").performClick()
+        compose.onNodeWithText("Open in Documents").performClick()
         compose.waitUntil(20_000) { compose.onAllNodesWithText("This device").fetchSemanticsNodes().size == 1 }
         compose.onNodeWithText("This device").performClick()
-        clickNativeText("No folder")
-        clickNativeText("Scholix synthetic QA")
         clickNativeText("Create study")
         compose.waitUntil(20_000) { catalog.entries().any { it.assignmentKey == assignment.key && it.isLocal } }
         val first = catalog.entries().single { it.assignmentKey == assignment.key }
@@ -172,22 +172,23 @@ class StudyHandoffUiTest {
                 caller.startActivity(Intent(caller, caller.javaClass).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
             }
             compose.waitUntil(20_000) { caller.hasWindowFocus() }
-            compose.onNodeWithText("Open fstudy").assertExists()
+            compose.onNodeWithText("Open in Documents").assertExists()
         }
         returnToScholix()
-        compose.onNodeWithText("Open fstudy").performClick()
+        compose.onNodeWithText("Open in Documents").performClick()
         compose.waitUntil(20_000) { compose.onAllNodesWithText("This device").fetchSemanticsNodes().size == 1 }
         compose.onNodeWithText("This device").performClick()
+        clickNativeText("Use this study")
         compose.waitUntil(20_000) {
             val root = instrumentation.uiAutomation.rootInActiveWindow
             findNativeText(root, assignment.title) != null && findNativeText(root, "No questions yet") == null
         }
         assertEquals(first.studyId, catalog.entries().single { it.assignmentKey == assignment.key }.studyId)
         returnToScholix()
-        compose.onNodeWithText("Open fstudy").performClick()
-        compose.waitUntil(20_000) { compose.onAllNodesWithText("Cancel").fetchSemanticsNodes().size == 1 }
-        compose.onNodeWithText("Cancel").performClick()
-        compose.onNodeWithText("Open fstudy").assertExists()
+        compose.onNodeWithText("Open in Documents").performClick()
+        compose.waitUntil(20_000) { compose.onAllNodesWithContentDescription("Cancel").fetchSemanticsNodes().size == 1 }
+        compose.onNodeWithContentDescription("Cancel").performClick()
+        compose.onNodeWithText("Open in Documents").assertExists()
         assertEquals(first.studyId, catalog.entries().single { it.assignmentKey == assignment.key }.studyId)
     }
 }

@@ -20,7 +20,7 @@ The normal provider picker scopes all main feature pages and their navigation to
 
 Materials is currently available only for Lemida and OpenU. Settings is always the last visible navigation item, including when another page comes from overflow; Settings itself has a Back button. Attendance portions settings belong to a provider account and subject, and open from that subject's attendance card rather than general app settings.
 
-Assignment study handoff transfers real fstudy questions and sources. Documents offers a folder choice on creation and owns the study's stable ID, name, location, answers and progress. Reopening an assignment must retain that ID after renaming or moving the study, refresh Scholix's displayed reference, and never overwrite existing work.
+The assignment action is named Open in Documents. Its Motion device picker opens the target's study/note choice. Assignment study handoff transfers real fstudy questions and sources. Documents offers a folder choice on creation and can convert an existing note into the linked study, preserving its writing, name and folder while adding the assignment content. Documents owns the study's stable ID, name, location, answers and progress. Reopening an assignment must retain that ID after renaming or moving the study, refresh Scholix's displayed reference, and never overwrite existing work.
 
 Locker is the single top-level locker page. Keep Contents and the Lockerim integration inside it. Saved numeric and dial combinations are device-local, encrypted, and excluded from backup; preserve leading zeros and each dial step's direction and turn count.
 

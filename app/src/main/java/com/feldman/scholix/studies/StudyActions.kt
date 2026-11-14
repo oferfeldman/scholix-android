@@ -79,7 +79,7 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
             }) }
             .onFailure { pending = null; targetPackage = null; error = "Update Documents to use study links." }
     }
-    fun request(reference: StudyReference? = null, choose: Boolean = false) {
+    fun request(reference: StudyReference? = null, choose: Boolean = true) {
         error = null
         message = null
         pending = DocumentsStudyContract.request(assignment, reference, choose)
@@ -130,7 +130,7 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
                 onClick = { request(reference) })
             if (!reference.isLocal && reference.publication != null) Text("This published study has not been downloaded. Download support is not available yet.")
         }
-        MotionButton(text = "Open fstudy", icon = MotionIcons.Outlined.School,
+        MotionButton(text = "Open in Documents", icon = MotionIcons.Outlined.School,
             modifier = Modifier.fillMaxWidth(), enabled = pending == null,
             sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
             contentPadding = PaddingValues(horizontal = 20.dp), onClick = {

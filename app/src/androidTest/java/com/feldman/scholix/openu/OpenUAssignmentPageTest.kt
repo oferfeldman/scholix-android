@@ -118,7 +118,7 @@ class OpenUAssignmentPageTest {
                 }, onBack = {})
                 }
             } }
-            val study = compose.onNodeWithText("Open fstudy").assertIsDisplayed().assertHeightIsEqualTo(48.dp).fetchSemanticsNode().boundsInRoot
+            val study = compose.onNodeWithText("Open in Documents").assertIsDisplayed().assertHeightIsEqualTo(48.dp).fetchSemanticsNode().boundsInRoot
             val upload = compose.onNodeWithText("Upload files").assertIsDisplayed().assertHeightIsEqualTo(48.dp).fetchSemanticsNode().boundsInRoot
             assertEquals(2f * context.resources.displayMetrics.density, upload.top - study.bottom, 1f)
             val status = compose.onNodeWithText(item.status).fetchSemanticsNode().boundsInRoot

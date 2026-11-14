@@ -19,6 +19,7 @@ internal class StudyContentTransfer(context: Context, private val file: File, pr
     private val capability = "${context.packageName}.study-content"
     private var sha256 = ""
     private val token = UUID.randomUUID().toString()
+    private val connections = java.util.concurrent.ConcurrentHashMap.newKeySet<java.net.Socket>()
     private val ready = CompletableDeferred<JSONObject>()
     private val link = SeamlessLink(context.applicationContext) { state ->
         if (state.optBoolean("connected") && !ready.isCompleted) {
@@ -34,26 +35,36 @@ internal class StudyContentTransfer(context: Context, private val file: File, pr
         }
     }
 
-    suspend fun publish(): JSONObject {
-        sha256 = withContext(Dispatchers.IO) { MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) } }
-        check(link.connect()) { "Install or connect Seamless to transfer this study." }
+    init {
         scope.launch(Dispatchers.IO) {
             try {
-                while (isActive) server.accept().use { socket ->
-                    socket.soTimeout = 600_000
-                    val input = DataInputStream(socket.getInputStream())
-                    if (input.readUTF() == token) {
-                        val output = DataOutputStream(socket.getOutputStream())
-                        output.writeLong(file.length())
-                        file.inputStream().use { it.copyTo(output) }
-                        output.flush()
-                        val receipt = input.readUTF()
-                        withContext(Dispatchers.Main) { onReceipt(receipt) }
-                        close()
+                while (isActive) {
+                    val socket = server.accept()
+                    connections.add(socket)
+                    launch {
+                        try { socket.use {
+                            socket.soTimeout = 600_000
+                            val input = DataInputStream(socket.getInputStream())
+                            if (input.readUTF() == token) {
+                                val output = DataOutputStream(socket.getOutputStream())
+                                output.writeLong(file.length())
+                                file.inputStream().use { it.copyTo(output) }
+                                output.flush()
+                                val receipt = input.readUTF()
+                                withContext(Dispatchers.Main) { onReceipt(receipt) }
+                                close()
+                            }
+                        } } catch (_: java.io.IOException) { /* A failed route must not close the publisher before a retry. */ }
+                        finally { connections.remove(socket) }
                     }
                 }
             } catch (_: java.io.IOException) { close() }
         }
+    }
+
+    suspend fun publish(): JSONObject {
+        sha256 = withContext(Dispatchers.IO) { MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) } }
+        check(link.connect()) { "Install or connect Seamless to transfer this study." }
         return try { withTimeout(15_000) { ready.await() }
         } catch (e: TimeoutCancellationException) {
             close()
@@ -63,6 +74,7 @@ internal class StudyContentTransfer(context: Context, private val file: File, pr
 
     override fun close() {
         runCatching { server.close() }
+        connections.forEach { runCatching { it.close() } }
         link.unregister(capability)
         link.close()
         scope.cancel()

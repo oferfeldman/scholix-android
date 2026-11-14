@@ -15,6 +15,35 @@ import java.io.File
 import java.util.zip.ZipFile
 
 class AssignmentStudyContentTest {
+    @Test fun stalledOrDisconnectedRouteDoesNotBreakAnotherTransfer() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val file = File.createTempFile("synthetic-transfer-", ".fstudy", context.cacheDir)
+        val bytes = ByteArray(150_000) { (it % 251).toByte() }
+        file.writeBytes(bytes)
+        val received = kotlinx.coroutines.CompletableDeferred<String>()
+        val transfer = StudyContentTransfer(context, file) { received.complete(it) }
+        val server = StudyContentTransfer::class.java.getDeclaredField("server").apply { isAccessible = true }
+            .get(transfer) as java.net.ServerSocket
+        val token = StudyContentTransfer::class.java.getDeclaredField("token").apply { isAccessible = true }.get(transfer) as String
+        try {
+            java.net.Socket("127.0.0.1", server.localPort).close()
+            java.net.Socket("127.0.0.1", server.localPort).use {
+                java.net.Socket("127.0.0.1", server.localPort).use { socket ->
+                    socket.soTimeout = 5000
+                    val output = java.io.DataOutputStream(socket.getOutputStream())
+                    output.writeUTF(token)
+                    output.flush()
+                    val input = java.io.DataInputStream(socket.getInputStream())
+                    assertEquals(bytes.size.toLong(), input.readLong())
+                    assertArrayEquals(bytes, ByteArray(bytes.size).also { input.readFully(it) })
+                    output.writeUTF("synthetic-receipt")
+                    output.flush()
+                    assertEquals("synthetic-receipt", kotlinx.coroutines.withTimeout(5000) { received.await() })
+                }
+            }
+        } finally { transfer.close(); file.delete() }
+    }
+
     @Test fun bundleContainsOriginalSourceAndCompleteQuestionCrops() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         PDFBoxResourceLoader.init(context)
