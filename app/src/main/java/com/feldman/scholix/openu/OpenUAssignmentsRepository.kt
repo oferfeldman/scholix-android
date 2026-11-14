@@ -52,8 +52,7 @@ internal class OpenUAssignmentsRepository(context: Context, val provider: OpenAU
     }.orEmpty()
 
     suspend fun refreshCourses(): List<JSONObject> = withContext(Dispatchers.IO) {
-        val courses = provider.assignmentCourses().sortedWith(compareBy<JSONObject> { it.optInt("courseStatusRank", 1) }
-            .thenByDescending { it.optString("term") }.thenBy { it.optString("name") })
+        val courses = provider.assignmentCourses().sortedWith(OpenAUPlatform.courseOrder)
         save { it.put("courses", JSONArray(courses)) }
         persistSession()
         courses

@@ -572,9 +572,8 @@ fun MainScreen(
                             if (overview.has("hasBooklet")) put("hasBooklet", overview.optBoolean("hasBooklet"))
                         }
                     }
-            }.distinctBy { it.courseDestination() }.sortedBy { course ->
-                if (provider is OpenAUPlatform) OpenAUPlatform.courseStatusRank(
-                    course.optString("status"), course.optString("semesterStartDate")) else 0
+            }.distinctBy { it.courseDestination() }.let { courses ->
+                if (provider is OpenAUPlatform) courses.sortedWith(OpenAUPlatform.courseOrder) else courses
             }
         }.plus(preloadedCourses.filter { course -> platforms.any { it.id == course.optString("platformId") && it !is OpenAUPlatform && it !is GoogleClassroomPlatform } })
             .filter { it.stableCourseKey().isNotBlank() }.distinctBy { it.courseDestination() } +

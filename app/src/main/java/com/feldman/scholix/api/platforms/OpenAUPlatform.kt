@@ -212,11 +212,7 @@ class OpenAUPlatform() : Platform {
             if (courses.isEmpty() || refreshedPlatformIds.add(id)) {
                 refreshCoursesLocked(retryAuthentication = true)
             }
-            ArrayList(courses.sortedWith(
-                compareBy<JSONObject> { it.optInt("courseStatusRank", 1) }
-                    .thenBy { it.optString("semesterStartDate") }
-                    .thenBy { it.optString("name") }
-            ))
+            ArrayList(courses.sortedWith(courseOrder))
         }
     }
 
@@ -905,6 +901,13 @@ class OpenAUPlatform() : Platform {
         .put("platformDisplayName", platformDisplayName)
 
     companion object : Platform.Companion {
+        internal val courseOrder: Comparator<JSONObject> = compareBy<JSONObject> {
+            courseStatusRank(it.optString("status"), it.optString("semesterStartDate"))
+        }.thenComparator { first, second ->
+            val terms = first.optString("term").compareTo(second.optString("term"))
+            if (courseStatusRank(first.optString("status"), first.optString("semesterStartDate")) == 1) terms else -terms
+        }.thenBy { it.optString("name") }
+
         internal fun courseStatusRank(status: String?, semesterStartDate: String?): Int = when {
             status?.contains("בלימוד") == true -> 0
             status?.contains("נרשם") == true && !semesterStartDate.isNullOrBlank() &&

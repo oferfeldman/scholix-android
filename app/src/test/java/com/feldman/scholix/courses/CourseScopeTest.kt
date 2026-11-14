@@ -21,6 +21,19 @@ class CourseScopeTest {
         val restored = OpenAUPlatform.fromJson(JSONObject().put("courses", JSONArray().put(
             JSONObject().put("status", "נרשם").put("courseStatusRank", 2))))
         assertEquals(1, restored.toJson().getJSONArray("courses").getJSONObject(0).getInt("courseStatusRank"))
+        val courses = listOf(
+            "completed-old" to ("הצלחה" to "2025c"),
+            "upcoming-later" to ("נרשם" to "2999b"),
+            "current-old" to ("בלימוד" to "2026c"),
+            "completed-new" to ("הצלחה" to "2026a"),
+            "current-new" to ("בלימוד" to "2027a"),
+            "upcoming-near" to ("נרשם" to "2999a")
+        ).map { (name, statusAndTerm) ->
+            JSONObject().put("name", name).put("status", statusAndTerm.first)
+                .put("term", statusAndTerm.second).put("courseStatusRank", 2)
+        }
+        assertEquals(listOf("current-new", "current-old", "upcoming-near", "upcoming-later",
+            "completed-new", "completed-old"), courses.sortedWith(OpenAUPlatform.courseOrder).map { it.getString("name") })
     }
 
     @Test fun pickerShowsFinalAndExamOrAverageWithoutInventingMissingGrades() {
