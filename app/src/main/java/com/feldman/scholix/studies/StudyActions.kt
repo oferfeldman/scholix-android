@@ -8,10 +8,13 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -27,14 +30,19 @@ import com.feldman.scholix.lemida.studyAssignment
 import com.feldman.scholix.openu.OpenUAssignmentsRepository
 import com.feldman.motion.MotionButton
 import com.feldman.motion.MotionButtonDefaults
+import com.feldman.motion.MotionCard
 import com.feldman.motion.MotionIcons
+import com.feldman.motion.MotionItemPosition
+import com.feldman.motion.rememberSymbolPainter
+import com.feldman.motion.MotionSymbols
 import com.feldman.motion.MotionScaffold
 import com.feldman.scholix.ui.components.SettingsTopBar
 
 /** Used by assignments and the general catalog; no upload or provider submission is performed. */
 @Composable
 fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? = null, courseKey: String? = null,
-                 courseAssignmentKeys: Set<String> = emptySet(), prepareContent: (suspend () -> java.io.File)? = null) {
+                 courseAssignmentKeys: Set<String> = emptySet(), actionPosition: MotionItemPosition? = null,
+                 prepareContent: (suspend () -> java.io.File)? = null) {
     val context = LocalContext.current
     val catalog = remember(context) { StudyCatalog(context) }
     var entries by remember(assignment?.key, courseProviderId, courseKey) { mutableStateOf(catalog.entries()) }
@@ -117,29 +125,39 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
         onLocal = { picker = false; launch(it) },
         onSent = { picker = false; pending = null; message = "Opened Documents on $it" },
         onDismiss = { picker = false; pending = null })
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        entries.filter { reference ->
-            assignment == null &&
-                (courseProviderId == null || (reference.courseProviderId == courseProviderId && reference.courseKey == courseKey) ||
-                    reference.assignmentKey in courseAssignmentKeys)
-        }.forEach { reference ->
-            MotionButton(text = "Open ${reference.title}", enabled = pending == null,
-                modifier = Modifier.fillMaxWidth(),
+    val actions: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            entries.filter { reference ->
+                assignment == null &&
+                    (courseProviderId == null || (reference.courseProviderId == courseProviderId && reference.courseKey == courseKey) ||
+                        reference.assignmentKey in courseAssignmentKeys)
+            }.forEach { reference ->
+                MotionButton(text = "Open ${reference.title}", enabled = pending == null,
+                    modifier = Modifier.fillMaxWidth(),
+                    sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    onClick = { request(reference) })
+                if (!reference.isLocal && reference.publication != null) Text("This published study has not been downloaded. Download support is not available yet.")
+            }
+            val openStudy = { request(assignment?.let { item -> entries.firstOrNull { it.assignmentKey == item.key } }) }
+            if (actionPosition != null) {
+                Row(Modifier.fillMaxWidth().clickable(enabled = pending == null, role = Role.Button, onClick = openStudy)
+                    .heightIn(min = 56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(rememberSymbolPainter(MotionSymbols.ic_school), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Open fstudy", style = MaterialTheme.typography.bodyLarge)
+                }
+            } else MotionButton(text = "Open fstudy", icon = MotionIcons.Outlined.School,
+                modifier = Modifier.fillMaxWidth(), enabled = pending == null,
                 sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                onClick = { request(reference) })
-            if (!reference.isLocal && reference.publication != null) Text("This published study has not been downloaded. Download support is not available yet.")
+                contentPadding = PaddingValues(horizontal = 20.dp), onClick = openStudy)
+            if (preparing) LinearProgressIndicator(Modifier.fillMaxWidth())
+            message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-        MotionButton(text = "Open fstudy", icon = MotionIcons.Outlined.School,
-            modifier = Modifier.fillMaxWidth(), enabled = pending == null,
-            sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
-            contentPadding = PaddingValues(horizontal = 20.dp), onClick = {
-            request(assignment?.let { item -> entries.firstOrNull { it.assignmentKey == item.key } })
-        })
-        if (preparing) LinearProgressIndicator(Modifier.fillMaxWidth())
-        message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
+    if (actionPosition != null) MotionCard(position = actionPosition, contentPadding = 0.dp, content = actions)
+    else actions()
 }
 
 @Composable

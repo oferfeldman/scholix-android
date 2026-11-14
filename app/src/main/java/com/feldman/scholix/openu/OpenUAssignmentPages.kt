@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
@@ -23,13 +24,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.feldman.motion.MotionFonts
 import com.feldman.motion.MotionBackButton
-import com.feldman.motion.MotionButton
-import com.feldman.motion.MotionButtonDefaults
-import com.feldman.motion.MotionButtonState
-import com.feldman.motion.MotionIcons
+import com.feldman.motion.MotionCard
+import com.feldman.motion.MotionItemPosition
 import com.feldman.motion.MotionSymbols
 import com.feldman.motion.rememberSymbolPainter
 import com.feldman.motion.MotionLazyColumn
@@ -220,12 +218,13 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                         }
                     }
                 }
-                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(assignment.status.ifBlank { "Status unavailable" }, style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary)
-                    if (assignment.due.isNotBlank()) Text("Due ${assignment.due}", style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(assignment.label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (assignment.status.isNotBlank()) Text(assignment.status, style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (assignment.due.isNotBlank()) Text("Due ${assignment.due}", style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(4.dp)) {
                     if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -234,6 +233,7 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                 Spacer(Modifier.height(16.dp))
                 StudyActions(StudyAssignment.create("https://opal.openu.ac.il", provider.id, assignment.courseKey,
                     assignment.module, assignment.cmid, assignment.label, assignment.courseName, assignment.status, repo.checkedAt(assignment)),
+                    actionPosition = if (assignment.module == "ouilassign") MotionItemPosition.Start else MotionItemPosition.Alone,
                     prepareContent = {
                         val detail = data ?: repo.detail(assignment)
                         val sources = detail.files.filter { it.group == "Original files" }.map { file ->
@@ -245,45 +245,39 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                                 assignment.module, assignment.cmid, assignment.label, assignment.courseName), sources, detail.instructions)
                     })
                 if (assignment.module == "ouilassign") {
-                    Spacer(Modifier.height(8.dp))
-                    MotionButton(text = if (openingUpload) "Opening…" else "Upload files", icon = MotionIcons.Outlined.Upload,
-                        modifier = Modifier.fillMaxWidth(), enabled = !openingUpload,
-                        sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        states = MotionButtonDefaults.states(default = MotionButtonState(
-                            backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer)), onClick = {
-                        openingUpload = true
-                        scope.launch {
-                            try {
-                                withContext(Dispatchers.IO) { provider.assignmentPage(assignment.url) }
-                                val cookies = withContext(Dispatchers.IO) { provider.assignmentBrowserCookies(assignment.url) }
-                                val manager = android.webkit.CookieManager.getInstance()
-                                for (cookie in cookies) kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                                    manager.setCookie(assignment.url, cookie) { accepted ->
-                                        if (continuation.isActive) continuation.resumeWith(if (accepted) Result.success(Unit)
-                                            else Result.failure(java.io.IOException("Could not open the OpenU session.")))
+                    Spacer(Modifier.height(2.dp))
+                    MotionCard(position = MotionItemPosition.End, contentPadding = 0.dp) {
+                        Row(Modifier.fillMaxWidth().clickable(enabled = !openingUpload, role = Role.Button) {
+                            openingUpload = true
+                            scope.launch {
+                                try {
+                                    withContext(Dispatchers.IO) { provider.assignmentPage(assignment.url) }
+                                    val cookies = withContext(Dispatchers.IO) { provider.assignmentBrowserCookies(assignment.url) }
+                                    val manager = android.webkit.CookieManager.getInstance()
+                                    for (cookie in cookies) kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                                        manager.setCookie(assignment.url, cookie) { accepted ->
+                                            if (continuation.isActive) continuation.resumeWith(if (accepted) Result.success(Unit)
+                                                else Result.failure(java.io.IOException("Could not open the OpenU session.")))
+                                        }
                                     }
-                                }
-                                uri.openUri(assignment.url)
-                            } catch (e: CancellationException) { throw e
-                            } catch (e: Exception) { error = e.message ?: "Could not open uploads."
-                            } finally { openingUpload = false }
+                                    uri.openUri(assignment.url)
+                                } catch (e: CancellationException) { throw e
+                                } catch (e: Exception) { error = e.message ?: "Could not open uploads."
+                                } finally { openingUpload = false }
+                            }
+                        }.heightIn(min = 56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(rememberSymbolPainter(MotionSymbols.ic_upload), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.width(12.dp))
+                            Text(if (openingUpload) "Opening…" else "Upload files", style = MaterialTheme.typography.bodyLarge)
                         }
-                    })
+                    }
                 } else TextButton(onClick = { uri.openUri(assignment.url.ifBlank { "https://sheilta.apps.openu.ac.il/Main/Courses" }) }) {
                     Text("Open in OpenU")
                 }
             }
             val fileGroups = data?.files.orEmpty().groupBy { it.group }.toList() +
                 drafts.mapIndexed { index, draft -> "Unsubmitted website draft ${index + 1}" to draft.files }
-            if (fileGroups.isEmpty()) Title("Files")
-            if (fileGroups.isEmpty()) item {
-                Text(if (loading) "Loading files…" else if (error != null) "Files unavailable. Refresh to try again." else "No files provided by OpenU.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                TextButton(onClick = { uri.openUri(assignment.url.ifBlank { "https://sheilta.apps.openu.ac.il/Main/Courses" }) }) { Text("View files in OpenU") }
-            }
-            fileGroups.forEach { (group, files) ->
+            fileGroups.filter { it.second.isNotEmpty() }.forEach { (group, files) ->
                 Title(group)
                 section(items = files, key = { "$group:${it.url}" }, contentType = { "attachment" }) { file ->
                     Row(Modifier.fillMaxWidth().clickable(onClickLabel = "Open ${file.name}") {
@@ -298,26 +292,26 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                if (files.isEmpty()) item { Text("No files.") }
             }
             data?.instructions?.takeIf { it.isNotBlank() }?.let { instructions ->
                 Title("Instructions")
                 item { Text(instructions, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge) }
             }
-            item { TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide details" else "Submission details") } }
-            if (expanded) {
-                if (assignment.opens.isNotBlank()) item { Text("Available from ${assignment.opens}") }
-                data?.let { detail ->
-                    val fields = (detail.fields + detail.submission).distinct()
+            val fields = (data?.fields.orEmpty() + data?.submission.orEmpty()).filter { it.second.isNotBlank() }.distinct()
+            val notices = data?.notices.orEmpty().filter(String::isNotBlank)
+            if (assignment.opens.isNotBlank() || fields.isNotEmpty() || notices.isNotEmpty()) {
+                item { TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide details" else "Submission details") } }
+                if (expanded) {
+                    if (assignment.opens.isNotBlank()) item { Text("Available from ${assignment.opens}") }
                     section(items = fields.withIndex().toList(), key = { "detail:${it.index}" }) { field ->
                         val (label, value) = field.value
                         CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                             ListItem(headlineContent = { Text(value) }, supportingContent = { Text(label) })
                         }
                     }
-                    detail.notices.forEachIndexed { index, notice -> item(key = "notice:$index") { Text(notice) } }
+                    notices.forEachIndexed { index, notice -> item(key = "notice:$index") { Text(notice) } }
+                    if (assignment.module == "ouilassign") item { TextButton(onClick = { onNavigate(AppDest.OpenUDraftHelp) }) { Text("Link website draft") } }
                 }
-                if (assignment.module == "ouilassign") item { TextButton(onClick = { onNavigate(AppDest.OpenUDraftHelp) }) { Text("Link website draft") } }
             }
         }
     }
