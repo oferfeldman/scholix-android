@@ -37,6 +37,23 @@ internal data class OpenUAssignmentFile(val name: String, val url: String, val g
     fun json() = JSONObject().put("name", name).put("url", url).put("group", group)
 }
 
+internal fun openUGradeRows(assignments: List<OpenUAssignment>, summary: JSONArray): JSONArray = JSONArray().apply {
+    assignments.forEach { assignment ->
+        put(JSONObject().put("id", assignment.key).put("assignmentKey", assignment.key)
+            .put("courseKey", assignment.courseKey).put("term", assignment.semester)
+            .put("subject", assignment.courseName).put("name", assignment.label)
+            .put("grade", assignment.grade.takeUnless { it.isBlank() || it == "null" } ?: "-")
+            .put("status", assignment.status).put("due", assignment.due)
+            .put("date", assignment.examDate.ifBlank { assignment.due }).apply {
+                assignment.number.toIntOrNull()?.let { put("assignmentOrder", it) }
+            })
+    }
+    for (index in 0 until summary.length()) {
+        val row = summary.getJSONObject(index)
+        if (row.optString("type") == "final" || row.optString("id").endsWith(":exam")) put(row)
+    }
+}
+
 internal data class OpenUAssignmentDetail(
     val fields: List<Pair<String, String>>, val submission: List<Pair<String, String>>,
     val instructions: String, val files: List<OpenUAssignmentFile>, val notices: List<String>,

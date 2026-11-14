@@ -6,6 +6,21 @@ import org.junit.Test
 import java.io.IOException
 
 class OpenUAssignmentsTest {
+    @Test fun gradeRowsKeepUngradedAssignmentsClickableWithoutLoweringTheAverage() {
+        val graded = item().copy(grade = "95")
+        val pending = graded.copy(number = "12", cmid = "123", grade = "", status = "Not submitted")
+        val rows = openUGradeRows(listOf(graded, pending), org.json.JSONArray().put(
+            JSONObject().put("type", "final").put("grade", "98")))
+        val (assignments, average, final) = com.feldman.scholix.pages.processGrades(rows)
+        assertEquals(2, assignments.size)
+        assertEquals(95f, average, 0f)
+        assertEquals("98", final?.getString("grade"))
+        assertEquals(pending.key, assignments.first().getString("assignmentKey"))
+        assertEquals("-", assignments.first().getString("grade"))
+        val withZero = openUGradeRows(listOf(graded, pending.copy(grade = "0")), org.json.JSONArray())
+        assertEquals(47.5f, com.feldman.scholix.pages.processGrades(withZero).second, 0f)
+    }
+
     @Test fun readsLiveLinearAlgebraDetailsAndPlainTextSubmissionStatus() {
         val html = requireNotNull(javaClass.getResource("/openu/linear-assignment-details.html")).readText()
         val assignment = item().copy(courseId = "20109", semester = "2027a", moodleId = "55366", cmid = "7051294")

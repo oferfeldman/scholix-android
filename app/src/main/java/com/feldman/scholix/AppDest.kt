@@ -134,7 +134,7 @@ sealed class AppDest : MotionDest {
                                val courseKey: String = "", val term: String = "") : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Assignment"
         @IgnoredOnParcel @Transient override val parent: MotionDest = if (courseKey.isNotBlank())
-            CourseSection(providerId, courseKey, term, com.feldman.scholix.courses.CourseSectionKind.ASSIGNMENTS) else Homework
+            CourseSection(providerId, courseKey, term, com.feldman.scholix.courses.CourseSectionKind.GRADES) else Grades
         @IgnoredOnParcel @Transient override val pane = if (courseKey.isBlank()) MotionPaneType.DETAIL else MotionPaneType.EXTRA
         @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
@@ -156,7 +156,7 @@ sealed class AppDest : MotionDest {
                                val courseKey: String = "", val term: String = "", val assignmentKey: String = "") : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Attachment"
         @IgnoredOnParcel @Transient override val parent: MotionDest = if (courseKey.isNotBlank())
-            OpenUAssignment(providerId, assignmentKey, courseKey, term) else Homework
+            OpenUAssignment(providerId, assignmentKey, courseKey, term) else Grades
         @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
@@ -260,7 +260,8 @@ sealed class AppDest : MotionDest {
                 modifier = Modifier.fillMaxSize(),
                 inbarAccessRequested = Grades in state.userOpenedPages,
                 isActive = state.activePage == Grades,
-                onOpenCourse = { state.onScopeSelected(it) }
+                onOpenCourse = { state.onScopeSelected(it) },
+                onOpenAssignment = { onNavigate(it) }
             )
             }
         }

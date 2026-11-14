@@ -711,9 +711,12 @@ fun MainScreen(
     }
     val currentScreen = backStack.backStack.lastOrNull() ?: startDestination
     LaunchedEffect(currentScreen, activeProviderId) {
-        if (currentScreen == AppDest.Home ||
-            (currentScreen in com.feldman.scholix.courses.providerDependentPages && currentScreen !in supportedPages)) {
+        if (currentScreen == AppDest.Home) {
             backStack.navigateTop(mainDestination)
+        }
+        if (currentScreen in com.feldman.scholix.courses.providerDependentPages && currentScreen !in supportedPages) {
+            if (!backStack.pop()) backStack.resetTo(mainDestination)
+            else backStack.navigateTop(mainDestination)
         }
         if (currentScreen == mainDestination) courseCacheEpoch++
     }
@@ -833,7 +836,8 @@ fun MainScreen(
                         navigateFromUser(target, topLevel = true)
                     } else {
                         val sections = courseSections(provider, course)
-                        val preferred = courseScope?.section ?: when (currentScreen) {
+                        val preferred = if (id != activeProviderId) com.feldman.scholix.courses.CourseSectionKind.OVERVIEW
+                        else courseScope?.section ?: when (currentScreen) {
                             AppDest.Grades -> com.feldman.scholix.courses.CourseSectionKind.GRADES
                             AppDest.Homework -> com.feldman.scholix.courses.CourseSectionKind.ASSIGNMENTS
                             AppDest.Materials -> com.feldman.scholix.courses.CourseSectionKind.FILES

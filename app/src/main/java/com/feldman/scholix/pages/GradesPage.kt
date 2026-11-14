@@ -60,6 +60,10 @@ import com.feldman.motion.MotionFonts
 import com.feldman.motion.rememberSymbolPainter
 import com.feldman.motion.MotionTheme
 import com.feldman.scholix.R
+import com.feldman.scholix.AppDest
+import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.openu.OpenUAssignmentsRepository
+import com.feldman.scholix.openu.openUGradeRows
 import com.feldman.scholix.courses.stableCourseKey
 import com.feldman.scholix.courses.courseDestination
 import com.feldman.scholix.TopBarSpacing
@@ -382,6 +386,7 @@ fun GradesScreen(
     focusedTerm: String? = null,
     onOpenCourse: ((com.feldman.scholix.CourseSection) -> Unit)? = null,
     includeTopInset: Boolean = true,
+    onOpenAssignment: ((AppDest.OpenUAssignment) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var inbarRequestedByUser by remember { mutableStateOf(false) }
@@ -517,6 +522,7 @@ fun GradesScreen(
             // The raw code, kept alongside the human-readable message so
             // recoverable failures can be told apart after the fact.
             var requestErrorCode: String? = null
+            var assignmentWarning: String? = null
 
             try {
                 withContext(Dispatchers.IO) {
@@ -540,6 +546,24 @@ fun GradesScreen(
                     } else if (platform is InbarPlatform && !inbarAllowed()) {
                         // Startup displays saved grades without contacting Inbar or requesting SMS.
                         gradesArray = course.optJSONArray("grades") ?: JSONArray()
+                    } else if (platform is OpenAUPlatform) {
+                        val assignments = OpenUAssignmentsRepository(context, platform)
+                        val liveSummary = platform.getGrades(course.stableCourseKey(), year, semester)
+                        val summaryFailed = liveSummary.optJSONObject(0)?.has("error") == true
+                        val currentCourse = if (summaryFailed) course else platform.getCourses()
+                            .firstOrNull { it.stableCourseKey() == course.stableCourseKey() } ?: course
+                        val summary = if (summaryFailed) platform.gradesFromCourse(course) else liveSummary
+                        if (summaryFailed) assignmentWarning = "Could not refresh grades. Showing saved course information."
+                        gradesArray = try {
+                            openUGradeRows(assignments.refresh(currentCourse), summary)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled
+                        } catch (exception: Exception) {
+                            val saved = assignments.cachedAssignments().filter { it.courseKey == course.stableCourseKey() }
+                            val rows = if (saved.isNotEmpty()) openUGradeRows(saved, summary) else summary
+                            if (rows.length() == 0) throw exception
+                            assignmentWarning = "Could not refresh assignments. Showing saved information."
+                            rows
+                        }
                     } else {
                         val previousCookies = (platform as? WebtopPlatform)?.cookies
                         gradesArray = platform.getGrades(
@@ -608,7 +632,7 @@ fun GradesScreen(
                     return@launch
                 }
                 course.put("grades", gradesArray)
-                onResult(list, avg, requestError)
+                onResult(list, avg, requestError ?: assignmentWarning)
                 finalGrade = finalGradeObj
                 isLoading = false
                 loadedKey = keyFor(course, year, semester)
@@ -1031,7 +1055,7 @@ fun GradesScreen(
 
                             stillLoading -> {}
                             grades.isNotEmpty() || finalGrade != null -> {
-                                if (grades.isNotEmpty()) {
+                                if (grades.any { it.optDouble("grade", Double.NaN).isFinite() }) {
                                 MotionCard(
                                     position = MotionItemPosition.Alone,
                                     containerColor = MaterialTheme.colorScheme.primary,
@@ -1182,10 +1206,13 @@ fun GradesScreen(
 
                     }
                     if (!stillLoading){
+                        if ((grades.isNotEmpty() || finalGrade != null) && errorMessage != null) item {
+                            Text(errorMessage!!, color = MaterialTheme.colorScheme.error)
+                        }
                         val indexedGrades = grades.withIndex().toList()
                         val sortedGrades = if (sortBy == "Grade") {
                             indexedGrades.sortedByDescending {
-                                it.value.optDouble("grade", Double.MIN_VALUE)
+                                it.value.optDouble("grade", Double.NEGATIVE_INFINITY)
                             }
                         } else {
                             indexedGrades.sortedWith(
@@ -1203,9 +1230,15 @@ fun GradesScreen(
                             val grade = indexedGrade.value
                             val rawSubject = grade.optString("subject", "Unknown")
                             val rawName = grade.optString("name", "")
+                            val assignmentKey = grade.optString("assignmentKey")
+                            val assignment = assignmentKey.takeIf { it.isNotBlank() }?.let {
+                                AppDest.OpenUAssignment(courses.getOrNull(selectedTab)?.optString("platformId").orEmpty(), it,
+                                    grade.optString("courseKey"), grade.optString("term"))
+                            }
 
                             val rawTitle = if (rawName.isNotBlank()) rawName else rawSubject
-                            val rawSubtitle = if (rawName.isNotBlank() && rawSubject.isNotBlank() && rawSubject != rawName) rawSubject else null
+                            val rawSubtitle = if (assignment != null) grade.optString("status").takeIf(String::isNotBlank)
+                                else if (rawName.isNotBlank() && rawSubject.isNotBlank() && rawSubject != rawName) rawSubject else null
 
                             val isRtl = isRtlText("$rawTitle ${rawSubtitle.orEmpty()}")
 
@@ -1217,6 +1250,9 @@ fun GradesScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .then(if (assignment != null && onOpenAssignment != null) Modifier.clickable {
+                                            onOpenAssignment(assignment)
+                                        } else Modifier)
                                         .padding(
                                             start = 16.dp,
                                             top = 12.dp,
@@ -1254,6 +1290,9 @@ fun GradesScreen(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
+                                        if (assignment != null && grade.optString("due").isNotBlank()) Text(
+                                            "Due ${grade.optString("due")}", style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
 
                                     Spacer(Modifier.width(8.dp))
@@ -1263,7 +1302,11 @@ fun GradesScreen(
                                         if (d % 1.0 == 0.0) d.toLong().toString() else gradeStr
                                     } ?: gradeStr
 
-                                    Text(
+                                    if (assignment != null && (gradeStr.isBlank() || gradeStr == "-")) Text(
+                                        "Not graded", style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.widthIn(max = 100.dp), maxLines = 2
+                                    ) else Text(
                                         text = displayGrade,
                                         style = MaterialTheme.typography.bodyLarge.copy(
                                             fontFamily = MotionFonts.feldman(weight = 700, width = 50f),
@@ -1313,7 +1356,7 @@ fun processGrades(gradesArray: JSONArray): Triple<List<JSONObject>, Float, JSONO
         }
 
         val g = grade.optDouble("grade", Double.NaN)
-        if (!g.isNaN() && (g != 0.0 || grade.has("points"))) {
+        if (!g.isNaN() && (g != 0.0 || grade.has("points") || grade.has("assignmentKey"))) {
             sum += g.toFloat()
             count++
         }

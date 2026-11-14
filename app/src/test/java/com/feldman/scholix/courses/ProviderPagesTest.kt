@@ -14,11 +14,12 @@ class ProviderPagesTest {
         assertFalse(com.feldman.scholix.storage.defaultNavigationOrder.contains(AppDest.Lockerim.label))
     }
 
-    @Test fun openUniversityOffersAssignmentsWithoutSchoolAttendanceOrSchedule() {
+    @Test fun openUniversityCombinesAssignmentsWithGradesWithoutSchoolAttendanceOrSchedule() {
         val pages = supportedProviderPages(OpenAUPlatform())
-        assertTrue(AppDest.Homework in pages)
+        assertFalse(AppDest.Homework in pages)
         assertTrue(AppDest.Materials in pages)
         assertTrue(AppDest.Grades in pages)
+        assertFalse(CourseSectionKind.ASSIGNMENTS in courseSections(OpenAUPlatform(), org.json.JSONObject()))
         assertFalse(AppDest.Attendance in pages)
         assertFalse(AppDest.Schedule in pages)
         assertFalse(AppDest.Messages in pages)

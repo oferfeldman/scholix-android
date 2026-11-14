@@ -59,7 +59,7 @@ class CourseScopeTest {
     }
 
     @Test fun scopedAssignmentAndAttachmentKeepTheirCourseAncestry() {
-        val section = CourseSection("one", "20476:2027a", "2027a", CourseSectionKind.ASSIGNMENTS)
+        val section = CourseSection("one", "20476:2027a", "2027a", CourseSectionKind.GRADES)
         val assignment = AppDest.OpenUAssignment("one", "activity", section.courseKey, section.term)
         val attachment = AppDest.OpenUAttachment("one", "Question", "https://example.test/question.pdf",
             section.courseKey, section.term, assignment.assignmentKey)
@@ -67,12 +67,12 @@ class CourseScopeTest {
         assertEquals(assignment, attachment.parent)
         assertEquals(section, attachment.courseScope())
         assertEquals(section, ScopeSwitcher(attachment).courseScope())
-        assertEquals(AppDest.Homework, AppDest.OpenUAssignment("one", "activity").parent)
+        assertEquals(AppDest.Grades, AppDest.OpenUAssignment("one", "activity").parent)
     }
 
     @Test fun globalExcursionPreservesTheOpenCourseItem() {
         val stack = MotionDestBackStack(AppDest.Home)
-        val section = course().courseDestination(CourseSectionKind.ASSIGNMENTS)
+        val section = course().courseDestination(CourseSectionKind.GRADES)
         val assignment = AppDest.OpenUAssignment("one", "activity", section.courseKey, section.term)
         stack.navigateTo(assignment)
         stack.navigateTop(AppDest.Grades)
@@ -84,7 +84,7 @@ class CourseScopeTest {
 
     @Test fun providerGradesIsAnExcursionThatReturnsToTheExactCourseInOneBack() {
         val stack = MotionDestBackStack(AppDest.Home)
-        val section = course().courseDestination(CourseSectionKind.ASSIGNMENTS)
+        val section = course().courseDestination(CourseSectionKind.GRADES)
         val assignment = AppDest.OpenUAssignment("one", "activity", section.courseKey, section.term)
         stack.navigateTo(assignment)
         val provider = ProviderGrades("school")

@@ -36,7 +36,7 @@ import org.json.JSONObject
 
 object OpenUCourseSections {
     fun available(course: JSONObject): List<CourseSectionKind> = listOf(
-        CourseSectionKind.OVERVIEW, CourseSectionKind.UNITS, CourseSectionKind.ASSIGNMENTS,
+        CourseSectionKind.OVERVIEW, CourseSectionKind.UNITS,
         CourseSectionKind.RECORDINGS, CourseSectionKind.FORUMS, CourseSectionKind.ARCHIVE, CourseSectionKind.BOOKS,
     ) + (if (course.optBoolean("hasBooklet")) listOf(CourseSectionKind.BOOKLET) else emptyList()) +
         listOf(CourseSectionKind.GRADES, CourseSectionKind.STUDIES)

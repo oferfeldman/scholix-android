@@ -14,8 +14,13 @@ import androidx.compose.ui.test.performClick
 import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import com.feldman.motion.MotionTheme
+import com.feldman.motion.MotionDest
 import com.feldman.scholix.MainScreen
+import com.feldman.scholix.AppDest
+import com.feldman.scholix.CourseSection
+import com.feldman.scholix.LocalAppState
 import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.api.platforms.DemoPlatform
 import org.json.JSONObject
 import com.feldman.scholix.pages.LockerDatabase
 import com.feldman.scholix.pages.LockerRepository
@@ -26,6 +31,41 @@ import org.junit.Assume.assumeTrue
 
 class CourseNavigationTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun switchingSchoolProviderToOpenUOpensOverviewInsteadOfKeepingGrades() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue(context.packageName.endsWith(".studyhandoff.qa"))
+        val database = Room.inMemoryDatabaseBuilder(context, LockerDatabase::class.java).build()
+        val repository = LockerRepository(database.lockerItemDao(), database.lockerTabDao())
+        val school = DemoPlatform()
+        val openu = OpenAUPlatform()
+        val courses = listOf(
+            JSONObject().put("platformId", school.id).put("courseKey", "school").put("name", "School algebra"),
+            JSONObject().put("platformId", openu.id).put("courseKey", "20109:2027a").put("name", "University algebra")
+        )
+        lateinit var activity: ComponentActivity
+        var active: MotionDest? = null
+        try {
+            compose.setContent {
+                MotionTheme {
+                    activity = LocalActivity.current as ComponentActivity
+                    MainScreen(courses, repository, {}, listOf(school, openu), {}, {},
+                        snackbarHost = { active = LocalAppState.current.activePage })
+                }
+            }
+            compose.runOnIdle { assertEquals(AppDest.Grades, active) }
+            compose.onNodeWithContentDescription("Choose course").performClick()
+            compose.onNodeWithText("University algebra").performClick()
+            compose.runOnIdle {
+                assertEquals(openu.id, (active as CourseSection).providerId)
+                assertEquals(CourseSectionKind.OVERVIEW, (active as CourseSection).section)
+            }
+            compose.onNodeWithContentDescription("Overview").assertExists()
+        } finally {
+            compose.runOnUiThread { activity.finish() }
+            database.close()
+        }
+    }
 
     @Test fun interruptingSettingsWithBackKeepsTheReturningCourseStateUnique() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

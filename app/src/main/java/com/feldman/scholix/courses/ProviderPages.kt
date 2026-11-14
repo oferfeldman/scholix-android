@@ -12,7 +12,7 @@ fun supportedProviderPages(provider: Platform?, lemida: Boolean = false): List<A
     AppDest.Grades.takeIf { provider?.suportsGrades == true },
     AppDest.Schedule.takeIf { provider?.supportsSchedule == true },
     AppDest.Attendance.takeIf { provider?.supportsAttendance == true },
-    AppDest.Homework.takeIf { lemida || provider is OpenAUPlatform || provider is GoogleClassroomPlatform },
+    AppDest.Homework.takeIf { lemida || provider is GoogleClassroomPlatform },
     AppDest.Messages.takeIf { provider is WebtopPlatform || provider is GoogleClassroomPlatform },
     AppDest.Materials.takeIf { lemida || provider is OpenAUPlatform }
 )

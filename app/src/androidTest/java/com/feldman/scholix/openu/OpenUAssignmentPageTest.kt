@@ -1,5 +1,6 @@
 package com.feldman.scholix.openu
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.runtime.getValue
@@ -10,6 +11,10 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import com.feldman.motion.MotionTheme
@@ -26,6 +31,45 @@ import org.junit.Test
 
 class OpenUAssignmentPageTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun combinedGradesPageShowsAndOpensBothGradedAndUngradedAssignments() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue(context.packageName.endsWith(".studyhandoff.qa"))
+        val previous = PlatformStorage.loadPlatforms(context)
+        val course = JSONObject().put("id", "20109").put("courseKey", "20109:2027a")
+            .put("name", "Synthetic course").put("term", "2027a")
+        val provider = OpenAUPlatform.fromJson(JSONObject().put("username", "synthetic-grades")
+            .put("lastCourseRefresh", System.currentTimeMillis()).put("courses", JSONArray().put(course)))
+        val graded = OpenUAssignment("20109", "Synthetic course", "2027a", "101", "01", "File assignment",
+            "https://opal.openu.ac.il/mod/ouilassign/view.php?id=1", "ouilassign", "1", grade = "95", status = "Checked")
+        val pending = graded.copy(number = "02", cmid = "2", grade = "", status = "Not submitted", due = "19/11/2026")
+        val prefs = context.getSharedPreferences("openu_assignments_${provider.id}", 0)
+        var opened: AppDest.OpenUAssignment? = null
+        try {
+            PlatformStorage.savePlatforms(context, previous + provider)
+            prefs.edit().putString("snapshot", JSONObject().put("account", provider.getUsername())
+                .put("coursesData", JSONObject().put(graded.courseKey, JSONObject()
+                    .put("items", JSONArray().put(graded.json()).put(pending.json())))).toString()).commit()
+            compose.setContent { MotionTheme {
+                com.feldman.scholix.pages.GradesScreen(androidx.compose.ui.Modifier.fillMaxSize(), listOf(course),
+                    focusedProviderId = provider.id, focusedCourseKey = graded.courseKey,
+                    onOpenAssignment = { opened = it })
+            } }
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("File assignment 01", substring = true)
+                .fetchSemanticsNodes().isNotEmpty() }
+            compose.onNode(hasScrollAction()).performScrollToNode(hasText("File assignment 02", substring = true))
+            compose.onNodeWithText("File assignment 02", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("Not graded").assertExists()
+            compose.onNodeWithText("File assignment 02", substring = true).performClick()
+            assertEquals(AppDest.OpenUAssignment(provider.id, pending.key, pending.courseKey, pending.semester), opened)
+            compose.onNode(hasScrollAction()).performScrollToNode(hasText("File assignment 01", substring = true))
+            compose.onNodeWithText("File assignment 01", substring = true).performClick()
+            assertEquals(graded.key, opened?.assignmentKey)
+        } finally {
+            PlatformStorage.savePlatforms(context, previous)
+            prefs.edit().clear().commit()
+        }
+    }
 
     @Test fun connectedActionsSeparateRtlMetadataAndHideEmptySections() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

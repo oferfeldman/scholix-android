@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.feldman.motion.*
@@ -58,6 +59,10 @@ data class CourseSection(
         }
         val course = state.courseCatalog.singleOrNull { matches(it) }
         val provider = state.platforms.firstOrNull { it.id == providerId }
+        if (provider is OpenAUPlatform && section == CourseSectionKind.ASSIGNMENTS) {
+            LaunchedEffect(this) { state.onScopeSelected(copy(section = CourseSectionKind.GRADES)) }
+            return
+        }
         if (course == null) {
             MotionScaffold(topBar = { com.feldman.scholix.ui.components.SettingsTopBar("Course", onBack) }) {
                 Item { Text("This course is no longer available for this account.") }
@@ -72,7 +77,8 @@ data class CourseSection(
                 modifier = Modifier.fillMaxSize(), preloadedCourses = state.preloadedCourses,
                 focusedProviderId = providerId, focusedCourseKey = courseKey, focusedTerm = term,
                 inbarAccessRequested = true, isActive = state.activePage == this,
-                onOpenCourse = { state.onScopeSelected(it) }, includeTopInset = false) }
+                onOpenCourse = { state.onScopeSelected(it) }, includeTopInset = false,
+                onOpenAssignment = { scopedNavigator(it) }) }
             }
             section == CourseSectionKind.STUDIES -> com.feldman.scholix.studies.StudiesPage(onBack, providerId, courseKey)
             provider is OpenAUPlatform -> com.feldman.scholix.openu.course.OpenUCourseSection(
@@ -114,6 +120,6 @@ data class ProviderGrades(val providerId: String = "") : AppDest() {
         val state = LocalAppState.current
         com.feldman.scholix.pages.GradesScreen(Modifier.fillMaxSize(), state.preloadedCourses,
             inbarAccessRequested = true, isActive = state.activePage == this, focusedProviderId = providerId,
-            onOpenCourse = { state.onScopeSelected(it) })
+            onOpenCourse = { state.onScopeSelected(it) }, onOpenAssignment = { onNavigate(it) })
     }
 }

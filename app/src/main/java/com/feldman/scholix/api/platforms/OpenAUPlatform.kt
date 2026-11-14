@@ -612,7 +612,7 @@ class OpenAUPlatform() : Platform {
         }
     }
 
-    private fun gradesFromCourse(course: JSONObject): JSONArray {
+    internal fun gradesFromCourse(course: JSONObject): JSONArray {
         val grades = JSONArray()
         val courseName = course.optString("name")
         val courseKey = course.optString("courseKey")
