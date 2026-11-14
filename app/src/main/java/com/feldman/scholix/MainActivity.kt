@@ -76,7 +76,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -717,15 +716,17 @@ fun MainScreen(
     }
     val courseScope = currentScreen.courseScope()
     val scopeCourse = courseScope?.let { scope -> courseCatalog.singleOrNull { scope.matches(it) } }
-    val navigationPages = if (courseScope != null && scopeCourse != null) {
-        courseSections(platforms.firstOrNull { it.id == courseScope.providerId }, scopeCourse)
-            .map { courseScope.copy(section = it) } + listOf(mainDestination, AppDest.Settings)
+    // Keep the returning course's bar intact while Settings hides it.
+    val navigationScope = backStack.backStack.asReversed().firstOrNull { it.showNavigation }?.courseScope()
+    val navigationCourse = navigationScope?.let { scope -> courseCatalog.singleOrNull { scope.matches(it) } }
+    val navigationPages = if (navigationScope != null && navigationCourse != null) {
+        courseSections(platforms.firstOrNull { it.id == navigationScope.providerId }, navigationCourse)
+            .map { navigationScope.copy(section = it) } + listOf(mainDestination, AppDest.Settings)
     } else globalNavigationPages
     val activeNavigationPage = if (generateSequence<MotionDest>(currentScreen) { it.parent }.any { it is ProviderGrades })
         AppDest.Grades else backStack.backStack.asReversed().firstNotNullOfOrNull { screen ->
         generateSequence<MotionDest>(screen) { it.parent }.firstOrNull { it in navigationPages }
     }
-    val courseStateHolder = rememberSaveableStateHolder()
     var courseLocations by rememberSaveable { mutableStateOf(arrayListOf<AppDest>()) }
     LaunchedEffect(currentScreen) {
         if (courseScope != null && scopeCourse != null && currentScreen is AppDest && currentScreen !is ScopeSwitcher) {
@@ -795,23 +796,23 @@ fun MainScreen(
         backStack.navigateTo(ScopeSwitcher(currentScreen as? AppDest ?: mainDestination))
     } else null
 
-    CompositionLocalProvider(LocalAppState provides appState, LocalScopeControl provides scopeControl,
-        LocalCourseStateHolder provides courseStateHolder) {
+    CompositionLocalProvider(LocalAppState provides appState, LocalScopeControl provides scopeControl) {
         val showProviderHeader = currentScreen is CourseSection || (courseScope == null && currentScreen in com.feldman.scholix.courses.providerDependentPages)
         val pickerCourses = providerOptions.flatMap { id ->
             val provider = platforms.firstOrNull { it.id == id }
             val catalogId = if (id == "lemida" && lemidaSnapshot.account.isNotBlank()) "lemida:${lemidaSnapshot.account}" else id
-            listOf(JSONObject().put("platformId", catalogId).put("providerRoot", true)
+            courseCatalog.filter { it.optString("platformId") == catalogId }.map { course ->
+                JSONObject(course.toString()).put("platformName", provider?.providerLabel() ?: "Lemida")
+            }.ifEmpty { listOf(JSONObject().put("platformId", catalogId).put("providerRoot", true)
                 .put("platformName", provider?.providerLabel() ?: "Lemida")
-                .put("name", provider?.providerLabel() ?: "Lemida").put("status", "All courses")) +
-                courseCatalog.filter { it.optString("platformId") == catalogId }
+                .put("name", provider?.providerLabel() ?: "Lemida")) }
         }
         val pickerIndex = pickerCourses.indexOfFirst { course ->
             if (courseScope != null) courseScope.matches(course)
-            else course.optBoolean("providerRoot") &&
-                (course.optString("platformId") == activeProviderId || activeProviderId == "lemida" && course.optString("platformId").startsWith("lemida:"))
+            else course.optString("platformId") == activeProviderId ||
+                activeProviderId == "lemida" && course.optString("platformId").startsWith("lemida:")
         }.coerceAtLeast(0)
-        Column(Modifier.fillMaxSize()) {
+        val providerHeader: @Composable () -> Unit = {
         if (showProviderHeader && pickerCourses.isNotEmpty()) {
             com.feldman.scholix.ui.components.CoursePickerBar(
                 courses = pickerCourses, selectedIndex = pickerIndex,
@@ -838,8 +839,9 @@ fun MainScreen(
                     }
                 },
                 expanded = providerPickerExpanded, onExpandedChange = { providerPickerExpanded = it },
-                providersById = platforms.associateBy { it.id }, groupAllProviders = true,
+                providersById = platforms.associateBy { it.id },
                 modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp))
+        }
         }
         CompositionLocalProvider(LocalProviderHeaderVisible provides showProviderHeader) {
         // Motion owns the shell: bar, rail, the bar's slide and predictive back, and the overflow
@@ -847,7 +849,7 @@ fun MainScreen(
         MotionNavFlow(
             startDestination = startDestination,
             destinations = destinations,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxSize(),
             backStack = backStack,
             motionLevel = motionLevel,
             backNavigationBehavior = if (courseScope != null) MotionBackNavigationBehavior.PopLatest
@@ -856,7 +858,12 @@ fun MainScreen(
             theme = null,
             navigation = { content ->
                 MotionNavFlowAutomaticNavigation(
-                    content = content,
+                    content = {
+                        Column(Modifier.fillMaxSize()) {
+                            providerHeader()
+                            Box(Modifier.weight(1f)) { content() }
+                        }
+                    },
                     snackbarHost = snackbarHost,
                     navigationDestinations = navigationPages,
                     selectedDestination = selectedNavbarDest,
@@ -870,7 +877,6 @@ fun MainScreen(
                 )
             }
         )
-        }
         }
     }
 }

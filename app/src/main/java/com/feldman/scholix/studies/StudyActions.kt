@@ -14,6 +14,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -25,6 +26,8 @@ import com.feldman.scholix.lemida.LemidaSnapshot
 import com.feldman.scholix.lemida.studyAssignment
 import com.feldman.scholix.openu.OpenUAssignmentsRepository
 import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionButtonDefaults
+import com.feldman.motion.MotionIcons
 import com.feldman.motion.MotionScaffold
 import com.feldman.scholix.ui.components.SettingsTopBar
 
@@ -121,10 +124,16 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
                     reference.assignmentKey in courseAssignmentKeys)
         }.forEach { reference ->
             MotionButton(text = "Open ${reference.title}", enabled = pending == null,
+                modifier = Modifier.fillMaxWidth(),
+                sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
+                contentPadding = PaddingValues(horizontal = 20.dp),
                 onClick = { request(reference) })
             if (!reference.isLocal && reference.publication != null) Text("This published study has not been downloaded. Download support is not available yet.")
         }
-        MotionButton(text = "Open fstudy", enabled = pending == null, onClick = {
+        MotionButton(text = "Open fstudy", icon = MotionIcons.Outlined.School,
+            modifier = Modifier.fillMaxWidth(), enabled = pending == null,
+            sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp), onClick = {
             request(assignment?.let { item -> entries.firstOrNull { it.assignmentKey == item.key } })
         })
         if (preparing) LinearProgressIndicator(Modifier.fillMaxWidth())

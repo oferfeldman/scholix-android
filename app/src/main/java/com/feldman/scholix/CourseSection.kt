@@ -44,9 +44,7 @@ data class CourseSection(
     @Composable
     override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
                          onFabAction: ((() -> Unit) -> Unit) -> Unit) {
-        val holder = LocalCourseStateHolder.current
-        if (holder != null) holder.SaveableStateProvider(this) { CourseContent(onNavigate, onBack, searchQuery) }
-        else CourseContent(onNavigate, onBack, searchQuery)
+        CourseContent(onNavigate, onBack, searchQuery)
     }
 
     @Composable

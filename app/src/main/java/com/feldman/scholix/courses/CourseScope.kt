@@ -1,7 +1,5 @@
 package com.feldman.scholix.courses
 
-import androidx.compose.runtime.compositionLocalOf
-import androidx.compose.runtime.saveable.SaveableStateHolder
 import com.feldman.motion.MotionDest
 import com.feldman.scholix.CourseSection
 import com.feldman.scholix.api.Platform
@@ -28,8 +26,6 @@ fun courseSections(provider: Platform?, course: JSONObject): List<CourseSectionK
         CourseSectionKind.ASSIGNMENTS, CourseSectionKind.FILES, CourseSectionKind.STUDIES)
     else -> if (provider?.suportsGrades == true) listOf(CourseSectionKind.GRADES) else emptyList()
 }).filterNot { it == CourseSectionKind.STUDIES }
-
-val LocalCourseStateHolder = compositionLocalOf<SaveableStateHolder?> { null }
 
 fun CourseSection.sameCourse(other: CourseSection): Boolean =
     providerId == other.providerId && courseKey == other.courseKey && term == other.term

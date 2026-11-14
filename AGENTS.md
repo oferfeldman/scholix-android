@@ -8,7 +8,7 @@ Keep connected school providers such as Webtop and Mashov, university providers 
 
 The user removed the course-first Home on 13 November 2026. Open Grades when supported by the selected provider, otherwise its first supported page (or Tiktek). Omit Home from navigation and return from a course to its provider's main page. Keep the course switcher and each page's distinct icon. Preview proposed Android designs with the app's actual Compose/Motion components, fonts, colors, shapes, and provider data.
 
-Use one Grades-style picker for providers and courses, with courses nested inside their provider account's folder. Course pages keep a single header and distinct section icons; avoid dashboard sections and resume cards.
+Use one Grades-style picker for providers and courses. Only accounts with two or more courses get a provider folder; single courses appear directly. Do not add an All courses/main courses option. Course pages keep a single header and distinct section icons; avoid dashboard sections and resume cards.
 
 The normal provider picker scopes all main feature pages and their navigation to supported capabilities. Hide Studies from navigation while retaining assignment study handoff. Assignments has no redundant title bar; retain its course picker and refresh/sign-in controls.
 

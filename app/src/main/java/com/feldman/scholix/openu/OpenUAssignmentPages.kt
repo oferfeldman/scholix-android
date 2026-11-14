@@ -23,9 +23,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.feldman.motion.MotionFonts
 import com.feldman.motion.MotionBackButton
 import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionButtonDefaults
+import com.feldman.motion.MotionButtonState
+import com.feldman.motion.MotionIcons
 import com.feldman.motion.MotionSymbols
 import com.feldman.motion.rememberSymbolPainter
 import com.feldman.motion.MotionLazyColumn
@@ -184,7 +188,10 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
         catch (e: Exception) { error = e.message ?: "Could not update this assignment." }
         finally { loading = false }
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    Column(Modifier.widthIn(max = 840.dp).fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(TopBarSpacing()))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             MotionBackButton(onClick = onBack)
@@ -199,10 +206,10 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
             item {
                 CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(assignment.label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                     Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SubjectIcon(subject = assignment.courseName, assignment = assignment.label)
+                        SubjectIcon(subject = assignment.courseName, assignment = assignment.label, size = 48.dp, iconSize = 28.dp)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(assignment.label, style = MaterialTheme.typography.headlineMedium.copy(
+                            Text(assignment.label, style = MaterialTheme.typography.headlineSmall.copy(
                                 fontFamily = MotionFonts.feldman(weight = 600), fontWeight = FontWeight.SemiBold))
                             Text(assignment.semester, style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -213,10 +220,16 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                         }
                     }
                 }
-                Text(listOf(assignment.status.ifBlank { "Status unavailable" }, assignment.due.takeIf { it.isNotBlank() }?.let { "Due $it" })
-                    .filterNotNull().joinToString(" · "), style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(assignment.status.ifBlank { "Status unavailable" }, style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary)
+                    if (assignment.due.isNotBlank()) Text("Due ${assignment.due}", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(4.dp)) {
+                    if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
                 error?.let { Text(it, Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.error) }
                 Spacer(Modifier.height(16.dp))
                 StudyActions(StudyAssignment.create("https://opal.openu.ac.il", provider.id, assignment.courseKey,
@@ -233,7 +246,13 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                     })
                 if (assignment.module == "ouilassign") {
                     Spacer(Modifier.height(8.dp))
-                    MotionButton(text = if (openingUpload) "Opening…" else "Upload files", enabled = !openingUpload, onClick = {
+                    MotionButton(text = if (openingUpload) "Opening…" else "Upload files", icon = MotionIcons.Outlined.Upload,
+                        modifier = Modifier.fillMaxWidth(), enabled = !openingUpload,
+                        sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        states = MotionButtonDefaults.states(default = MotionButtonState(
+                            backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer)), onClick = {
                         openingUpload = true
                         scope.launch {
                             try {
@@ -258,13 +277,14 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
             }
             val fileGroups = data?.files.orEmpty().groupBy { it.group }.toList() +
                 drafts.mapIndexed { index, draft -> "Unsubmitted website draft ${index + 1}" to draft.files }
-            Title("Files")
+            if (fileGroups.isEmpty()) Title("Files")
             if (fileGroups.isEmpty()) item {
                 Text(if (loading) "Loading files…" else if (error != null) "Files unavailable. Refresh to try again." else "No files provided by OpenU.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 TextButton(onClick = { uri.openUri(assignment.url.ifBlank { "https://sheilta.apps.openu.ac.il/Main/Courses" }) }) { Text("View files in OpenU") }
             }
             fileGroups.forEach { (group, files) ->
+                Title(group)
                 section(items = files, key = { "$group:${it.url}" }, contentType = { "attachment" }) { file ->
                     Row(Modifier.fillMaxWidth().clickable(onClickLabel = "Open ${file.name}") {
                         onNavigate(AppDest.OpenUAttachment(provider.id, file.name, file.url))
@@ -273,7 +293,6 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                             Text(file.name, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(group, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(rememberSymbolPainter(MotionSymbols.ic_open_in_new), null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -281,11 +300,14 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                 }
                 if (files.isEmpty()) item { Text("No files.") }
             }
-            item { TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide details" else "Instructions and details") } }
+            data?.instructions?.takeIf { it.isNotBlank() }?.let { instructions ->
+                Title("Instructions")
+                item { Text(instructions, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge) }
+            }
+            item { TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide details" else "Submission details") } }
             if (expanded) {
                 if (assignment.opens.isNotBlank()) item { Text("Available from ${assignment.opens}") }
                 data?.let { detail ->
-                    if (detail.instructions.isNotBlank()) item { Text(detail.instructions, style = MaterialTheme.typography.bodyLarge) }
                     val fields = (detail.fields + detail.submission).distinct()
                     section(items = fields.withIndex().toList(), key = { "detail:${it.index}" }) { field ->
                         val (label, value) = field.value
@@ -298,6 +320,8 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                 if (assignment.module == "ouilassign") item { TextButton(onClick = { onNavigate(AppDest.OpenUDraftHelp) }) { Text("Link website draft") } }
             }
         }
+    }
+    }
     }
 }
 

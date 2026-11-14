@@ -44,14 +44,14 @@ private sealed interface CourseDropdownEntry {
     data class Folder(val platformId: String, val courseIndices: List<Int>) : CourseDropdownEntry
 }
 
-private fun buildCourseDropdownEntries(courses: List<JSONObject>, groupAllProviders: Boolean): List<CourseDropdownEntry> {
+private fun buildCourseDropdownEntries(courses: List<JSONObject>): List<CourseDropdownEntry> {
     val byProvider = courses.indices.groupBy { index -> courses[index].optString("platformId") }
     val emittedFolders = mutableSetOf<String>()
     return buildList {
         courses.indices.forEach { index ->
             val platformId = courses[index].optString("platformId")
             val providerCourses = byProvider[platformId].orEmpty()
-            if (platformId.isNotBlank() && (groupAllProviders || providerCourses.size >= 3)) {
+            if (platformId.isNotBlank() && providerCourses.size >= 2) {
                 if (emittedFolders.add(platformId)) {
                     add(CourseDropdownEntry.Folder(platformId, providerCourses))
                 }
@@ -150,11 +150,10 @@ internal fun CoursePickerBar(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     providersById: Map<String, Platform>,
-    modifier: Modifier = Modifier,
-    groupAllProviders: Boolean = false
+    modifier: Modifier = Modifier
 ) {
     val courseLabel = stringResource(R.string.course)
-    val menuEntries = remember(courses, groupAllProviders) { buildCourseDropdownEntries(courses, groupAllProviders) }
+    val menuEntries = remember(courses) { buildCourseDropdownEntries(courses) }
     val hasFolders = remember(menuEntries) { menuEntries.any { it is CourseDropdownEntry.Folder } }
     var openFolderPlatformId by remember { mutableStateOf<String?>(null) }
 
@@ -318,7 +317,7 @@ internal fun CoursePickerBar(
                                             ?.optString("platformId") == entry.platformId
                                         CourseDropdownMenuRow(
                                             title = providerName,
-                                            description = listOfNotNull(provider?.providerDescription()?.takeIf { it.isNotBlank() }, "${entry.courseIndices.count { !courses[it].optBoolean("providerRoot") }} courses").joinToString(" · "),
+                                            description = listOfNotNull(provider?.providerDescription()?.takeIf { it.isNotBlank() }, "${entry.courseIndices.size} courses").joinToString(" · "),
                                             selected = selectedIsInside,
                                             leadingContent = {
                                                 SubjectIcon(

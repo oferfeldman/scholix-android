@@ -1,10 +1,12 @@
 package com.feldman.scholix.openu
 
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import com.feldman.motion.MotionTheme
 import com.feldman.scholix.AppDest
@@ -20,7 +22,7 @@ import org.junit.Test
 class OpenUAssignmentPageTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun filesAndUploadAreVisibleBeforeExpandedInstructions() {
+    @Test fun compactActionsAndOriginalFilesRemainVisibleWithInstructions() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assumeTrue(context.packageName.endsWith(".studyhandoff.qa"))
         val previous = PlatformStorage.loadPlatforms(context)
@@ -45,12 +47,10 @@ class OpenUAssignmentPageTest {
                     }
                 }, onBack = {})
             } }
-            compose.onNodeWithText("Open fstudy").assertIsDisplayed()
-            compose.onNodeWithText("Upload files").assertIsDisplayed()
+            compose.onNodeWithText("Open fstudy").assertIsDisplayed().assertHeightIsEqualTo(48.dp)
+            compose.onNodeWithText("Upload files").assertIsDisplayed().assertHeightIsEqualTo(48.dp)
             compose.onNodeWithText("Task.pdf").performScrollTo().performClick()
             assertTrue(openedFile)
-            compose.onNodeWithText("Synthetic long instructions").assertDoesNotExist()
-            compose.onNodeWithText("Instructions and details").performScrollTo().performClick()
             compose.onNodeWithText("Synthetic long instructions").performScrollTo().assertIsDisplayed()
         } finally {
             PlatformStorage.savePlatforms(context, previous)
