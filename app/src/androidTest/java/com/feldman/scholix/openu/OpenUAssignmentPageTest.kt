@@ -55,8 +55,8 @@ class OpenUAssignmentPageTest {
                 }, onBack = {})
                 }
             } }
-            val study = compose.onNodeWithText("Open fstudy").assertIsDisplayed().assertHeightIsEqualTo(56.dp).fetchSemanticsNode().boundsInRoot
-            val upload = compose.onNodeWithText("Upload files").assertIsDisplayed().assertHeightIsEqualTo(56.dp).fetchSemanticsNode().boundsInRoot
+            val study = compose.onNodeWithText("Open fstudy").assertIsDisplayed().assertHeightIsEqualTo(48.dp).fetchSemanticsNode().boundsInRoot
+            val upload = compose.onNodeWithText("Upload files").assertIsDisplayed().assertHeightIsEqualTo(48.dp).fetchSemanticsNode().boundsInRoot
             assertEquals(2f * context.resources.displayMetrics.density, upload.top - study.bottom, 1f)
             val status = compose.onNodeWithText(item.status).fetchSemanticsNode().boundsInRoot
             val due = compose.onNodeWithText("Due ${item.due}").fetchSemanticsNode().boundsInRoot
@@ -69,14 +69,16 @@ class OpenUAssignmentPageTest {
             compose.runOnIdle {
                 snapshot.getJSONObject("details").getJSONObject(item.key).put("data", detail.copy(
                     instructions = "", files = emptyList(), fields = listOf("Last modified" to "18/11/2026", "Empty field" to ""),
-                    notices = listOf(" ")).json())
+                    submission = listOf("Receipt" to "qa-receipt"), notices = listOf(" ")).json())
                 prefs.edit().putString("snapshot", snapshot.toString()).commit()
                 revision++
             }
             compose.onNodeWithText("Files").assertDoesNotExist()
             compose.onNodeWithText("Original files").assertDoesNotExist()
             compose.onNodeWithText("Instructions").assertDoesNotExist()
-            compose.onNodeWithText("Submission details").performScrollTo().performClick()
+            compose.onNodeWithText("Assignment details").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Submission details").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("qa-receipt").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("18/11/2026").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Empty field").assertDoesNotExist()
         } finally {

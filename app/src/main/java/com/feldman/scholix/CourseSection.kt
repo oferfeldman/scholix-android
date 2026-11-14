@@ -37,7 +37,7 @@ data class CourseSection(
         CourseSectionKind.BOOKS -> MotionIcons.Outlined.MenuBook
         CourseSectionKind.BOOKLET -> MotionIcons.Outlined.Book
         CourseSectionKind.FILES -> MotionIcons.Outlined.Folder
-        CourseSectionKind.GRADES -> MotionIcons.Outlined.Grade
+        CourseSectionKind.GRADES -> AppDest.Grades.icon
         CourseSectionKind.STUDIES -> MotionIcons.Outlined.School
     }
 

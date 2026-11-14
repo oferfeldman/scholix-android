@@ -719,13 +719,6 @@ class OpenAUPlatform() : Platform {
             }
     }
 
-    private fun courseStatusRank(status: String?, semesterStartDate: String?): Int = when {
-        status?.contains("בלימוד") == true -> 0
-        status?.contains("נרשם") == true && semesterStartDate.orEmpty().take(10) <= java.time.LocalDate.now().toString() -> 0
-        status?.contains("נרשם") == true -> 2
-        else -> 1
-    }
-
     private fun sanitizeAssignments(course: JSONObject): JSONArray {
         val source = sequenceOf("assigmentScores", "assigmentScoreModel")
             .mapNotNull { course.opt(it) as? JSONArray }
@@ -912,6 +905,14 @@ class OpenAUPlatform() : Platform {
         .put("platformDisplayName", platformDisplayName)
 
     companion object : Platform.Companion {
+        internal fun courseStatusRank(status: String?, semesterStartDate: String?): Int = when {
+            status?.contains("בלימוד") == true -> 0
+            status?.contains("נרשם") == true && !semesterStartDate.isNullOrBlank() &&
+                semesterStartDate.take(10) <= java.time.LocalDate.now().toString() -> 0
+            status?.contains("נרשם") == true -> 1
+            else -> 2
+        }
+
         private const val TAG = "OpenAUPlatform"
         private const val ERROR_SERVER_UNREACHABLE = "server_unreachable"
         private const val ERROR_LOGIN_FAILED = "login_failed"
@@ -949,6 +950,7 @@ class OpenAUPlatform() : Platform {
                     if (!c.has("platformId") || c.optString("platformId").isBlank()) {
                         c.put("platformId", platform.id)
                     }
+                    c.put("courseStatusRank", courseStatusRank(c.optString("status"), c.optString("semesterStartDate")))
                     platform.courses.add(c)
                 }
             }

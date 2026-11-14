@@ -572,6 +572,9 @@ fun MainScreen(
                             if (overview.has("hasBooklet")) put("hasBooklet", overview.optBoolean("hasBooklet"))
                         }
                     }
+            }.distinctBy { it.courseDestination() }.sortedBy { course ->
+                if (provider is OpenAUPlatform) OpenAUPlatform.courseStatusRank(
+                    course.optString("status"), course.optString("semesterStartDate")) else 0
             }
         }.plus(preloadedCourses.filter { course -> platforms.any { it.id == course.optString("platformId") && it !is OpenAUPlatform && it !is GoogleClassroomPlatform } })
             .filter { it.stableCourseKey().isNotBlank() }.distinctBy { it.courseDestination() } +
@@ -719,8 +722,9 @@ fun MainScreen(
     // Keep the returning course's bar intact while Settings hides it.
     val navigationScope = backStack.backStack.asReversed().firstOrNull { it.showNavigation }?.courseScope()
     val navigationCourse = navigationScope?.let { scope -> courseCatalog.singleOrNull { scope.matches(it) } }
-    val navigationPages = if (navigationScope != null && navigationCourse != null) {
-        courseSections(platforms.firstOrNull { it.id == navigationScope.providerId }, navigationCourse)
+    val navigationPages = if (navigationScope != null) {
+        courseSections(platforms.firstOrNull { it.id == navigationScope.providerId },
+            navigationCourse ?: JSONObject().put("platformId", navigationScope.providerId))
             .map { navigationScope.copy(section = it) } + listOf(mainDestination, AppDest.Settings)
     } else globalNavigationPages
     val activeNavigationPage = if (generateSequence<MotionDest>(currentScreen) { it.parent }.any { it is ProviderGrades })

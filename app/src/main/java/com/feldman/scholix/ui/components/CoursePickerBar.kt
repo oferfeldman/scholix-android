@@ -29,6 +29,7 @@ import com.feldman.scholix.R
 import com.feldman.scholix.api.Platform
 import com.feldman.scholix.pages.isRtlText
 import org.json.JSONObject
+import java.text.DecimalFormat
 
 internal fun courseSupportingText(course: JSONObject): String =
     course.optString("status").ifBlank {
@@ -38,6 +39,23 @@ internal fun courseSupportingText(course: JSONObject): String =
             }
         }
     }
+
+internal fun coursePickerDescription(course: JSONObject): String {
+    fun value(text: String) = text.trim().takeUnless { it.isBlank() || it == "-" || it.equals("null", true) }
+    val scores = course.optJSONArray("assignments")?.takeIf { it.length() > 0 } ?: course.optJSONArray("grades")
+    val grades = (0 until (scores?.length() ?: 0)).mapNotNull { scores?.optJSONObject(it) }
+    val final = value(course.optString("finalGrade")) ?: grades.firstOrNull { it.optString("type") == "final" }
+        ?.let { value(it.optString("grade")) }
+    val exam = value(course.optString("examGrade"))
+    val marks = grades.filter { it.optString("type") != "final" }.mapNotNull {
+        value(it.optString("grade"))?.toDoubleOrNull()?.takeIf(Double::isFinite)
+    }
+    val summary = listOfNotNull(
+        final?.let { "Final $it" } ?: marks.takeIf { it.isNotEmpty() }?.let { "Avg ${DecimalFormat("0.#").format(it.average())}" },
+        exam?.let { "Exam $it" },
+    ).joinToString(" · ")
+    return listOf(courseSupportingText(course), summary).filter(String::isNotBlank).joinToString("\n")
+}
 
 private sealed interface CourseDropdownEntry {
     data class Course(val courseIndex: Int) : CourseDropdownEntry
@@ -106,7 +124,7 @@ private fun CourseDropdownMenuRow(
                         text = description,
                         style = MaterialTheme.typography.bodySmall,
                         color = contentColor.copy(alpha = 0.74f),
-                        maxLines = 1,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -184,9 +202,9 @@ internal fun CoursePickerBar(
                 ?: courses[entry.courseIndices.first()].optString("platformName")
         }
     } + listOfNotNull(openFolderPlatformId?.let { providersById[it]?.getName() })
-    val visibleMenuDescriptions = if (!hasFolders) courses.map(::courseSupportingText) else visibleMenuEntries.map { entry ->
+    val visibleMenuDescriptions = if (!hasFolders) courses.map(::coursePickerDescription) else visibleMenuEntries.map { entry ->
         when (entry) {
-            is CourseDropdownEntry.Course -> courseSupportingText(courses[entry.courseIndex])
+            is CourseDropdownEntry.Course -> coursePickerDescription(courses[entry.courseIndex])
             is CourseDropdownEntry.Folder -> "${entry.courseIndices.size} courses"
         }
     }
@@ -202,7 +220,7 @@ internal fun CoursePickerBar(
             onExpandedChange(opening)
         },
         optionLabel = courseDisplayLabel,
-        optionDescription = { course -> courseSupportingText(course) },
+        optionDescription = { course -> coursePickerDescription(course) },
         optionKey = { course ->
             "${course.optString("platformId")}|${course.optString("courseKey")}|${course.optString("name")}"
         },
@@ -267,7 +285,7 @@ internal fun CoursePickerBar(
                                 val course = courses[courseIndex]
                                 CourseDropdownMenuRow(
                                     title = courseDisplayLabel(course),
-                                    description = courseSupportingText(course),
+                                    description = coursePickerDescription(course),
                                     selected = courseIndex == selectedIndex,
                                     leadingContent = {
                                         SubjectIcon(
@@ -291,7 +309,7 @@ internal fun CoursePickerBar(
                                         val course = courses[entry.courseIndex]
                                         CourseDropdownMenuRow(
                                             title = courseDisplayLabel(course),
-                                            description = courseSupportingText(course),
+                                            description = coursePickerDescription(course),
                                             selected = entry.courseIndex == selectedIndex,
                                             leadingContent = {
                                                 SubjectIcon(

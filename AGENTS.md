@@ -10,6 +10,10 @@ The user removed the course-first Home on 13 November 2026. Open Grades when sup
 
 Use one Grades-style picker for providers and courses. Only accounts with two or more courses get a provider folder; single courses appear directly. Do not add an All courses/main courses option. Course pages keep a single header and distinct section icons; avoid dashboard sections and resume cards.
 
+Order OpenU courses as current, upcoming, then completed. Show available final and exam grades in the picker, or the available assessment average when no final grade exists. Derive course navigation from the selected route before content finishes loading.
+
+Assignment details use the compact rounded Open fstudy and Upload files buttons with a 2 dp gap. Read the real assignment/submission details and display populated sections inline; omit empty sections.
+
 The normal provider picker scopes all main feature pages and their navigation to supported capabilities. Hide Studies from navigation while retaining assignment study handoff. Assignments has no redundant title bar; retain its course picker and refresh/sign-in controls.
 
 Materials is currently available only for Lemida and OpenU. Settings is always the last visible navigation item, including when another page comes from overflow; Settings itself has a Back button. Attendance portions settings belong to a provider account and subject, and open from that subject's attendance card rather than general app settings.

@@ -14,7 +14,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalUriHandler
@@ -24,10 +23,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.feldman.motion.MotionFonts
 import com.feldman.motion.MotionBackButton
-import com.feldman.motion.MotionCard
-import com.feldman.motion.MotionItemPosition
+import com.feldman.motion.MotionButton
+import com.feldman.motion.MotionButtonDefaults
+import com.feldman.motion.MotionButtonState
+import com.feldman.motion.MotionIcons
 import com.feldman.motion.MotionSymbols
 import com.feldman.motion.rememberSymbolPainter
 import com.feldman.motion.MotionLazyColumn
@@ -162,7 +164,6 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
     var error by remember { mutableStateOf<String?>(null) }
     var retry by remember { mutableIntStateOf(0) }
     val uri = LocalUriHandler.current
-    var expanded by rememberSaveable(assignmentKey) { mutableStateOf(false) }
     var openingUpload by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(repo, assignmentKey, retry) {
@@ -170,10 +171,7 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
         if (repo == null || selected == null) return@LaunchedEffect
         loading = true; error = null
         try {
-            val course = repo.cachedCourses().firstOrNull { it.optString("courseKey") == selected.courseKey }
-            val current = course?.let { repo.refresh(it).firstOrNull { row -> row.key == assignmentKey } }
-                ?: throw java.io.IOException("This assignment is no longer present in the refreshed course list.")
-            item = current
+            val current = selected
             data = repo.detail(current)
             for (draft in repo.cachedDrafts(current)) {
                 try { repo.draft(current, draft.reference) }
@@ -233,7 +231,6 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                 Spacer(Modifier.height(16.dp))
                 StudyActions(StudyAssignment.create("https://opal.openu.ac.il", provider.id, assignment.courseKey,
                     assignment.module, assignment.cmid, assignment.label, assignment.courseName, assignment.status, repo.checkedAt(assignment)),
-                    actionPosition = if (assignment.module == "ouilassign") MotionItemPosition.Start else MotionItemPosition.Alone,
                     prepareContent = {
                         val detail = data ?: repo.detail(assignment)
                         val sources = detail.files.filter { it.group == "Original files" }.map { file ->
@@ -246,31 +243,31 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                     })
                 if (assignment.module == "ouilassign") {
                     Spacer(Modifier.height(2.dp))
-                    MotionCard(position = MotionItemPosition.End, contentPadding = 0.dp) {
-                        Row(Modifier.fillMaxWidth().clickable(enabled = !openingUpload, role = Role.Button) {
-                            openingUpload = true
-                            scope.launch {
-                                try {
-                                    withContext(Dispatchers.IO) { provider.assignmentPage(assignment.url) }
-                                    val cookies = withContext(Dispatchers.IO) { provider.assignmentBrowserCookies(assignment.url) }
-                                    val manager = android.webkit.CookieManager.getInstance()
-                                    for (cookie in cookies) kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
-                                        manager.setCookie(assignment.url, cookie) { accepted ->
-                                            if (continuation.isActive) continuation.resumeWith(if (accepted) Result.success(Unit)
-                                                else Result.failure(java.io.IOException("Could not open the OpenU session.")))
-                                        }
+                    MotionButton(text = if (openingUpload) "Opening…" else "Upload files", icon = MotionIcons.Outlined.Upload,
+                        modifier = Modifier.fillMaxWidth(), enabled = !openingUpload,
+                        sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        states = MotionButtonDefaults.states(default = MotionButtonState(
+                            backgroundColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer)), onClick = {
+                        openingUpload = true
+                        scope.launch {
+                            try {
+                                withContext(Dispatchers.IO) { provider.assignmentPage(assignment.url) }
+                                val cookies = withContext(Dispatchers.IO) { provider.assignmentBrowserCookies(assignment.url) }
+                                val manager = android.webkit.CookieManager.getInstance()
+                                for (cookie in cookies) kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+                                    manager.setCookie(assignment.url, cookie) { accepted ->
+                                        if (continuation.isActive) continuation.resumeWith(if (accepted) Result.success(Unit)
+                                            else Result.failure(java.io.IOException("Could not open the OpenU session.")))
                                     }
-                                    uri.openUri(assignment.url)
-                                } catch (e: CancellationException) { throw e
-                                } catch (e: Exception) { error = e.message ?: "Could not open uploads."
-                                } finally { openingUpload = false }
-                            }
-                        }.heightIn(min = 56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(rememberSymbolPainter(MotionSymbols.ic_upload), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.width(12.dp))
-                            Text(if (openingUpload) "Opening…" else "Upload files", style = MaterialTheme.typography.bodyLarge)
+                                }
+                                uri.openUri(assignment.url)
+                            } catch (e: CancellationException) { throw e
+                            } catch (e: Exception) { error = e.message ?: "Could not open uploads."
+                            } finally { openingUpload = false }
                         }
-                    }
+                    })
                 } else TextButton(onClick = { uri.openUri(assignment.url.ifBlank { "https://sheilta.apps.openu.ac.il/Main/Courses" }) }) {
                     Text("Open in OpenU")
                 }
@@ -297,22 +294,28 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                 Title("Instructions")
                 item { Text(instructions, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge) }
             }
-            val fields = (data?.fields.orEmpty() + data?.submission.orEmpty()).filter { it.second.isNotBlank() }.distinct()
-            val notices = data?.notices.orEmpty().filter(String::isNotBlank)
-            if (assignment.opens.isNotBlank() || fields.isNotEmpty() || notices.isNotEmpty()) {
-                item { TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide details" else "Submission details") } }
-                if (expanded) {
-                    if (assignment.opens.isNotBlank()) item { Text("Available from ${assignment.opens}") }
-                    section(items = fields.withIndex().toList(), key = { "detail:${it.index}" }) { field ->
+            val detailGroups = listOf("Assignment details" to data?.fields.orEmpty(),
+                "Submission details" to data?.submission.orEmpty())
+            detailGroups.forEach { (title, values) ->
+                val fields = values.filter { it.second.isNotBlank() }.distinct()
+                if (fields.isNotEmpty()) {
+                    Title(title)
+                    section(items = fields.withIndex().toList(), key = { "$title:${it.index}" }) { field ->
                         val (label, value) = field.value
                         CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                            ListItem(headlineContent = { Text(value) }, supportingContent = { Text(label) })
+                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(value, style = MaterialTheme.typography.bodyLarge)
+                            }
                         }
                     }
-                    notices.forEachIndexed { index, notice -> item(key = "notice:$index") { Text(notice) } }
-                    if (assignment.module == "ouilassign") item { TextButton(onClick = { onNavigate(AppDest.OpenUDraftHelp) }) { Text("Link website draft") } }
                 }
             }
+            if (assignment.opens.isNotBlank()) item { Text("Available from ${assignment.opens}") }
+            data?.notices.orEmpty().filter(String::isNotBlank).forEachIndexed { index, notice ->
+                item(key = "notice:$index") { Text(notice) }
+            }
+
         }
     }
     }

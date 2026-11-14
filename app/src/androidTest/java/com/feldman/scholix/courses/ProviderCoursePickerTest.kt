@@ -20,7 +20,8 @@ class ProviderCoursePickerTest {
         val courses = listOf(
             JSONObject().put("platformId", "attendance").put("name", "Attendance provider").put("providerRoot", true),
             JSONObject().put("platformId", "webtop").put("name", "School algebra").put("courseKey", "1"),
-            JSONObject().put("platformId", "openu").put("platformName", "OpenU").put("name", "University algebra").put("courseKey", "2"),
+            JSONObject().put("platformId", "openu").put("platformName", "OpenU").put("name", "University algebra").put("courseKey", "2")
+                .put("finalGrade", "97").put("examGrade", "90"),
             JSONObject().put("platformId", "openu").put("platformName", "OpenU").put("name", "University physics").put("courseKey", "3")
         )
         var chosen = -1
@@ -42,6 +43,7 @@ class ProviderCoursePickerTest {
         compose.onNodeWithText("School algebra").assertDoesNotExist()
         compose.onNodeWithText("All courses").assertDoesNotExist()
         compose.onNodeWithText("University algebra").assertExists()
+        compose.onNodeWithText("Final 97 · Exam 90").assertExists()
         compose.onNodeWithText("University physics").performClick()
         compose.runOnIdle { assertEquals(3, chosen) }
     }

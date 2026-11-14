@@ -3,6 +3,9 @@ package com.feldman.scholix.courses
 import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -31,18 +34,24 @@ class CourseNavigationTest {
         val repository = LockerRepository(database.lockerItemDao(), database.lockerTabDao())
         val provider = OpenAUPlatform()
         val course = JSONObject().put("name", "Navigation course").put("platformId", provider.id).put("courseKey", "qa")
+        var courses by mutableStateOf(listOf(course))
         lateinit var activity: ComponentActivity
         try {
             compose.setContent {
                 MotionTheme {
                     activity = LocalActivity.current as ComponentActivity
-                    MainScreen(listOf(course), repository, {}, listOf(provider), {}, {})
+                    MainScreen(courses, repository, {}, listOf(provider), {}, {})
                 }
             }
             compose.waitForIdle()
             compose.onNodeWithContentDescription("Choose course").performClick()
             compose.onAllNodesWithText("Navigation course")[1].performClick()
             val menuBounds = compose.onNodeWithContentDescription("More pages").fetchSemanticsNode().boundsInRoot
+            compose.runOnIdle { courses = emptyList() }
+            compose.onNodeWithContentDescription("More pages").performClick()
+            compose.onNodeWithText("Recordings").assertExists()
+            compose.onNodeWithContentDescription("Close more pages").performClick()
+            compose.runOnIdle { courses = listOf(course) }
             repeat(3) {
                 compose.onNodeWithContentDescription("More pages").performClick()
                 compose.onNodeWithContentDescription("Close more pages").performClick()

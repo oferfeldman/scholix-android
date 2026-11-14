@@ -140,8 +140,11 @@ internal object OpenUAssignmentParser {
             val cells = row.select("th,td")
             if (cells.size >= 2) cells.first()!!.text() to cells.drop(1).joinToString(" ") { it.text() } else null
         } else emptyList()
+        val submission = fields("#ouilassign_view_submission_content .ouilassign_submission_info_row", ".ouilassign_section_row_title")
+            .ifEmpty { root.selectFirst("#ouilassign_view_submission_content")?.ownText()?.trim()
+                ?.takeIf(String::isNotBlank)?.let { listOf("Status" to it) }.orEmpty() }
         return OpenUAssignmentDetail(fields("#ouilassign_view_section_details [index-item]", ".ouilassign_inner_title"),
-            fields("#ouilassign_view_submission_content .ouilassign_submission_info_row", ".ouilassign_section_row_title") + quizFields,
+            submission + quizFields,
             root.select("#ouilassign_view_section_guide .ouilassign_section_content, #intro, .quizintro").joinToString("\n\n") { it.wholeText().trim() },
             files("#ouilassign_view_section_assignment, #ouilassign_view_section_guide, #intro, .quizintro", "Original files") +
                 files("#ouilassign_view_submission_content", "Submitted files") +

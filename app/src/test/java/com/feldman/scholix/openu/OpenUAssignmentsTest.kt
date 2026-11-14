@@ -6,6 +6,16 @@ import org.junit.Test
 import java.io.IOException
 
 class OpenUAssignmentsTest {
+    @Test fun readsLiveLinearAlgebraDetailsAndPlainTextSubmissionStatus() {
+        val html = requireNotNull(javaClass.getResource("/openu/linear-assignment-details.html")).readText()
+        val assignment = item().copy(courseId = "20109", semester = "2027a", moodleId = "55366", cmid = "7051294")
+        val detail = OpenUAssignmentParser.detail(html, assignment)
+        assertEquals(4, detail.fields.size)
+        assertTrue(detail.fields.contains("משקל המטלה" to "3"))
+        assertTrue(detail.fields.any { it.second == "19/11/2026" })
+        assertEquals(listOf("Status" to "מטלה זו טרם הוגשה"), detail.submission)
+    }
+
     private fun course(term: String = "2026c") = JSONObject().put("id", "20476").put("name", "Discrete Mathematics")
         .put("term", term).put("courseKey", "20476:$term")
     private val list = """<body class="course-54812"><ul id="ouilassign_index_list_container"><li>

@@ -8,12 +8,35 @@ import com.feldman.scholix.ScopeSwitcher
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import com.feldman.scholix.api.platforms.OpenAUPlatform
+import com.feldman.scholix.ui.components.coursePickerDescription
+import org.json.JSONArray
 
 class CourseScopeTest {
+    @Test fun openUCoursesSortCurrentThenUpcomingThenCompletedIncludingOldSnapshots() {
+        assertEquals(0, OpenAUPlatform.courseStatusRank("בלימוד", null))
+        assertEquals(1, OpenAUPlatform.courseStatusRank("נרשם", "2999-01-01"))
+        assertEquals(1, OpenAUPlatform.courseStatusRank("נרשם", null))
+        assertEquals(2, OpenAUPlatform.courseStatusRank("הצלחה", "2025-01-01"))
+        val restored = OpenAUPlatform.fromJson(JSONObject().put("courses", JSONArray().put(
+            JSONObject().put("status", "נרשם").put("courseStatusRank", 2))))
+        assertEquals(1, restored.toJson().getJSONArray("courses").getJSONObject(0).getInt("courseStatusRank"))
+    }
+
+    @Test fun pickerShowsFinalAndExamOrAverageWithoutInventingMissingGrades() {
+        val course = JSONObject().put("status", "Learning").put("assignments", JSONArray()
+            .put(JSONObject().put("grade", "90")).put(JSONObject().put("grade", "80")))
+        assertEquals("Learning\nAvg 85", coursePickerDescription(course))
+        course.put("finalGrade", "99").put("examGrade", "98")
+        assertEquals("Learning\nFinal 99 · Exam 98", coursePickerDescription(course))
+        assertEquals("", coursePickerDescription(JSONObject().put("finalGrade", "null").put("examGrade", "-")))
+    }
+
     @Test fun courseTabsHaveDistinctSectionIcons() {
         val icons = CourseSectionKind.entries.map { CourseSection(section = it).icon.name }
         assertEquals(CourseSectionKind.entries.size, icons.distinct().size)
         assertFalse(icons.contains("description"))
+        assertEquals(AppDest.Grades.icon, CourseSection(section = CourseSectionKind.GRADES).icon)
     }
 
     private fun course(provider: String = "one", term: String = "2027a") = JSONObject()
