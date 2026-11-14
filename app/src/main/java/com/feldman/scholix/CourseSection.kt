@@ -76,7 +76,7 @@ data class CourseSection(
                 Item { com.feldman.scholix.pages.GradesScreen(
                 modifier = Modifier.fillMaxSize(), preloadedCourses = state.preloadedCourses,
                 focusedProviderId = providerId, focusedCourseKey = courseKey, focusedTerm = term,
-                inbarAccessRequested = true, isActive = state.activePage == this,
+                inbarAccessRequested = true, isActive = state.activePage?.courseScope() == this@CourseSection,
                 onOpenCourse = { state.onScopeSelected(it) }, includeTopInset = false,
                 onOpenAssignment = { scopedNavigator(it) }) }
             }

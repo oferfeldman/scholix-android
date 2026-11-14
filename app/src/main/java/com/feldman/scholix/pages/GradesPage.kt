@@ -619,6 +619,7 @@ fun GradesScreen(
                     // Keep the spinner up: the retry replaces this result.
                     Log.d("GradesPage", "portal session expired; re-signing in off-screen")
                     reloginAttempted = true
+                    loadedKey = keyFor(course, year, semester)
                     portalRelogin = portal
                     return@launch
                 }
@@ -628,6 +629,7 @@ fun GradesScreen(
                 ) {
                     Log.d("GradesPage", "webtop session expired; re-signing in off-screen")
                     reloginAttempted = true
+                    loadedKey = keyFor(course, year, semester)
                     webtopRelogin = webtop
                     return@launch
                 }

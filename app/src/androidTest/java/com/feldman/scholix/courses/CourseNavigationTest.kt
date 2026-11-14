@@ -6,6 +6,9 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.key
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -19,8 +22,11 @@ import com.feldman.scholix.MainScreen
 import com.feldman.scholix.AppDest
 import com.feldman.scholix.CourseSection
 import com.feldman.scholix.LocalAppState
+import com.feldman.scholix.AppState
 import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.DemoPlatform
+import com.feldman.scholix.api.platforms.WebtopPlatform
+import com.feldman.scholix.api.platforms.MashovPlatform
 import org.json.JSONObject
 import com.feldman.scholix.pages.LockerDatabase
 import com.feldman.scholix.pages.LockerRepository
@@ -31,6 +37,40 @@ import org.junit.Assume.assumeTrue
 
 class CourseNavigationTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun activeCourseGradesFinishesLoadingForWebtopMashovAndOpenU() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue(context.packageName.endsWith(".studyhandoff.qa"))
+        val database = Room.inMemoryDatabaseBuilder(context, LockerDatabase::class.java).build()
+        val repository = LockerRepository(database.lockerItemDao(), database.lockerTabDao())
+        val states = listOf(WebtopPlatform(), MashovPlatform(), OpenAUPlatform()).map { provider ->
+            val course = JSONObject().put("platformId", provider.id).put("courseKey", "spinner-qa").put("name", "Loading regression")
+            val destination = CourseSection(provider.id, "spinner-qa", section = CourseSectionKind.GRADES)
+            AppState(listOf(course), repository, listOf(provider), {}, {}, {}, activePage = destination, courseCatalog = listOf(course))
+        }
+        var selected by mutableIntStateOf(0)
+        try {
+            compose.setContent {
+                MotionTheme {
+                    key(selected) {
+                        val state = states[selected]
+                        CompositionLocalProvider(LocalAppState provides state) {
+                            (state.activePage as CourseSection).Content(onNavigate = object : com.feldman.motion.MotionNavigator {
+                                override fun invoke(dest: MotionDest, resetStack: Boolean) = Unit
+                            }, onBack = {}, searchQuery = "", onFabAction = {})
+                        }
+                    }
+                }
+            }
+            states.indices.forEach { index ->
+                compose.runOnIdle { selected = index }
+                compose.waitForIdle()
+                compose.waitUntil(10_000) {
+                    compose.onAllNodesWithText("Could not find account for this course.").fetchSemanticsNodes().isNotEmpty()
+                }
+            }
+        } finally { database.close() }
+    }
 
     @Test fun switchingSchoolProviderToOpenUOpensOverviewInsteadOfKeepingGrades() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
