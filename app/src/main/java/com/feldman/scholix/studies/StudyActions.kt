@@ -89,6 +89,7 @@ fun StudyActions(assignment: StudyAssignment? = null, courseProviderId: String? 
             try {
                 contentPath = prepareContent?.invoke()?.absolutePath
                 if (contentPath != null) pending = JSONObject(requireNotNull(pending)).put("content", true).toString()
+                contentPath?.let { path -> message = StudyBundleSummary.describe(java.io.File(path)) }
                 picker = true
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: Exception) { pending = null; error = e.message ?: "Could not prepare assignment files."

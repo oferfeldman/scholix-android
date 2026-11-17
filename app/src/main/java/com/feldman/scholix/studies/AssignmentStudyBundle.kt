@@ -23,6 +23,7 @@ object AssignmentStudyBundle {
             PDFBoxResourceLoader.init(context.applicationContext)
             val sources = JSONArray()
             val questions = JSONArray()
+            val folders = JSONArray()
             val pdfs = files.filter { it.file.inputStream().use { input ->
                 val header = ByteArray(5)
                 input.read(header) == 5 && header.contentEquals("%PDF-".toByteArray())
@@ -34,33 +35,45 @@ object AssignmentStudyBundle {
                         .put("fileName", "$sourceId.pdf").put("mimeType", "application/pdf")
                         .put("pageCount", pdf.numberOfPages).put("solutionOnly", source.solutionOnly))
                     if (!source.solutionOnly) {
-                        val headings = mutableListOf<Heading>()
+                        val words = mutableListOf<PdfWord>()
                         val stripper = object : PDFTextStripper() {
                             override fun writeString(text: String?, positions: MutableList<TextPosition>?) {
-                                val number = heading.find(text.orEmpty())?.groupValues?.get(1)
-                                if (number != null && !positions.isNullOrEmpty()) {
-                                    headings += Heading(number, currentPageNo - 1,
-                                        ((positions.minOf { it.yDirAdj - it.heightDir }) / pdf.getPage(currentPageNo - 1).cropBox.height - .01f).coerceIn(0f, .99f))
-                                }
+                                if (text.isNullOrBlank() || positions.isNullOrEmpty()) return
+                                val box = pdf.getPage(currentPageNo - 1).cropBox
+                                words += PdfWord(currentPageNo - 1,
+                                    positions.minOf { it.yDirAdj - it.heightDir } / box.height, positions.maxOf { it.yDirAdj } / box.height,
+                                    positions.minOf { it.xDirAdj } / box.width, positions.maxOf { it.xDirAdj + it.widthDirAdj } / box.width, text)
                             }
                         }
                         stripper.sortByPosition = true
                         stripper.getText(pdf)
-                        val prompts = headings.distinctBy { it.number }
+                        val printed = QuestionHeadings.find(words)
+                        val prompts = printed.questions
                         if (prompts.isEmpty()) {
                             repeat(pdf.numberOfPages) { page ->
                                 questions.put(question("$sourceId-page-$page", source.name, "Page ${page + 1}",
                                     JSONArray().put(crop(sourceId, page, 0f, 1f))))
                             }
                         } else prompts.forEachIndexed { questionIndex, start ->
-                            val end = prompts.getOrNull(questionIndex + 1)
+                            // A question ends where the next question or part (such as the bonus exercises) begins.
+                            val end = (prompts.drop(questionIndex + 1).map { it.page to it.top } +
+                                printed.sections.map { it.page to it.top })
+                                .filter { (page, top) -> page > start.page || page == start.page && top > start.top }
+                                .minWithOrNull(compareBy({ it.first }, { it.second }))
                             val crops = JSONArray()
-                            for (page in start.page..(end?.page ?: (pdf.numberOfPages - 1))) {
-                                val top = if (page == start.page) start.top else 0f
-                                val bottom = if (page == end?.page) end.top else 1f
+                            for (page in start.page..(end?.first ?: (pdf.numberOfPages - 1))) {
+                                val top = if (page == start.page) (start.top - .01f).coerceAtLeast(0f) else 0f
+                                val bottom = if (page == end?.first) (end.second - .005f).coerceAtMost(1f) else 1f
                                 if (bottom > top) crops.put(crop(sourceId, page, top, bottom))
                             }
-                            questions.put(question("$sourceId-question-${start.number}-$questionIndex", source.name, start.number, crops))
+                            val entry = question("$sourceId-question-${start.number.trimEnd('*')}-$questionIndex", source.name, start.number, crops)
+                            start.section?.let { title ->
+                                val folderId = "$sourceId-part-" + printed.sections.indexOfFirst { it.title == title }
+                                if ((0 until folders.length()).none { folders.getJSONObject(it).getString("id") == folderId })
+                                    folders.put(JSONObject().put("id", folderId).put("title", title))
+                                entry.put("folderId", folderId).put("topic", title)
+                            }
+                            questions.put(entry)
                         }
                     }
                 }
@@ -71,7 +84,7 @@ object AssignmentStudyBundle {
             require(questions.length() > 0) { "This assignment has no question files or instructions to import. Refresh the assignment first." }
             val now = System.currentTimeMillis()
             val study = JSONObject().put("id", "scholix-${assignment.key}").put("title", assignment.title)
-                .put("createdAtMillis", now).put("updatedAtMillis", now).put("sources", sources).put("questions", questions)
+                .put("createdAtMillis", now).put("updatedAtMillis", now).put("sources", sources).put("folders", folders).put("questions", questions)
             val directory = File(context.cacheDir, "study-handoffs").apply { mkdirs() }
             directory.listFiles()?.filter { now - it.lastModified() > 24 * 60 * 60 * 1000 }?.forEach { it.delete() }
             File.createTempFile("assignment-", ".fstudy", directory).also { bundle ->
@@ -89,8 +102,6 @@ object AssignmentStudyBundle {
             }
         }
 
-    private data class Heading(val number: String, val page: Int, val top: Float)
-    private val heading = Regex("(?:^|\\s)(?:שאלה|הלאש|question|exercise)\\s*[:.]?\\s*([0-9]+)(?:\\s|[.):]|$)", RegexOption.IGNORE_CASE)
     private fun question(id: String, topic: String, number: String, crops: JSONArray) =
         JSONObject().put("id", id).put("topic", topic).put("number", number).put("sourceCrops", crops)
     private fun crop(source: String, page: Int, top: Float, bottom: Float) = JSONObject().put("sourceId", source)
