@@ -1,5 +1,6 @@
 package com.feldman.scholix.lemida
 
+import com.feldman.scholix.sms.ForwardedSmsWatcher
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import android.Manifest
@@ -80,6 +81,12 @@ class LemidaLoginActivity : ComponentActivity() {
     private var consentRegistered = false
     private var consentLaunched = false
     private fun currentChallenge() = mfa.active(SystemClock.elapsedRealtime())
+    // A Microsoft text forwarded from the user's phone by Seamless passes the same checks as an SMS here.
+    private val forwardedSms by lazy {
+        ForwardedSmsWatcher(this) { sms ->
+            if (currentChallenge()) mfa.acceptCode(sms.body, sms.sender, SystemClock.elapsedRealtime())
+        }
+    }
     private fun showPageFailure(message: String) {
         if (isFinishing || isDestroyed || syncing) return
         signInProbe.invalidate()
@@ -332,6 +339,7 @@ class LemidaLoginActivity : ComponentActivity() {
         ContextCompat.registerReceiver(this, consentReceiver, IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION),
             SmsRetriever.SEND_PERMISSION, null, ContextCompat.RECEIVER_EXPORTED)
         consentRegistered = true
+        forwardedSms.start()
         val supportsSms = packageManager.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
             .requestedPermissions.orEmpty().contains(Manifest.permission.RECEIVE_SMS)
         if (supportsSms) {
@@ -351,7 +359,13 @@ class LemidaLoginActivity : ComponentActivity() {
         if (!intent.getBooleanExtra("edit_sign_in_details", false)) browser.loadUrl("${LemidaParser.BASE}/my/")
         handler.postDelayed(poll, 750)
     }
+    override fun onResume() {
+        super.onResume()
+        forwardedSms.check()
+    }
+
     override fun onDestroy() {
+        forwardedSms.stop()
         detailsDialog?.dismiss()
         credentials = null
         handler.removeCallbacksAndMessages(null)
