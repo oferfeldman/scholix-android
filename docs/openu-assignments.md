@@ -13,9 +13,8 @@ assignment identity on the receiving device and never overwrites its study conte
 
 Course number, exact semester, activity module and Moodle activity ID identify
 each assignment. Failed refreshes keep the last successful per-course snapshot
-and its check time. Grades merges matching Opal assignments and Sheilta scores
-into a single row. Compact windows open the assignment on its own page. Expanded
-windows keep it beside the Grades list.
+and its check time. Compact windows open the assignment on its own page.
+Expanded windows keep it beside the Grades list.
 
 Dropdowns use the newest locally published Motion artifact, `beta64-documents-toolbar-local`: regular selectors and action menus use `Transform`; course selectors use `Morph`. Opening a provider-folder course picker starts inside the selected course's folder, with the back row still available to choose another provider. Grades and Assignments share this implementation; Schedule's provider picker uses the same common picker controls.
 

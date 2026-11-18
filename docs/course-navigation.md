@@ -18,9 +18,8 @@ explicit. Quizzes open OpenU's original controls in the built-in browser; openin
 the native overview does not start, save or submit an attempt.
 
 OpenU Overview contains the course facts and learning units. Wider windows keep
-the list beside the selected unit, recording or assignment. Grades combines
-assessment marks with all assignments, including work awaiting a grade. The
-course shows its final grade when available or a running average otherwise.
+the list beside the selected unit, recording or assignment. Grades includes
+assessment marks and assignments, including work awaiting a grade.
 Saved Units routes open Overview and saved Assignments routes open Grades.
 Saved Archive routes also open Overview. The archive's separate Drive collection
 is unavailable in Scholix.

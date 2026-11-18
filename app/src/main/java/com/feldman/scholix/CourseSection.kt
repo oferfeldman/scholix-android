@@ -73,6 +73,7 @@ data class CourseSection(
         when {
             section == CourseSectionKind.GRADES -> MotionScaffold(scrollable = false,
                 contentPadding = PaddingValues(0.dp),
+                bottomBarClearance = false,
                 topBar = { com.feldman.scholix.ui.components.SettingsTopBar(section.label, onBack) }) {
                 Item { com.feldman.scholix.pages.GradesScreen(
                 modifier = Modifier.fillMaxSize(), preloadedCourses = state.preloadedCourses,

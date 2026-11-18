@@ -6,30 +6,6 @@ import org.junit.Test
 import java.io.IOException
 
 class OpenUAssignmentsTest {
-    @Test fun mergesNumberedAssignmentsAndKeepsOnlyOneCopyOfAnExamMark() {
-        val course = course().put("assignments", org.json.JSONArray()
-            .put(JSONObject().put("number", "ממ״ן 011").put("grade", "95"))
-            .put(JSONObject().put("number", "99").put("type", "בחינה").put("grade", "90")))
-        val items = OpenUAssignmentParser.assignments(list, course, "54812")
-        val exam = JSONObject().put("id", "20476:2026c:exam").put("grade", "90.0")
-        val final = JSONObject().put("type", "final").put("grade", "92")
-
-        assertEquals(2, items.size)
-        assertEquals("95", items.first().grade)
-        val rows = openUGradeRows(items + items.first(), org.json.JSONArray().put(exam).put(final))
-        assertEquals(3, rows.length())
-        assertEquals("exam", rows.getJSONObject(1).getString("type"))
-        assertEquals("final", rows.getJSONObject(2).getString("type"))
-        assertEquals(3, openUGradeRows(items, org.json.JSONArray().put(exam.put("grade", "91"))).length())
-
-        val savedOpal = items.first().copy(grade = "")
-        val savedSheilta = savedOpal.copy(module = "assessment", number = "ממ״ן 011", cmid = "011", grade = "95")
-        val cachedRows = openUGradeRows(listOf(savedOpal, savedSheilta), org.json.JSONArray())
-        assertEquals(1, cachedRows.length())
-        assertEquals(savedOpal.key, cachedRows.getJSONObject(0).getString("assignmentKey"))
-        assertEquals("95", cachedRows.getJSONObject(0).getString("grade"))
-    }
-
     @Test fun gradeRowsKeepUngradedAssignmentsClickableWithoutLoweringTheAverage() {
         val graded = item().copy(grade = "95")
         val pending = graded.copy(number = "12", cmid = "123", grade = "", status = "Not submitted")

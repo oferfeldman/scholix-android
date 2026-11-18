@@ -37,40 +37,20 @@ internal data class OpenUAssignmentFile(val name: String, val url: String, val g
     fun json() = JSONObject().put("name", name).put("url", url).put("group", group)
 }
 
-private val examAssessment = Regex("exam|מבחן|בחינ", RegexOption.IGNORE_CASE)
-
-/** "ממ\"ן 11", "11" and "011" name the same assignment. */
-private fun assignmentNumber(value: String): String =
-    Regex("\\d+").find(value)?.value?.trimStart('0')?.ifBlank { "0" } ?: value.trim()
-
 internal fun openUGradeRows(assignments: List<OpenUAssignment>, summary: JSONArray): JSONArray = JSONArray().apply {
-    val examMarks = assignments.filter { it.module == "assessment" && examAssessment.containsMatchIn(it.title) }
-        .mapNotNull { it.grade.toDoubleOrNull() }.toSet()
-    // Saved snapshots can contain both an Opal activity and a Sheilta grade for one assignment.
-    val opalNumbers = assignments.filter { it.module != "assessment" && it.number.isNotBlank() }
-        .map { assignmentNumber(it.number) }.toSet()
-    val duplicates = assignments.filter {
-        it.module == "assessment" && !examAssessment.containsMatchIn(it.title) && assignmentNumber(it.number) in opalNumbers
-    }.toSet()
-    val duplicateMarks = duplicates.associateBy { assignmentNumber(it.number) }
-    assignments.distinctBy { it.key }.filterNot { it in duplicates }.forEach { assignment ->
-        val mark = assignment.grade.takeUnless { it.isBlank() || it == "null" || it == "-" }
-            ?: duplicateMarks[assignmentNumber(assignment.number)]?.grade
-                ?.takeIf { assignment.module != "assessment" && it.isNotBlank() && it != "null" }
+    assignments.forEach { assignment ->
         put(JSONObject().put("id", assignment.key).put("assignmentKey", assignment.key)
             .put("courseKey", assignment.courseKey).put("term", assignment.semester)
             .put("subject", assignment.courseName).put("name", assignment.label)
-            .put("grade", mark ?: "-")
+            .put("grade", assignment.grade.takeUnless { it.isBlank() || it == "null" } ?: "-")
             .put("status", assignment.status).put("due", assignment.due)
             .put("date", assignment.examDate.ifBlank { assignment.due }).apply {
-                if (assignment.module == "assessment" && examAssessment.containsMatchIn(assignment.title)) put("type", "exam")
                 assignment.number.toIntOrNull()?.let { put("assignmentOrder", it) }
             })
     }
     for (index in 0 until summary.length()) {
         val row = summary.getJSONObject(index)
-        if (row.optString("type") == "final" ||
-            (row.optString("id").endsWith(":exam") && row.optString("grade").toDoubleOrNull() !in examMarks)) put(row)
+        if (row.optString("type") == "final" || row.optString("id").endsWith(":exam")) put(row)
     }
 }
 
@@ -125,10 +105,7 @@ internal object OpenUAssignmentParser {
             throw IOException("OpenU did not return the assignment list. The previous list has been kept.")
         val scores = course.optJSONArray("assignments") ?: JSONArray()
         val gradeRows = (0 until scores.length()).map { scores.getJSONObject(it) }
-        fun matching(number: String) = number.takeIf(String::isNotBlank)?.let {
-            gradeRows.firstOrNull { score -> !examAssessment.containsMatchIn(score.optString("type")) &&
-                assignmentNumber(score.optString("number")) == assignmentNumber(number) }
-        }
+        fun matching(number: String) = gradeRows.firstOrNull { it.optString("number").trimStart('0') == number.trimStart('0') }
         val rows = doc.select("#ouilassign_index_list_container > li, #ouilassign_index_list_container > span > li").mapNotNull { item ->
             val link = item.selectFirst("[index-item=name] a") ?: return@mapNotNull null
             val url = link.absUrl("href")
@@ -146,8 +123,7 @@ internal object OpenUAssignmentParser {
                 item.selectFirst("[ouilassign-status]")?.attr("ouilassign-status").orEmpty(),
                 grade, score?.optString("weight").orEmpty())
         }
-        val matchedScores = rows.mapNotNull { matching(it.number) }.toSet()
-        return rows + gradeRows.filterNot { it in matchedScores }.map { s ->
+        return rows + gradeRows.filter { s -> rows.none { it.number.trimStart('0') == s.optString("number").trimStart('0') } }.map { s ->
             OpenUAssignment(course.getString("id"), course.getString("name"), course.getString("term"), moodleId,
                 s.optString("number"), s.optString("type", "Assessment"), "", "assessment", s.optString("number"),
                 status = s.optString("status"), statusCode = s.optString("statusCode"), grade = s.optString("grade"),
