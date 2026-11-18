@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.viewinterop.AndroidView
 import com.feldman.motion.*
 import com.feldman.scholix.*
@@ -25,7 +26,6 @@ import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.WebtopDownloadedAttachment
 import com.feldman.scholix.courses.CourseSectionKind
 import com.feldman.scholix.drive.DrivePdfReader
-import com.feldman.scholix.openu.OpenUAssignmentsPage
 import com.feldman.scholix.ui.components.SettingsTopBar
 import com.feldman.scholix.ui.components.openMessageAttachment
 import kotlinx.coroutines.CancellationException
@@ -35,114 +35,167 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 object OpenUCourseSections {
+    /** Units live on the course Overview; Assignments live in Grades. */
     fun available(course: JSONObject): List<CourseSectionKind> = listOf(
-        CourseSectionKind.OVERVIEW, CourseSectionKind.UNITS,
-        CourseSectionKind.RECORDINGS, CourseSectionKind.FORUMS, CourseSectionKind.ARCHIVE, CourseSectionKind.BOOKS,
+        CourseSectionKind.OVERVIEW, CourseSectionKind.RECORDINGS, CourseSectionKind.GRADES,
+        CourseSectionKind.BOOKS, CourseSectionKind.FORUMS,
     ) + (if (course.optBoolean("hasBooklet")) listOf(CourseSectionKind.BOOKLET) else emptyList()) +
-        listOf(CourseSectionKind.GRADES, CourseSectionKind.STUDIES)
+        listOf(CourseSectionKind.STUDIES)
+
+    /** Where a saved route to a section that no longer has its own page now lives. */
+    fun redirect(section: CourseSectionKind): CourseSectionKind? = when (section) {
+        CourseSectionKind.UNITS, CourseSectionKind.ARCHIVE -> CourseSectionKind.OVERVIEW
+        CourseSectionKind.ASSIGNMENTS -> CourseSectionKind.GRADES
+        else -> null
+    }
+
+    /** "2027a" as OpenU writes semesters: 2027A. */
+    fun termLabel(term: String): String = Regex("^(\\d{4})([a-c])$", RegexOption.IGNORE_CASE).matchEntire(term)
+        ?.let { "${it.groupValues[1]}${it.groupValues[2].uppercase()}" } ?: term
+
+    /** The course facts the Overview states: number, semester, credits and a known exam date. */
+    fun facts(course: JSONObject): List<Pair<String, String>> {
+        val exam = course.optJSONArray("assignments")?.objects().orEmpty()
+            .firstNotNullOfOrNull { it.optString("examDate").takeIf(String::isNotBlank) }
+        return listOfNotNull(
+            course.optString("id").takeIf(String::isNotBlank)?.let { "Course" to it },
+            course.optString("term").takeIf(String::isNotBlank)?.let { "Semester" to termLabel(it) },
+            course.optString("points").takeIf(String::isNotBlank)?.let { "Credits" to it },
+            exam?.let { "Exam" to it },
+        )
+    }
+
+    /** Progress of a unit already opened on this device, from its saved activity list. */
+    fun unitProgress(unit: JSONObject?): Pair<Int, Int>? {
+        val items = unit?.optJSONArray("items")?.objects() ?: return null
+        val tracked = items.filter { it.has("completed") }
+        if (tracked.isEmpty()) return null
+        return tracked.count { it.optBoolean("completed") } to tracked.size
+    }
 }
 
 @Composable
 fun OpenUCourseSection(platform: OpenAUPlatform, courseKey: String, section: CourseSectionKind,
                        onNavigate: MotionNavigator, onBack: () -> Unit, term: String = "",
                        coursePicker: (@Composable () -> Unit)? = null) {
-    if (section == CourseSectionKind.ASSIGNMENTS) {
-        MotionScaffold(scrollable = false, contentPadding = PaddingValues(0.dp),
-            topBar = { SettingsTopBar(section.label, onBack) }) {
-            Item {
-                OpenUAssignmentsPage(platform, "", object : MotionNavigator {
-                    override fun invoke(destination: MotionDest, resetStack: Boolean) {
-                        onNavigate(if (destination is AppDest.OpenUAssignment) destination.copy(courseKey = courseKey, term = term) else destination, resetStack)
-                    }
-                }, courseKey, {}, {}, includeTopInset = false)
-            }
-        }
-        return
-    }
     val context = LocalContext.current
     val repo = remember(platform, platform.getUsername()) { OpenUCourseRepository(context, platform) }
     val onCourseCacheChanged = LocalAppState.current.onCourseCacheChanged
     val kind = section.name.lowercase()
-    val cacheKey = if (section in listOf(CourseSectionKind.OVERVIEW, CourseSectionKind.UNITS)) "overview" else kind
+    val cacheKey = if (section == CourseSectionKind.OVERVIEW) "overview" else kind
     var data by remember(repo, courseKey, section) { mutableStateOf(repo.cached(courseKey, cacheKey)) }
     var error by remember(repo, courseKey, section) { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    var loading by remember(repo, courseKey, section) { mutableStateOf(false) }
     var retry by remember { mutableIntStateOf(0) }
     var bookConsent by remember { mutableStateOf<JSONObject?>(null) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(repo, courseKey, section, retry) {
-        if (section == CourseSectionKind.ARCHIVE) return@LaunchedEffect
         loading = true; error = null
         try {
             data = if (cacheKey == "overview") repo.course(courseKey) else repo.list(courseKey, kind)
             if (cacheKey == "overview") onCourseCacheChanged()
         }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { error = e.message ?: "Could not update this OpenU section." }
+        catch (e: Exception) { error = e.message ?: "Could not update this course." }
         finally { loading = false }
     }
-    MotionScaffold(topBar = { if (coursePicker != null) Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        Box(Modifier.weight(1f)) { coursePicker() }
-        IconButton(onClick = { retry++ }, enabled = !loading) { Icon(rememberSymbolPainter(MotionSymbols.ic_refresh), "Refresh") }
-    } else SettingsTopBar(section.label, onBack, actions = {
-        IconButton(onClick = { retry++ }, enabled = !loading && section != CourseSectionKind.ARCHIVE) {
-            Icon(rememberSymbolPainter(MotionSymbols.ic_refresh), contentDescription = "Refresh")
+    val refresh = @Composable {
+        IconButton(onClick = { retry++ }, enabled = !loading) {
+            Icon(rememberSymbolPainter(MotionSymbols.ic_refresh), contentDescription = "Refresh",
+                tint = if (loading) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                else MaterialTheme.colorScheme.onSurfaceVariant)
         }
-    }) }) {
-        if (loading) Item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        if (error != null) Item { Column { Text(error!!, color = MaterialTheme.colorScheme.error)
-            if (data != null) Text("Showing saved course content.") } }
+    }
+    MotionScaffold(topBar = {
+        if (coursePicker != null) Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { coursePicker() }
+            refresh()
+        } else SettingsTopBar(section.label, onBack, actions = { refresh() })
+    }) {
+        Item(visible = loading) { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        error?.let { message -> Item {
+            Text(if (data != null) "$message Showing saved content." else message,
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+        } }
         when (section) {
             CourseSectionKind.OVERVIEW -> {
                 val course = data ?: LocalAppState.current.courseCatalog.singleOrNull {
                     it.optString("platformId") == platform.id && it.optString("courseKey") == courseKey && it.optString("term") == term
                 }
-                if (course != null) {
-                    Item {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(course.optString("name"), style = MaterialTheme.typography.headlineMedium)
-                            Text(listOf(course.optString("id"), course.optString("term"), course.optString("status")).filter(String::isNotBlank).joinToString(" · "))
-                            if (course.optString("finalGrade").isNotBlank()) Text("Final grade: ${course.optString("finalGrade")}")
-                        }
-                    }
-                    Section {
-                        OpenUCourseSections.available(course).filter { it != section }.forEach { target ->
-                            PageItem(title = target.label, onClick = { onNavigate(CourseSection(platform.id, courseKey, term, target)) })
-                        }
-                    }
-                }
-            }
-            CourseSectionKind.UNITS -> {
+                val facts = course?.let(OpenUCourseSections::facts).orEmpty()
+                if (facts.isNotEmpty()) Item { CourseFacts(facts) }
                 val units = data?.optJSONArray("sections")?.objects().orEmpty()
-                if (!loading && units.isEmpty()) Item { Text("No learning units were returned for this course.") }
-                Section {
-                    units.forEach { unit -> PageItem(title = unit.optString("title"), onClick = {
-                        onNavigate(OpenUCourseItem(platform.id, courseKey, term, section, "unit", unit.getString("id"), unit.getString("title")))
-                    }) }
+                if (data != null && !loading && units.isEmpty()) Item { Text("This course has no units yet.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (units.isNotEmpty()) {
+                    Title("Units")
+                    Section {
+                        units.forEach { unit ->
+                            val id = unit.optString("id")
+                            val title = unit.optString("title")
+                            val target = OpenUCourseItem(platform.id, courseKey, term, section, "unit", id, title)
+                            val progress = OpenUCourseSections.unitProgress(repo.cached(courseKey, "unit:$id"))
+                            val done = progress != null && progress.first == progress.second
+                            CourseRow(title = title, key = "unit:$id", destination = target, accent = done,
+                                icon = rememberSymbolPainter(if (done) MotionSymbols.ic_task_alt else MotionSymbols.ic_view_module),
+                                description = progress?.let { (complete, total) ->
+                                    if (complete == total) "Done" else "$complete of $total done" },
+                                onClick = { onNavigate(target) })
+                        }
+                    }
                 }
             }
-            CourseSectionKind.ARCHIVE -> Item {
-                Text("The OpenU app's exam and assignment archive uses its separately configured Google Drive collection. That collection is not connected in Scholix.")
+            CourseSectionKind.RECORDINGS -> {
+                val items = data?.optJSONArray("items")?.objects().orEmpty()
+                if (data != null && !loading && items.isEmpty()) Item { Text("No recordings for this course.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                val collections = items.groupBy { it.optString("collection") }
+                collections.forEach { (collection, recordings) ->
+                    if (collections.size > 1 && collection.isNotBlank()) Title(collection)
+                    Section {
+                        recordings.forEach { item ->
+                            val target = OpenUCoursePlayer(platform.id, courseKey, term, section, item.optString("title"), item.toString())
+                            CourseRow(title = item.optString("title"), key = "recording:${item.optString("cmid")}:${item.optString("id")}",
+                                destination = target, icon = rememberSymbolPainter(MotionSymbols.ic_play_circle),
+                                description = listOf(item.optString("date"), item.optString("instructor"))
+                                    .filter(String::isNotBlank).joinToString("\n")
+                                    .ifBlank { item.optString("meta") },
+                                onClick = { onNavigate(target) })
+                        }
+                    }
+                }
             }
             else -> {
                 val items = data?.optJSONArray("items")?.objects().orEmpty()
-                if (!loading && items.isEmpty()) Item { Text("No ${section.label.lowercase()} were returned for this course.") }
-                if (section == CourseSectionKind.RECORDINGS) items.map { it.optString("collection") }.distinct().forEach { collection ->
-                    Title(collection)
-                    Section { items.filter { it.optString("collection") == collection }.forEach { item ->
-                        PageItem(title = item.optString("title"), description = item.optString("meta"), onClick = {
-                            onNavigate(OpenUCoursePlayer(platform.id, courseKey, term, section, item.optString("title"), item.toString()))
-                        })
-                    } }
-                } else Section {
-                    items.forEach { item -> PageItem(title = item.optString("title"), description = item.optString("description"), onClick = {
-                        when (section) {
-                            CourseSectionKind.BOOKS -> if (item.optBoolean("requiresConsent")) bookConsent = item
-                                else onNavigate(OpenUCourseDocument(platform.id, courseKey, term, section, item.optString("title"), item.getString("url")))
-                            CourseSectionKind.BOOKLET -> onNavigate(OpenUCourseDocument(platform.id, courseKey, term, section, item.optString("title"), item.getString("url")))
-                            else -> onNavigate(OpenUCourseItem(platform.id, courseKey, term, section, "activity", item.optString("id"), item.optString("title"), item.optString("url")))
+                if (data != null && !loading && items.isEmpty()) Item {
+                    Text(when (section) {
+                        CourseSectionKind.BOOKS -> "No digital books for this course."
+                        CourseSectionKind.FORUMS -> "No forums for this course."
+                        CourseSectionKind.BOOKLET -> "The booklet has no files."
+                        else -> "No files for this course."
+                    }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Section {
+                    items.forEach { item ->
+                        val title = item.optString("title")
+                        val target: MotionDest? = when (section) {
+                            CourseSectionKind.BOOKS -> item.optString("url").takeIf(String::isNotBlank)
+                                ?.let { OpenUCourseDocument(platform.id, courseKey, term, section, title, it) }
+                            CourseSectionKind.BOOKLET -> OpenUCourseDocument(platform.id, courseKey, term, section, title, item.optString("url"))
+                            else -> OpenUCourseItem(platform.id, courseKey, term, section, "activity", item.optString("id"), title, item.optString("url"))
                         }
-                    }) }
+                        CourseRow(title = title, key = "${section.name}:${item.optString("id")}", destination = target,
+                            icon = rememberSymbolPainter(when (section) {
+                                CourseSectionKind.BOOKS -> MotionSymbols.ic_menu_book
+                                CourseSectionKind.FORUMS -> MotionSymbols.ic_forum
+                                else -> MotionSymbols.ic_book
+                            }),
+                            description = item.optString("description"),
+                            onClick = {
+                                if (section == CourseSectionKind.BOOKS && item.optBoolean("requiresConsent")) bookConsent = item
+                                else target?.let { onNavigate(it) }
+                            })
+                    }
                 }
             }
         }
@@ -157,10 +210,27 @@ fun OpenUCourseSection(platform: OpenAUPlatform, courseKey: String, section: Cou
                 try { val url = repo.consent(courseKey, book.getString("id"))
                     onNavigate(OpenUCourseDocument(platform.id, courseKey, term, section, book.optString("title"), url)) }
                 catch (e: CancellationException) { throw e }
-                catch (e: Exception) { error = e.message ?: "Could not accept book terms." }
+                catch (e: Exception) { error = e.message ?: "Could not accept the book terms." }
                 finally { loading = false }
             }
         }, onDismiss = { bookConsent = null }) }
+}
+
+/** Course number, semester, credits and exam date as plain label and value pairs. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CourseFacts(facts: List<Pair<String, String>>) {
+    FlowRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        facts.forEach { (label, value) ->
+            Column(Modifier.semantics(mergeDescendants = true) {}) {
+                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(value, style = MaterialTheme.typography.titleLarge.copy(
+                    fontFamily = MotionFonts.feldman(weight = 600, width = 80f)),
+                    color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+    }
 }
 
 @Composable
@@ -197,16 +267,27 @@ internal fun OpenUCourseItemPage(route: OpenUCourseItem, onNavigate: MotionNavig
         }
     }
     MotionScaffold(topBar = { SettingsTopBar(route.title, onBack, actions = {
-        TextButton(onClick = { retry++ }, enabled = !loading) { Text("Refresh") }
+        IconButton(onClick = { retry++ }, enabled = !loading) {
+            Icon(rememberSymbolPainter(MotionSymbols.ic_refresh), contentDescription = "Refresh")
+        }
     }) }) {
-        if (loading) Item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        Item(visible = loading) { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         error?.let { Item { Text(it, color = MaterialTheme.colorScheme.error) } }
         val value = data
-        if (route.kind == "unit") Section {
-            value?.optJSONArray("items")?.objects().orEmpty().forEach { item ->
-                PageItem(title = item.optString("title"), description = if (item.optBoolean("completed")) "Completed" else item.optString("module"), onClick = {
-                    onNavigate(route.copy(kind = if (item.optString("module") == "quiz") "quiz" else "activity", itemId = item.getString("id"), title = item.optString("title"), url = item.getString("url"), unitId = route.itemId, unitTitle = route.title))
-                })
+        if (route.kind == "unit") {
+            val items = value?.optJSONArray("items")?.objects().orEmpty()
+            if (value != null && !loading && items.isEmpty()) Item { Text("This unit has no activities yet.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Section {
+                items.forEach { item ->
+                    val module = item.optString("module")
+                    val target = route.copy(kind = if (module == "quiz") "quiz" else "activity", itemId = item.optString("id"),
+                        title = item.optString("title"), url = item.optString("url"), unitId = route.itemId, unitTitle = route.title)
+                    val done = item.optBoolean("completed")
+                    CourseRow(title = item.optString("title"), key = "activity:${item.optString("id")}", destination = target,
+                        accent = done, icon = rememberSymbolPainter(if (done) MotionSymbols.ic_task_alt else moduleSymbol(module)),
+                        description = if (done) "Done" else moduleLabel(module), onClick = { onNavigate(target) })
+                }
             }
         } else if (value != null) {
             val quiz = value.optJSONObject("quiz")
@@ -221,16 +302,28 @@ internal fun OpenUCourseItemPage(route: OpenUCourseItem, onNavigate: MotionNavig
                 Item { TextButton(onClick = { runCatching { uri.openUri(route.url) }.onFailure { error = it.message } }) { Text("Open original page") } }
             }
             Section {
-                value.optJSONArray("media")?.objects().orEmpty().forEach { media -> PageItem(title = media.optString("title").ifBlank { "Open media" }, onClick = {
+                value.optJSONArray("media")?.objects().orEmpty().forEach { media ->
                     val target = media.optString("url")
-                    if (OpenUCourseParser.documentUrl(target)) onNavigate(OpenUCourseDocument(route.providerId, route.courseKey, route.term, route.section, route.title, target, origin = route))
-                    else if (OpenUCourseParser.hlsUrl(target)) onNavigate(OpenUCoursePlayer(route.providerId, route.courseKey, route.term, route.section, route.title, playerUrl = target, origin = route))
-                    else runCatching { uri.openUri(target) }.onFailure { error = it.message }
-                }) }
+                    CourseRow(title = media.optString("title").ifBlank { "Play media" }, key = "media:$target",
+                        icon = rememberSymbolPainter(MotionSymbols.ic_play_circle), onClick = {
+                        if (OpenUCourseParser.documentUrl(target)) onNavigate(OpenUCourseDocument(route.providerId, route.courseKey, route.term, route.section, route.title, target, origin = route))
+                        else if (OpenUCourseParser.hlsUrl(target)) onNavigate(OpenUCoursePlayer(route.providerId, route.courseKey, route.term, route.section, route.title, playerUrl = target, origin = route))
+                        else runCatching { uri.openUri(target) }.onFailure { error = it.message }
+                    })
+                }
                 value.optJSONArray("links")?.objects().orEmpty().filter { link ->
                     val path = runCatching { java.net.URI(link.optString("url")).path }.getOrNull().orEmpty()
                     !path.contains("/mod/quiz/") || path.endsWith("view.php") || path.endsWith("review.php")
-                }.forEach { link -> PageItem(title = link.optString("title"), onClick = { open(link) }) }
+                }.forEach { link ->
+                    val target = link.optString("url")
+                    val module = Regex("/mod/([a-z][a-z0-9_]*)/").find(runCatching { java.net.URI(target).path }.getOrNull().orEmpty())?.groupValues?.get(1)
+                    CourseRow(title = link.optString("title"), key = "link:$target", onClick = { open(link) },
+                        icon = rememberSymbolPainter(when {
+                            OpenUCourseParser.documentUrl(target) -> MotionSymbols.ic_description
+                            module != null -> moduleSymbol(module)
+                            else -> MotionSymbols.ic_link
+                        }))
+                }
             }
         }
         BottomBarSpacer(minMargin = 24.dp)

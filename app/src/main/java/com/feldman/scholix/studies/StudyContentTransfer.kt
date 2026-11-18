@@ -16,13 +16,17 @@ import java.util.UUID
 internal class StudyContentTransfer(context: Context, private val file: File, private val onReceipt: (String) -> Unit) : AutoCloseable {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val server = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).apply { soTimeout = 600_000 }
-    private val capability = "${context.packageName}.study-content"
-    private var sha256 = ""
     private val token = UUID.randomUUID().toString()
+    private val capability = "${context.packageName}.${UUID.randomUUID()}.study-content"
+    private var sha256 = ""
+    private val closed = java.util.concurrent.atomic.AtomicBoolean()
+    private var registering = false
     private val connections = java.util.concurrent.ConcurrentHashMap.newKeySet<java.net.Socket>()
     private val ready = CompletableDeferred<JSONObject>()
     private val link = SeamlessLink(context.applicationContext) { state ->
-        if (state.optBoolean("connected") && !ready.isCompleted) {
+        if (closed.get()) return@SeamlessLink
+        if (state.optBoolean("connected") && !ready.isCompleted && !registering) {
+            registering = true
             linkRegister(state.getString("deviceId"))
         } else if (state.has(SeamlessLink.ERROR)) ready.completeExceptionally(IllegalStateException("Connect Seamless to transfer study files."))
     }
@@ -41,6 +45,11 @@ internal class StudyContentTransfer(context: Context, private val file: File, pr
                 while (isActive) {
                     val socket = server.accept()
                     connections.add(socket)
+                    if (closed.get()) {
+                        connections.remove(socket)
+                        socket.close()
+                        break
+                    }
                     launch {
                         try { socket.use {
                             socket.soTimeout = 600_000
@@ -63,9 +72,24 @@ internal class StudyContentTransfer(context: Context, private val file: File, pr
     }
 
     suspend fun publish(): JSONObject {
-        sha256 = withContext(Dispatchers.IO) { MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) } }
-        check(link.connect()) { "Install or connect Seamless to transfer this study." }
-        return try { withTimeout(15_000) { ready.await() }
+        return try {
+            sha256 = withContext(Dispatchers.IO) {
+                val digest = MessageDigest.getInstance("SHA-256")
+                file.inputStream().use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count == -1) break
+                        digest.update(buffer, 0, count)
+                    }
+                }
+                digest.digest().joinToString("") { "%02x".format(it) }
+            }
+            withContext(Dispatchers.Main.immediate) {
+                check(!closed.get()) { "Study transfer closed." }
+                check(link.connect()) { "Install or connect Seamless to transfer this study." }
+            }
+            withTimeout(15_000) { ready.await() }
         } catch (e: TimeoutCancellationException) {
             close()
             throw java.io.IOException("Could not connect Seamless. Reconnect it and try again.", e)
@@ -73,11 +97,18 @@ internal class StudyContentTransfer(context: Context, private val file: File, pr
     }
 
     override fun close() {
+        if (!closed.compareAndSet(false, true)) return
         runCatching { server.close() }
         connections.forEach { runCatching { it.close() } }
-        link.unregister(capability)
-        link.close()
-        scope.cancel()
+        scope.launch {
+            try {
+                link.unregister(capability)
+                link.close()
+            } finally {
+                ready.completeExceptionally(java.io.IOException("Study transfer closed."))
+                scope.cancel()
+            }
+        }
     }
 
 }

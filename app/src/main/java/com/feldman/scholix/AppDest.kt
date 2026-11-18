@@ -3,7 +3,9 @@
 package com.feldman.scholix
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
@@ -54,7 +56,6 @@ sealed class AppDest : MotionDest {
     data object Home : AppDest() {
         @IgnoredOnParcel @Transient override val label = "Home"
         @IgnoredOnParcel @Transient override val icon = MotionIcons.Outlined.Home
-        @IgnoredOnParcel @Transient override val pane = MotionPaneType.LIST
         @IgnoredOnParcel @Transient override val showNavigation = true
         @IgnoredOnParcel @Transient override val filledIcon = R.drawable.ic_home
         @IgnoredOnParcel @Transient override val outlineIcon = R.drawable.ic_home
@@ -135,7 +136,7 @@ sealed class AppDest : MotionDest {
         @IgnoredOnParcel @Transient override val label = "Assignment"
         @IgnoredOnParcel @Transient override val parent: MotionDest = if (courseKey.isNotBlank())
             CourseSection(providerId, courseKey, term, com.feldman.scholix.courses.CourseSectionKind.GRADES) else Grades
-        @IgnoredOnParcel @Transient override val pane = if (courseKey.isBlank()) MotionPaneType.DETAIL else MotionPaneType.EXTRA
+        @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
         @IgnoredOnParcel @Transient override val showNavigation = false
         @Composable
         override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
@@ -347,7 +348,13 @@ sealed class AppDest : MotionDest {
             searchQuery: String,
             onFabAction: ((() -> Unit) -> Unit) -> Unit
         ) {
-            MessagesScreen(onNavigate, onBack)
+            val providerHeader = LocalMessagesProviderHeader.current
+            Column(Modifier.fillMaxSize()) {
+                providerHeader?.invoke()
+                CompositionLocalProvider(LocalProviderHeaderVisible provides (providerHeader != null)) {
+                    MessagesScreen(onNavigate, onBack)
+                }
+            }
         }
     }
 

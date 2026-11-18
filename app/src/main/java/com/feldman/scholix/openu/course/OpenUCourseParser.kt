@@ -117,6 +117,8 @@ internal object OpenUCourseParser {
                 .put("title", row.selectFirst(".ovc_playlist_title")?.text().orEmpty())
                 .put("description", row.selectFirst(".ovc_descr_short")?.text().orEmpty())
                 .put("meta", listOf(".pl_instructor", ".pl_recorddate").mapNotNull { row.selectFirst(it)?.text() }.joinToString(" · "))
+                .put("instructor", row.selectFirst(".pl_instructor")?.text().orEmpty())
+                .put("date", row.selectFirst(".pl_recorddate")?.text().orEmpty())
                 .put("collection", collection).put("cmid", cmid).put("context", context?.attr("cid").orEmpty())
                 .put("mid", context?.attr("mid").orEmpty()).put("course", course)
         })

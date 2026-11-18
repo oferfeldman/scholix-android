@@ -27,7 +27,7 @@ data class CourseSection(
 ) : AppDest() {
     @IgnoredOnParcel @Transient override val label = section.label
     @IgnoredOnParcel @Transient override val parent: MotionDest = AppDest.Home
-    @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+    @IgnoredOnParcel @Transient override val pane = MotionPaneType.LIST
     @IgnoredOnParcel @Transient override val icon = when (section) {
         CourseSectionKind.OVERVIEW -> MotionIcons.Outlined.Dashboard
         CourseSectionKind.UNITS -> MotionIcons.Outlined.ViewModule
@@ -59,8 +59,9 @@ data class CourseSection(
         }
         val course = state.courseCatalog.singleOrNull { matches(it) }
         val provider = state.platforms.firstOrNull { it.id == providerId }
-        if (provider is OpenAUPlatform && section == CourseSectionKind.ASSIGNMENTS) {
-            LaunchedEffect(this) { state.onScopeSelected(copy(section = CourseSectionKind.GRADES)) }
+        val moved = if (provider is OpenAUPlatform) com.feldman.scholix.openu.course.OpenUCourseSections.redirect(section) else null
+        if (moved != null) {
+            LaunchedEffect(this) { state.onScopeSelected(copy(section = moved)) }
             return
         }
         if (course == null) {
@@ -72,6 +73,7 @@ data class CourseSection(
         when {
             section == CourseSectionKind.GRADES -> MotionScaffold(scrollable = false,
                 contentPadding = PaddingValues(0.dp),
+                bottomBarClearance = false,
                 topBar = { com.feldman.scholix.ui.components.SettingsTopBar(section.label, onBack) }) {
                 Item { com.feldman.scholix.pages.GradesScreen(
                 modifier = Modifier.fillMaxSize(), preloadedCourses = state.preloadedCourses,

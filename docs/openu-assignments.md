@@ -1,22 +1,20 @@
 # OpenU assignments
 
-Assignment details now put **Open fstudy**, **Upload files**, and files before an
-expandable **Instructions and details** section. Upload opens the official Opal
-controls in Scholix's built-in browser using the selected account's existing
-session; the user chooses files and confirms submission there. Instruction links
-are included in assignment file discovery. No native academic submission is claimed.
+OpenU assignments are listed in the course's **Grades** page, including ungraded
+work. Tap an assignment to see its status, due date, files, instructions and available
+submission details. **Upload files** opens Opal's submission controls using the
+selected account's session. Choose files and confirm submission there.
 
-**Open fstudy** first shows supported local/remote devices, even when Documents is
+**Open in Documents** first shows supported local and remote devices, even when Documents is
 absent on the phone. Remote discovery and launch use the installed Seamless app's
 approved local Link IPC. Seamless retains all server configuration. Both Seamless
 and the receiving Documents need app-handoff support; remote reopening uses the
 assignment identity on the receiving device and never overwrites its study contents.
 
-Choose a course in **Assignments** using the same course picker as Grades. OpenU, Classroom and Lemida courses share this picker, with provider folders for three or more courses, subject/provider icons, and previous/next buttons. OpenU includes previous and upcoming semesters; repeated course names show their semester. Selection follows provider and course identity across refreshes. The app's search and the status filter operate on the selected OpenU course. Course number, exact semester, activity module and Moodle activity ID identify each item. Failed or partial refreshes retain the last successful per-course snapshot and its original check time.
-
-The OpenU list uses Grades' content layout: the course picker sits below the status-bar inset, without a separate Assignments app bar. Assignment rows use the same connected lazy section, subject icons and title/grade typography. Refresh uses Grades' contained loading indicator and pull-to-refresh colors; the list is replaced by the indicator while loading. Details use a compact course/back header, assignment summary, readable instructions, connected label/value rows and file rows. Check times remain in saved state and the Documents handoff; they are not displayed in the list or details.
-
-The page is named **Assignments** throughout navigation, notifications, login and error messages. Saved navigation positions using the former label are migrated when read. Existing cache keys, notification channel IDs and notification intents keep their identities.
+Course number, exact semester, activity module and Moodle activity ID identify
+each assignment. Failed refreshes keep the last successful per-course snapshot
+and its check time. Compact windows open the assignment on its own page.
+Expanded windows keep it beside the Grades list.
 
 Dropdowns use the newest locally published Motion artifact, `beta64-documents-toolbar-local`: regular selectors and action menus use `Transform`; course selectors use `Morph`. Opening a provider-folder course picker starts inside the selected course's folder, with the back row still available to choose another provider. Grades and Assignments share this implementation; Schedule's provider picker uses the same common picker controls.
 

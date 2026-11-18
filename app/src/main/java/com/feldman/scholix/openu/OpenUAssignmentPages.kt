@@ -1,5 +1,8 @@
 package com.feldman.scholix.openu
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -24,8 +27,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.feldman.motion.MotionFonts
-import com.feldman.motion.MotionBackButton
 import com.feldman.motion.MotionButton
 import com.feldman.motion.MotionButtonDefaults
 import com.feldman.motion.MotionButtonState
@@ -165,6 +168,7 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
     var retry by remember { mutableIntStateOf(0) }
     val uri = LocalUriHandler.current
     var openingUpload by remember { mutableStateOf(false) }
+    var sendingFiles by remember(assignmentKey) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(repo, assignmentKey, retry) {
         val selected = item
@@ -184,44 +188,36 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
         catch (e: Exception) { error = e.message ?: "Could not update this assignment." }
         finally { loading = false }
     }
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface) {
+    MotionScaffold(
+        scrollable = false,
+        contentPadding = PaddingValues(0.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        topBar = {
+            SettingsTopBar(item?.courseName.orEmpty(), onBack) {
+                IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh assignment") }
+            }
+        },
+    ) {
+    Item {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     Column(Modifier.widthIn(max = 840.dp).fillMaxSize().padding(horizontal = 16.dp)) {
-        Spacer(Modifier.height(TopBarSpacing()))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            MotionBackButton(onClick = onBack)
-            Text(item?.courseName.orEmpty(), Modifier.weight(1f).padding(horizontal = 12.dp),
-                style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh assignment") }
-        }
         val assignment = item
         if (assignment == null || repo == null || provider == null) {
             Text("Assignment unavailable.", Modifier.padding(vertical = 24.dp))
         } else MotionLazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
                 CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(assignment.label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         SubjectIcon(subject = assignment.courseName, assignment = assignment.label, size = 48.dp, iconSize = 28.dp)
                         Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(assignment.label, style = MaterialTheme.typography.headlineSmall.copy(
                                 fontFamily = MotionFonts.feldman(weight = 600), fontWeight = FontWeight.SemiBold))
-                            Text(assignment.semester, style = MaterialTheme.typography.bodyMedium,
+                            if (assignment.status.isNotBlank()) Text(assignment.status, style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (assignment.due.isNotBlank()) Text("Due ${assignment.due}", style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (assignment.grade.isNotBlank() && assignment.grade != "-") {
-                            Text(assignment.grade, style = MaterialTheme.typography.displaySmall.copy(
-                                fontFamily = MotionFonts.feldman(weight = 700, width = 50f)), color = MaterialTheme.colorScheme.onSurface)
-                        }
-                    }
-                }
-                CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(assignment.label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (assignment.status.isNotBlank()) Text(assignment.status, style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (assignment.due.isNotBlank()) Text("Due ${assignment.due}", style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(4.dp)) {
@@ -272,6 +268,40 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                     Text("Open in OpenU")
                 }
             }
+            val originalFiles = data?.files.orEmpty().filter { it.group == "Original files" }
+            if (originalFiles.isNotEmpty()) item {
+                MotionButton(
+                    text = if (sendingFiles) "Preparing files…" else "Send assignment files",
+                    enabled = !sendingFiles,
+                    onClick = {
+                        sendingFiles = true
+                        error = null
+                        scope.launch {
+                            try {
+                                val files = originalFiles.map { repo.openFile(it) }
+                                val uris = ArrayList(files.map {
+                                    FileProvider.getUriForFile(context, "${context.packageName}.provider", it.file)
+                                })
+                                val intent = Intent(if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE)
+                                    .setPackage("com.seamless")
+                                    .setType(files.map { it.mimeType }.distinct().singleOrNull() ?: "*/*")
+                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                if (uris.size == 1) intent.putExtra(Intent.EXTRA_STREAM, uris.single())
+                                else intent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                                intent.clipData = ClipData.newRawUri(files.first().file.name, uris.first()).apply {
+                                    uris.drop(1).forEach { addItem(ClipData.Item(it)) }
+                                }
+                                context.startActivity(intent)
+                            } catch (e: CancellationException) { throw e
+                            } catch (_: ActivityNotFoundException) {
+                                error = "Install Seamless to send files to another device."
+                            } catch (e: Exception) {
+                                error = e.message ?: "Could not send the assignment files."
+                            } finally { sendingFiles = false }
+                        }
+                    }
+                )
+            }
             val fileGroups = data?.files.orEmpty().groupBy { it.group }.toList() +
                 drafts.mapIndexed { index, draft -> "Unsubmitted website draft ${index + 1}" to draft.files }
             fileGroups.filter { it.second.isNotEmpty() }.forEach { (group, files) ->
@@ -292,7 +322,12 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
             }
             data?.instructions?.takeIf { it.isNotBlank() }?.let { instructions ->
                 Title("Instructions")
-                item { Text(instructions, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge) }
+                item {
+                    CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(instructions)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                        Text(instructions, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.bodyLarge, textAlign = androidx.compose.ui.text.style.TextAlign.Start)
+                    }
+                }
             }
             val detailGroups = listOf("Assignment details" to data?.fields.orEmpty(),
                 "Submission details" to data?.submission.orEmpty())
@@ -317,6 +352,7 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
             }
 
         }
+    }
     }
     }
     }
