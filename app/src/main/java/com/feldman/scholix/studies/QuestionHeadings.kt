@@ -21,6 +21,8 @@ internal object QuestionHeadings {
     private val hebrewWords = setOf("שאלה", "תרגיל")
     private val latinWords = setOf("question", "exercise", "problem")
     private val numberToken = Regex("^[.():\\-]*(\\d{1,3})(\\*?)[.():\\-]*(\\*?)$")
+    // A number glued to the next word by extraction: "5.(לכל".
+    private val numberThenWord = Regex("^[.():\\-]*(\\d{1,3})(\\*?)[.():\\-]+(\\*?).*$")
     private val glued = Regex("^(?:(\\d{1,3})(שאלה|תרגיל)|(שאלה|תרגיל)(\\d{1,3}))[.:]?$")
     // Not \b: Java's word boundary doesn't treat Hebrew letters as word characters.
     private val section = Regex("^(?:(?:תרגילי|שאלות)\\s+(?:בונוס|רשות|אתגר)|bonus(?:\\s+(?:questions|exercises|problems))?)[:.]?(?:\\s.*)?$",
@@ -65,7 +67,7 @@ internal object QuestionHeadings {
         val next = tokens.getOrNull(index + 1)
         // "תרגיל בית 5" is the sheet's title, not a question.
         if (next == null || next == "בית" || next == "ביתי") return null
-        numberToken.matchEntire(next)?.let { match ->
+        (numberToken.matchEntire(next) ?: numberThenWord.matchEntire(next))?.let { match ->
             val star = starred || match.groupValues[2].isNotEmpty() || match.groupValues[3].isNotEmpty() ||
                 tokens.getOrNull(index + 2)?.startsWith("*") == true
             return match.groupValues[1] + if (star) "*" else ""
@@ -81,7 +83,8 @@ internal object QuestionHeadings {
     }
 
     private fun isHebrewWord(token: String): Boolean {
-        val word = token.trim(':', '.', ',', ')', '(')
+        // Only the Hebrew letters count: extraction can glue a symbol from a formula above onto the word ("nתרגיל").
+        val word = token.filter { it in 'א'..'ת' }
         // Some PDFs store Hebrew in visual order, so the word comes out reversed.
         return word in hebrewWords || word.reversed() in hebrewWords
     }

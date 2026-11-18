@@ -1,5 +1,6 @@
 package com.feldman.scholix.lemida
 
+import com.feldman.scholix.courses.courseScope
 import com.feldman.motion.MotionDropdownMenuItem
 import com.feldman.motion.MotionDropdown
 import com.feldman.motion.MotionDropdownDefaults
@@ -103,6 +104,12 @@ fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNa
     val courseKey = selectedCourse.optString("courseKey").takeIf { it.isNotBlank() }
     LaunchedEffect(providerId, courseKey) {
         selectedKey = "$providerId|${courseKey.orEmpty()}"
+    }
+    // On a wide screen this list stays beside an open course: follow that Lemida course instead of the first one.
+    val openCourse = app.activePage?.courseScope()?.takeIf { it.providerId.startsWith("lemida:") }?.courseKey
+    LaunchedEffect(openCourse) {
+        if (openCourse != null && courses.any { it.optString("platformId") == "lemida" && it.optString("courseKey") == openCourse })
+            selectedKey = "lemida|$openCourse"
     }
     val requestedAssignment by HomeworkLinks.pending.collectAsStateWithLifecycle()
     LaunchedEffect(requestedAssignment) {
@@ -464,10 +471,17 @@ internal fun LemidaHomeworkDetail(item: Homework, repo: LemidaRepository, accoun
                 Section { data.notices.forEach { notice -> Item { Text(notice, style = MaterialTheme.typography.bodyMedium) } } }
             }
             if (data.dates.isNotBlank()) { Title("Dates"); Section { Item { Text(data.dates, style = MaterialTheme.typography.bodyMedium) } } }
-            if (data.description.isNotBlank()) { Title("Instructions"); Section { Item { Text(data.description, style = MaterialTheme.typography.bodyMedium) } } }
-            if (data.tables.isNotEmpty()) Title("Submission and grading")
-            data.tables.forEachIndexed { index, table -> Section {
-                data.tableCaptions.getOrNull(index)?.takeIf { it.isNotBlank() }?.let { caption ->
+            // Lemida repeats each attached file (name and upload time) in the instructions and the status
+            // table; those are already listed under PDF attachments, so only other text is shown again.
+            val attachments = data.pdfs.map { it.name }
+            val instructions = LemidaDetailText.withoutAttachments(data.description, attachments)
+            val tables = data.tables.map { table -> table.filterNot { cells ->
+                cells.first().isBlank() && LemidaDetailText.withoutAttachments(cells.drop(1).joinToString("\n"), attachments).isBlank()
+            } }
+            if (instructions.isNotBlank()) { Title("Instructions"); Section { Item { Text(instructions, style = MaterialTheme.typography.bodyMedium) } } }
+            if (tables.any { it.isNotEmpty() }) Title("Submission and grading")
+            tables.forEachIndexed { index, table -> if (table.isNotEmpty()) Section {
+                data.tableCaptions.getOrNull(index)?.takeIf { it.isNotBlank() && table.none { cells -> cells.first() == it } }?.let { caption ->
                     Item { Text(caption, style = MaterialTheme.typography.titleSmall) }
                 }
                 table.forEach { cells -> Item {

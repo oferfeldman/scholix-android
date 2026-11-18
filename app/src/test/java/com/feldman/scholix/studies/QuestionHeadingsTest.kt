@@ -26,7 +26,8 @@ class QuestionHeadingsTest {
             rtl(0, .53f, "תרגיל", ".3", "הוכיחו") +
             rtl(0, .60f, "תרגיל", ".4") +
             rtl(1, .08f, "תרגילי", "בונוס") +
-            rtl(1, .11f, "תרגיל", ".5", "תהי", "סדרה") +
+            // Formula glyphs glued on by extraction.
+            rtl(1, .11f, "nתרגיל", "5.(לכל", "א)חת", "מהסדרות") +
             rtl(1, .14f, "תרגיל", ".6", "מטרת", "התרגיל")
         val found = QuestionHeadings.find(words)
         assertEquals(listOf("1", "2", "3", "4", "5", "6"), found.questions.map { it.number })
