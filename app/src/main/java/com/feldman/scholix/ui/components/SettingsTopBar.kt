@@ -26,6 +26,7 @@ import com.feldman.motion.MotionBackButton
 import com.feldman.scholix.AppDest
 import com.feldman.scholix.CourseSection
 import com.feldman.scholix.LocalAppState
+import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.courses.courseDestination
 import com.feldman.scholix.courses.courseScope
 import com.feldman.scholix.courses.courseSections
@@ -62,8 +63,9 @@ fun SettingsTopBar(
                 onSelected = { index ->
                     val course = courses[index.coerceIn(0, courses.lastIndex)]
                     val provider = state.platforms.firstOrNull { it.id == course.optString("platformId") }
-                    val section = courseScope?.section?.takeIf { it in courseSections(provider, course) }
-                        ?: CourseSectionKind.OVERVIEW
+                    val sections = courseSections(provider, course)
+                    val section = courseScope?.section?.takeIf { it in sections }
+                        ?: CourseSectionKind.OVERVIEW.takeIf { it in sections } ?: sections.firstOrNull() ?: CourseSectionKind.OVERVIEW
                     state.onScopeSelected(course.courseDestination(section))
                 },
                 expanded = courseMenuExpanded,
@@ -96,7 +98,8 @@ fun SettingsTopBar(
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = chromeColor, titleContentColor = chromeContentColor),
         actions = {
-            if (courseScope != null && state != null && state.activePage !is CourseSection) {
+            if (courseScope != null && state != null && state.activePage !is CourseSection &&
+                state.platforms.none { it.id == courseScope.providerId && it is OpenAUPlatform }) {
                 IconButton(onClick = { state.onScopeSelected(AppDest.Home) }) {
                     Icon(painterResource(AppDest.Home.outlineIcon), contentDescription = "Home")
                 }

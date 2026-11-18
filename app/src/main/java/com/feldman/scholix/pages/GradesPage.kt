@@ -1057,7 +1057,10 @@ fun GradesScreen(
 
                             stillLoading -> {}
                             grades.isNotEmpty() || finalGrade != null -> {
-                                if (grades.any { it.optDouble("grade", Double.NaN).isFinite() }) {
+                                val openU = providersById[selectedCourse?.optString("platformId")] is OpenAUPlatform
+                                val showAverage = (!openU || finalGrade == null) &&
+                                    grades.any { it.optDouble("grade", Double.NaN).isFinite() }
+                                if (showAverage) {
                                 MotionCard(
                                     position = MotionItemPosition.Alone,
                                     containerColor = MaterialTheme.colorScheme.primary,
@@ -1106,7 +1109,7 @@ fun GradesScreen(
 
                                 }
                                 if (finalGrade != null) {
-                                    Spacer(Modifier.height(MotionSectionDefaults.ItemSpacing))
+                                    if (showAverage) Spacer(Modifier.height(MotionSectionDefaults.ItemSpacing))
                                     MotionCard(
                                         position = MotionItemPosition.Alone,
                                         containerColor = MaterialTheme.colorScheme.primary,
@@ -1242,7 +1245,7 @@ fun GradesScreen(
                             val rawSubtitle = if (assignment != null) grade.optString("status").takeIf(String::isNotBlank)
                                 else if (rawName.isNotBlank() && rawSubject.isNotBlank() && rawSubject != rawName) rawSubject else null
 
-                            val isRtl = isRtlText("$rawTitle ${rawSubtitle.orEmpty()}")
+                            val isRtl = isRtlText(rawTitle.ifBlank { rawSubtitle.orEmpty() })
 
                             val bidi = BidiFormatter.getInstance()
                             val title = bidi.unicodeWrap(rawTitle)
@@ -1264,10 +1267,17 @@ fun GradesScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    SubjectIcon(
-                                        subject = rawSubject,
-                                        assignment = rawName
-                                    )
+                                    if (assignment != null || grade.optString("id").endsWith(":exam")) {
+                                        val isExam = grade.optString("type") == "exam" || grade.optString("id").endsWith(":exam")
+                                        Icon(
+                                            rememberSymbolPainter(if (isExam) MotionSymbols.ic_quiz else MotionSymbols.ic_assignment),
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    } else {
+                                        SubjectIcon(subject = rawSubject, assignment = rawName)
+                                    }
                                     Spacer(Modifier.width(12.dp))
 
                                     Column(

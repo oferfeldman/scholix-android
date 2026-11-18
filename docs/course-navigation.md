@@ -1,24 +1,14 @@
 # Courses and provider views
 
-Connected OpenU, Lemida and Classroom users start on Home. School-only users keep
-Grades as their start page. Existing notification intents still take priority.
-Home uses saved course data; opening it does not request Inbar SMS or refresh
-university sessions. Provider-grouped course rows use the same icons, type and
-connected surfaces as assignment lists. Rows open Overview; Resume restores the
-last course location. Home no longer duplicates general-page or provider-grade
-shortcuts, aggregate grade summaries, or per-card action chips.
+Scholix opens the selected provider's Grades when supported, or its first
+supported page. Notification intents still take priority. The shared picker
+switches between providers and courses, with a folder for accounts with two or
+more courses. Back from a course returns to its provider's main page.
 
-The existing Motion bar and tablet rail switch to the selected course's sections.
-Normal page titles and existing general-page pickers are retained. A compact
-All platforms icon in Home, Grades and course/item headers opens direct provider
-grades first, including empty-cache accounts, then global views and recent courses.
-It replaces the old title chip and extra header rows. Provider rows include the
-account label. Home/course-to-provider navigation takes two taps before subject
-selection, loading or sign-in; consent and SMS remain separate interactions.
-Course routes retain provider, course and term identity; Lemida routes
-also retain the saved account. Recent courses resume their open route, while a
-Home tab selection returns to the course list. Course-section saveable state is
-kept above transient destination composition.
+The Motion bar and rail switch to the selected course's sections. When switching
+providers, the navigation updates from the selected provider's capabilities while
+data loads. Course routes retain provider, course and term identity. Recent
+courses resume their last open route.
 
 OpenU sections reuse the provider's existing on-device session. Learning units,
 activities, forum content, digital books, available booklets and recording lists
@@ -27,11 +17,13 @@ PDFs use the existing reader and recordings use native playback. Book consent is
 explicit. Quizzes open OpenU's original controls in the built-in browser; opening
 the native overview does not start, save or submit an attempt.
 
-The original OpenU exam/assignment archive requires a separately configured
-server-side Google Drive collection. That collection is not connected here, and
-Archive states this limitation. Live provider reads, playback, consent and quiz
-flows still require signed-in device verification. No device, account session or
-installation was changed for this source integration.
+OpenU Overview contains the course facts and learning units. Wider windows keep
+the list beside the selected unit, recording or assignment. Grades combines
+assessment marks with all assignments, including work awaiting a grade. The
+course shows its final grade when available or a running average otherwise.
+Saved Units routes open Overview and saved Assignments routes open Grades.
+Saved Archive routes also open Overview. The archive's separate Drive collection
+is unavailable in Scholix.
 
 Lemida keeps its original assignment detail, PDF reader and built-in hand-in page.
 Files lists saved assignment PDF attachments and links to the official course for

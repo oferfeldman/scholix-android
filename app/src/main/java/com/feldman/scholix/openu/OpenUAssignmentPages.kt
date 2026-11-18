@@ -29,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.feldman.motion.MotionFonts
-import com.feldman.motion.MotionBackButton
 import com.feldman.motion.MotionButton
 import com.feldman.motion.MotionButtonDefaults
 import com.feldman.motion.MotionButtonState
@@ -189,44 +188,36 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
         catch (e: Exception) { error = e.message ?: "Could not update this assignment." }
         finally { loading = false }
     }
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface) {
+    MotionScaffold(
+        scrollable = false,
+        contentPadding = PaddingValues(0.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        topBar = {
+            SettingsTopBar(item?.courseName.orEmpty(), onBack) {
+                IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh assignment") }
+            }
+        },
+    ) {
+    Item {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     Column(Modifier.widthIn(max = 840.dp).fillMaxSize().padding(horizontal = 16.dp)) {
-        Spacer(Modifier.height(TopBarSpacing()))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            MotionBackButton(onClick = onBack)
-            Text(item?.courseName.orEmpty(), Modifier.weight(1f).padding(horizontal = 12.dp),
-                style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            IconButton(onClick = { retry++ }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh assignment") }
-        }
         val assignment = item
         if (assignment == null || repo == null || provider == null) {
             Text("Assignment unavailable.", Modifier.padding(vertical = 24.dp))
         } else MotionLazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
                 CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(assignment.label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         SubjectIcon(subject = assignment.courseName, assignment = assignment.label, size = 48.dp, iconSize = 28.dp)
                         Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(assignment.label, style = MaterialTheme.typography.headlineSmall.copy(
                                 fontFamily = MotionFonts.feldman(weight = 600), fontWeight = FontWeight.SemiBold))
-                            Text(assignment.semester, style = MaterialTheme.typography.bodyMedium,
+                            if (assignment.status.isNotBlank()) Text(assignment.status, style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (assignment.due.isNotBlank()) Text("Due ${assignment.due}", style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (assignment.grade.isNotBlank() && assignment.grade != "-") {
-                            Text(assignment.grade, style = MaterialTheme.typography.displaySmall.copy(
-                                fontFamily = MotionFonts.feldman(weight = 700, width = 50f)), color = MaterialTheme.colorScheme.onSurface)
-                        }
-                    }
-                }
-                CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(assignment.label)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (assignment.status.isNotBlank()) Text(assignment.status, style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (assignment.due.isNotBlank()) Text("Due ${assignment.due}", style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(4.dp)) {
@@ -331,7 +322,12 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
             }
             data?.instructions?.takeIf { it.isNotBlank() }?.let { instructions ->
                 Title("Instructions")
-                item { Text(instructions, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge) }
+                item {
+                    CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(instructions)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                        Text(instructions, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.bodyLarge, textAlign = androidx.compose.ui.text.style.TextAlign.Start)
+                    }
+                }
             }
             val detailGroups = listOf("Assignment details" to data?.fields.orEmpty(),
                 "Submission details" to data?.submission.orEmpty())
@@ -356,6 +352,7 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
             }
 
         }
+    }
     }
     }
     }

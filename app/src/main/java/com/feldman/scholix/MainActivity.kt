@@ -72,6 +72,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -677,10 +678,10 @@ fun MainScreen(
             selectedProviderId = providerId
             val courseMainPage = com.feldman.scholix.courses.supportedProviderPages(
                 platforms.firstOrNull { it.id == providerId }, providerId == "lemida").firstOrNull() ?: AppDest.Tiktek
-            // Close the old course item before replacing the section; identities live in routes.
+            // Each course section is a list root. Replace the previous list and its details.
             backStack.navigateTop(courseMainPage)
-            while (backStack.backStack.lastOrNull()?.courseScope() != null &&
-                backStack.backStack.lastOrNull() !is CourseSection) backStack.pop()
+            backStack.navigateTop(AppDest.Home)
+            while (backStack.backStack.lastOrNull()?.courseScope() != null) backStack.pop()
             backStack.navigateTo(destination)
         } else if (topLevel) {
             backStack.navigateTop(destination)
@@ -726,9 +727,14 @@ fun MainScreen(
     val navigationScope = backStack.backStack.asReversed().firstOrNull { it.showNavigation }?.courseScope()
     val navigationCourse = navigationScope?.let { scope -> courseCatalog.singleOrNull { scope.matches(it) } }
     val navigationPages = if (navigationScope != null) {
-        courseSections(platforms.firstOrNull { it.id == navigationScope.providerId },
+        val provider = platforms.firstOrNull { it.id == navigationScope.providerId }
+        val sections = courseSections(provider,
             navigationCourse ?: JSONObject().put("platformId", navigationScope.providerId))
-            .map { navigationScope.copy(section = it) } + listOf(mainDestination, AppDest.Settings)
+            .map { navigationScope.copy(section = it) }
+        val providerLink = mainDestination.takeUnless { main ->
+            main == AppDest.Grades && sections.any { it.section == CourseSectionKind.GRADES }
+        }
+        sections + listOfNotNull(providerLink, AppDest.Settings)
     } else globalNavigationPages
     val activeNavigationPage = if (generateSequence<MotionDest>(currentScreen) { it.parent }.any { it is ProviderGrades })
         AppDest.Grades else backStack.backStack.asReversed().firstNotNullOfOrNull { screen ->
@@ -783,15 +789,9 @@ fun MainScreen(
             onScopeSelected = { destination -> navigateFromUser(destination,
                 topLevel = destination.parent == null) },
             onCourseResumed = { course ->
-                val providerId = if (course.providerId.startsWith("lemida:")) "lemida" else course.providerId
-                selectedProviderId = providerId
-                val courseMainPage = com.feldman.scholix.courses.supportedProviderPages(
-                    platforms.firstOrNull { it.id == providerId }, providerId == "lemida").firstOrNull() ?: AppDest.Tiktek
-                backStack.navigateTop(courseMainPage)
-                if (backStack.backStack.lastOrNull()?.courseScope()?.sameCourse(course) != true) {
-                    while (backStack.backStack.lastOrNull() != courseMainPage) { if (!backStack.pop()) break }
-                    backStack.navigateTo(courseLocations.firstOrNull { it.courseScope()?.sameCourse(course) == true } ?: course)
-                }
+                val location = courseLocations.firstOrNull { it.courseScope()?.sameCourse(course) == true }
+                navigateFromUser(location?.courseScope() ?: course)
+                if (location != null && location !is CourseSection) backStack.navigateTo(location)
             },
         )
     val scopeLabel = if (scopeCourse != null) {
@@ -808,7 +808,10 @@ fun MainScreen(
         val pickerCourses = providerOptions.flatMap { id ->
             val provider = platforms.firstOrNull { it.id == id }
             val catalogId = if (id == "lemida" && lemidaSnapshot.account.isNotBlank()) "lemida:${lemidaSnapshot.account}" else id
-            courseCatalog.filter { it.optString("platformId") == catalogId }.map { course ->
+            // School-provider grade rows belong to their main page, even when stored as courses.
+            val courses = if (provider is OpenAUPlatform || provider is GoogleClassroomPlatform || id == "lemida")
+                courseCatalog.filter { it.optString("platformId") == catalogId } else emptyList()
+            courses.map { course ->
                 JSONObject(course.toString()).put("platformName", provider?.providerLabel() ?: "Lemida")
             }.ifEmpty { listOf(JSONObject().put("platformId", catalogId).put("providerRoot", true)
                 .put("platformName", provider?.providerLabel() ?: "Lemida")
@@ -832,7 +835,9 @@ fun MainScreen(
                     val provider = platforms.firstOrNull { it.id == id }
                     val pages = com.feldman.scholix.courses.supportedProviderPages(provider, id == "lemida")
                     if (course.optBoolean("providerRoot")) {
-                        val target = (currentScreen as? AppDest)?.takeIf { it in pages } ?: pages.firstOrNull() ?: AppDest.Tiktek
+                        val target = (currentScreen as? AppDest)?.takeIf { id == activeProviderId && it in pages }
+                            ?: pages.firstOrNull() ?: AppDest.Tiktek
+                        if (id != activeProviderId) backStack.resetTo(target)
                         navigateFromUser(target, topLevel = true)
                     } else {
                         val sections = courseSections(provider, course)
@@ -848,7 +853,8 @@ fun MainScreen(
                 },
                 expanded = providerPickerExpanded, onExpandedChange = { providerPickerExpanded = it },
                 providersById = platforms.associateBy { it.id },
-                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp))
+                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
+                    .statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp))
         }
         }
         CompositionLocalProvider(LocalProviderHeaderVisible provides showProviderHeader,
@@ -866,24 +872,25 @@ fun MainScreen(
             navigationDestinations = navigationPages,
             theme = null,
             navigation = { content ->
-                MotionNavFlowAutomaticNavigation(
-                    content = {
-                        Column(Modifier.fillMaxSize()) {
-                            if (showProviderHeader && currentScreen != AppDest.Messages) providerHeader()
-                            Box(Modifier.weight(1f)) { content() }
-                        }
-                    },
-                    snackbarHost = snackbarHost,
-                    navigationDestinations = navigationPages,
-                    selectedDestination = selectedNavbarDest,
-                    // Outside a course the bar's few slots go to the pages, in the user's order;
-                    // Course navigation returns to the original main page.
-                    pinnedEndDestination = AppDest.Settings,
-                    replacePinnedEndWhenFull = false,
-                    onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = dest.parent == null) },
-                    contrastBlurEnabled = navigationBlurred,
-                    onOverflowChanged = { overflowPagesList = it.filterIsInstance<AppDest>() },
-                )
+                // A provider switch replaces the navigation scope in the same frame as its page.
+                key(activeProviderId) {
+                    MotionNavFlowAutomaticNavigation(
+                        content = {
+                            Column(Modifier.fillMaxSize()) {
+                                if (showProviderHeader && currentScreen != AppDest.Messages) providerHeader()
+                                Box(Modifier.weight(1f)) { content() }
+                            }
+                        },
+                        snackbarHost = snackbarHost,
+                        navigationDestinations = navigationPages,
+                        selectedDestination = selectedNavbarDest,
+                        pinnedEndDestination = AppDest.Settings,
+                        replacePinnedEndWhenFull = false,
+                        onDestinationSelected = { dest -> navigateFromUser(dest, topLevel = dest.parent == null) },
+                        contrastBlurEnabled = navigationBlurred,
+                        onOverflowChanged = { overflowPagesList = it.filterIsInstance<AppDest>() },
+                    )
+                }
             }
         )
         }

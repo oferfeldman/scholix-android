@@ -28,7 +28,8 @@ data class OpenUCourseItem(
         forumUrl.isNotBlank() -> OpenUCourseItem(providerId, courseKey, term, section, "activity", title = forumTitle, url = forumUrl)
         else -> CourseSection(providerId, courseKey, term, section)
     }
-    @IgnoredOnParcel @Transient override val pane = MotionPaneType.EXTRA
+    @IgnoredOnParcel @Transient override val pane =
+        if (kind != "unit" && unitId.isNotBlank() || forumUrl.isNotBlank()) MotionPaneType.EXTRA else MotionPaneType.DETAIL
     @IgnoredOnParcel @Transient override val showNavigation = kind != "quiz"
     @Composable
     override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
@@ -46,7 +47,7 @@ data class OpenUCourseDocument(
 ) : AppDest() {
     @IgnoredOnParcel @Transient override val label = title.ifBlank { "Document" }
     @IgnoredOnParcel @Transient override val parent: MotionDest = origin ?: CourseSection(providerId, courseKey, term, section)
-    @IgnoredOnParcel @Transient override val pane = MotionPaneType.EXTRA
+    @IgnoredOnParcel @Transient override val pane = if (origin == null) MotionPaneType.DETAIL else MotionPaneType.EXTRA
     @IgnoredOnParcel @Transient override val showNavigation = false
     @Composable
     override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
@@ -65,7 +66,7 @@ data class OpenUCoursePlayer(
 ) : AppDest() {
     @IgnoredOnParcel @Transient override val label = title.ifBlank { "Recording" }
     @IgnoredOnParcel @Transient override val parent: MotionDest = origin ?: CourseSection(providerId, courseKey, term, section)
-    @IgnoredOnParcel @Transient override val pane = MotionPaneType.EXTRA
+    @IgnoredOnParcel @Transient override val pane = if (origin == null) MotionPaneType.DETAIL else MotionPaneType.EXTRA
     @IgnoredOnParcel @Transient override val showNavigation = false
     @Composable
     override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
