@@ -55,6 +55,9 @@ object LemidaActivities {
     fun isExerciseTitle(title: String): Boolean =
         exerciseWords.containsMatchIn(title) && !solutionWords.containsMatchIn(title)
 
+    /** Moodle numbers course modules as they are created, so a larger module ID is a newer activity. */
+    fun recency(item: Homework): Long = item.id.substringAfterLast(':').toLongOrNull() ?: 0L
+
     /** Whether an activity of [type] named [title] belongs in the work list. */
     fun counts(type: String, title: String): Boolean =
         type in workTypes || (type in materialTypes && isExerciseTitle(title))

@@ -63,4 +63,11 @@ class LemidaActivitiesTest {
         assertFalse(LemidaActivities.isExerciseTitle("Syllabus"))
         assertFalse(LemidaActivities.isExerciseTitle("HW1 solutions"))
     }
+
+    @Test fun newerActivitiesHaveLargerRecency() {
+        val old = LemidaParser.stateHomework(state(module("quiz", 120, "Exercise 1")), 5, "Linear algebra").single()
+        val new = LemidaParser.stateHomework(state(module("assign", 98000, "Exercise 4")), 9, "Mechanics").single()
+        assertTrue(LemidaActivities.recency(new) > LemidaActivities.recency(old))
+        assertEquals(0L, LemidaActivities.recency(old.copy(id = "malformed")))
+    }
 }

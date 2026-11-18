@@ -44,17 +44,21 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
         prefs.registerOnSharedPreferenceChangeListener(listener)
         trySend(Unit)
         awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
-    }.conflate().map {
+    }.conflate().map { snapshotOf(prefs.all) }.flowOn(Dispatchers.IO)
+
+    /** The saved snapshot, read now, so a page can draw saved data on its first frame (and during its transition). */
+    fun cachedSnapshot(): LemidaSnapshot = snapshotOf(prefs.all)
+
+    private fun snapshotOf(values: Map<String, *>): LemidaSnapshot {
         // One atomic preference snapshot; never wait behind a network sync just to show saved data.
-        val values = prefs.all
         val homework = LemidaParser.decode(values["homework"] as? String ?: "[]")
         val courses = (values["courses"] as? String)?.let { LemidaCourse.decode(it) }
             ?: homework.map { LemidaCourse(it.courseId, it.course) }.distinctBy { it.id }
-        LemidaSnapshot(homework, courses.sortedBy { it.name }, values["status"] as? String ?: "",
+        return LemidaSnapshot(homework, courses.sortedBy { it.name }, values["status"] as? String ?: "",
             values["last_sync"] as? Long ?: 0L, values["enabled"] as? Boolean ?: false,
             values["needs_login"] as? Boolean ?: false, loaded = true, account = values["user_id"] as? String ?: "",
             materials = LemidaMaterial.decode(values["materials"] as? String ?: "[]"))
-    }.flowOn(Dispatchers.IO)
+    }
     fun setUserAgent(value: String) { prefs.edit().putString("user_agent", value).apply() }
     private fun detailKey(item: Homework) = "detail:${prefs.getString("user_id", "")}:${item.id}"
     fun cachedDetail(item: Homework): HomeworkDetail? = prefs.getString(detailKey(item), null)?.let {

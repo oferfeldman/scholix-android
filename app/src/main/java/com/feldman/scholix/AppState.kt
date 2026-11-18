@@ -27,6 +27,9 @@ class AppState(
     val onScopeSelected: (AppDest) -> Unit = {},
     val onCourseResumed: (CourseSection) -> Unit = {},
     val onCourseCacheChanged: () -> Unit = {},
+    /** The Lemida course the main Assignments and Materials pages are narrowed to, or null for all. */
+    val lemidaCourse: Int? = null,
+    val onLemidaCourseChanged: (Int?) -> Unit = {},
 ) {
     val scopedPlatforms get() = platforms.filter { selectedProviderId.isBlank() || it.id == selectedProviderId }
 }
