@@ -74,7 +74,9 @@ internal fun StudyDevicePicker(payload: String, localPackage: String?, prepareRe
             if (loading || sending) LinearProgressIndicator(Modifier.fillMaxWidth())
             if (local.isNotEmpty() || devices.any { it.optBoolean("supported") })
             MotionScaffold(modifier = Modifier.heightIn(max = 400.dp), contentPadding = PaddingValues(0.dp), fitContentHeight = true) {
-                Section {
+                // Remote devices arrive after "This device" is already shown. The published Motion section does not draw
+                // rows added to a section that is already on screen, so the section is rebuilt whenever its rows change.
+                key(local.size, devices.filter { it.optBoolean("supported") }.map { it.optString("id") }) { Section {
                     local.forEach { target ->
                         PageItem(title = if (local.size == 1) "This device" else "This device · ${target.loadLabel(context.packageManager)}", icon = rememberVectorPainter(Icons.Outlined.Smartphone), onClick = {
                             if (!sending)
@@ -104,7 +106,7 @@ internal fun StudyDevicePicker(payload: String, localPackage: String?, prepareRe
                             })
                         }
                     }
-                }
+                } }
             }
             if (!loading && devices.none { it.optBoolean("supported") } && error == null && !approval)
                 Text(if (devices.any { !it.optBoolean("checked") }) "No supported devices confirmed. Check the connection in Seamless."
