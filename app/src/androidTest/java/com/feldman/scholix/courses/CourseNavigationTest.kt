@@ -38,6 +38,42 @@ import org.junit.Assume.assumeTrue
 class CourseNavigationTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun messagesPickerStaysWithInboxDuringSubpageTransitions() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue(context.packageName.endsWith(".studyhandoff.qa"))
+        val database = Room.inMemoryDatabaseBuilder(context, LockerDatabase::class.java).build()
+        val provider = WebtopPlatform()
+        lateinit var activity: ComponentActivity
+        lateinit var state: AppState
+        try {
+            compose.setContent {
+                MotionTheme {
+                    activity = LocalActivity.current as ComponentActivity
+                    MainScreen(emptyList(), LockerRepository(database.lockerItemDao(), database.lockerTabDao()),
+                        {}, listOf(provider), {}, {}, snackbarHost = { state = LocalAppState.current })
+                }
+            }
+            compose.runOnIdle { state.onScopeSelected(AppDest.Messages) }
+            compose.waitForIdle()
+            val bounds = compose.onNodeWithContentDescription("Choose course").fetchSemanticsNode().boundsInRoot
+            for (destination in listOf(AppDest.MessageFolders(provider.id, "INBOX"), AppDest.MessageTools(provider.id))) {
+                compose.mainClock.autoAdvance = false
+                compose.runOnIdle { state.onScopeSelected(destination) }
+                compose.mainClock.advanceTimeBy(16)
+                compose.onNodeWithContentDescription("Choose course").assertExists()
+                compose.mainClock.autoAdvance = true
+                compose.waitForIdle()
+                compose.runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
+                compose.waitForIdle()
+                assertEquals(bounds, compose.onNodeWithContentDescription("Choose course").fetchSemanticsNode().boundsInRoot)
+            }
+        } finally {
+            compose.mainClock.autoAdvance = true
+            compose.runOnUiThread { activity.finish() }
+            database.close()
+        }
+    }
+
     @Test fun activeCourseGradesFinishesLoadingForWebtopMashovAndOpenU() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assumeTrue(context.packageName.endsWith(".studyhandoff.qa"))

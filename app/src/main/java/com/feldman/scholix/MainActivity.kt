@@ -150,6 +150,7 @@ import com.feldman.scholix.ui.components.providerLabel
 import org.json.JSONObject
 
 val LocalProviderHeaderVisible = compositionLocalOf { false }
+val LocalMessagesProviderHeader = compositionLocalOf<(@Composable () -> Unit)?> { null }
 
 @Composable
 fun TopBarSpacing(): Dp {
@@ -819,7 +820,7 @@ fun MainScreen(
                 activeProviderId == "lemida" && course.optString("platformId").startsWith("lemida:")
         }.coerceAtLeast(0)
         val providerHeader: @Composable () -> Unit = {
-        if (showProviderHeader && pickerCourses.isNotEmpty()) {
+        if (pickerCourses.isNotEmpty()) {
             com.feldman.scholix.ui.components.CoursePickerBar(
                 courses = pickerCourses, selectedIndex = pickerIndex,
                 onSelected = { index ->
@@ -850,7 +851,8 @@ fun MainScreen(
                 modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp))
         }
         }
-        CompositionLocalProvider(LocalProviderHeaderVisible provides showProviderHeader) {
+        CompositionLocalProvider(LocalProviderHeaderVisible provides showProviderHeader,
+            LocalMessagesProviderHeader provides providerHeader.takeIf { pickerCourses.isNotEmpty() }) {
         // Motion owns the shell: bar, rail, the bar's slide and predictive back, and the overflow
         // menu on the bar's button slot. The app keeps the back stack for its deep links.
         MotionNavFlow(
@@ -867,7 +869,7 @@ fun MainScreen(
                 MotionNavFlowAutomaticNavigation(
                     content = {
                         Column(Modifier.fillMaxSize()) {
-                            providerHeader()
+                            if (showProviderHeader && currentScreen != AppDest.Messages) providerHeader()
                             Box(Modifier.weight(1f)) { content() }
                         }
                     },

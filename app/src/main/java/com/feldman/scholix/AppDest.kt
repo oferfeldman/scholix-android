@@ -3,7 +3,9 @@
 package com.feldman.scholix
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
@@ -347,7 +349,13 @@ sealed class AppDest : MotionDest {
             searchQuery: String,
             onFabAction: ((() -> Unit) -> Unit) -> Unit
         ) {
-            MessagesScreen(onNavigate, onBack)
+            val providerHeader = LocalMessagesProviderHeader.current
+            Column(Modifier.fillMaxSize()) {
+                providerHeader?.invoke()
+                CompositionLocalProvider(LocalProviderHeaderVisible provides (providerHeader != null)) {
+                    MessagesScreen(onNavigate, onBack)
+                }
+            }
         }
     }
 
