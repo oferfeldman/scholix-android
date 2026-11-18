@@ -84,7 +84,8 @@ object AssignmentStudyBundle {
             require(questions.length() > 0) { "This assignment has no question files or instructions to import. Refresh the assignment first." }
             val now = System.currentTimeMillis()
             val study = JSONObject().put("id", "scholix-${assignment.key}").put("title", assignment.title)
-                .put("createdAtMillis", now).put("updatedAtMillis", now).put("sources", sources).put("folders", folders).put("questions", questions)
+                .put("createdAtMillis", now).put("updatedAtMillis", now).put("pageBackground", MATH_GRID)
+                .put("sources", sources).put("folders", folders).put("questions", questions)
             val directory = File(context.cacheDir, "study-handoffs").apply { mkdirs() }
             directory.listFiles()?.filter { now - it.lastModified() > 24 * 60 * 60 * 1000 }?.forEach { it.delete() }
             File.createTempFile("assignment-", ".fstudy", directory).also { bundle ->
@@ -101,6 +102,10 @@ object AssignmentStudyBundle {
                 require(bundle.length() <= 40L * 1024 * 1024) { "The study exceeds the 40 MB transfer limit." }
             }
         }
+
+    /** Answers are worked out by hand, so studies open on Documents' "Math grid" paper preset. */
+    private val MATH_GRID get() = JSONObject().put("type", "MATH").put("lineCount", 72)
+        .put("lineWidth", 3.0).put("lineColorArgb", 0xFFD8E3F0L)
 
     private fun question(id: String, topic: String, number: String, crops: JSONArray) =
         JSONObject().put("id", id).put("topic", topic).put("number", number).put("sourceCrops", crops)
