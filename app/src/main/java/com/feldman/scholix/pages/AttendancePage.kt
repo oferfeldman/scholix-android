@@ -419,7 +419,8 @@ fun AttendancePage(
         } else if (errorMessage != null) {
             Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
-                Text(errorMessage.orEmpty(), textAlign = TextAlign.Center)
+                // Outside a Surface the default content color is black, unreadable on the dark theme.
+                Text(errorMessage.orEmpty(), textAlign = TextAlign.Center, color = androidx.compose.material3.MaterialTheme.colorScheme.error)
                 TextButton(onClick = { reloginAttempted = false; reloadTrigger++ }) { Text("Retry") }
             }
         } else {

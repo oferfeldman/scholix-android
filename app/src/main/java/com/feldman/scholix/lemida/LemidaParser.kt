@@ -161,14 +161,16 @@ object LemidaParser {
         }.distinctBy { it.id }
     }
 
+    private fun activityIdentity(url: String): Pair<String, String>? = activity(url)
+
     /** Parse the endpoint and complete ID parameter, regardless of query ordering. */
-    private fun activityIdentity(url: String): Pair<String, String>? = runCatching {
+    internal fun activity(url: String): Pair<String, String>? = runCatching {
         val uri = URI(url)
         if (uri.scheme != "https" || !uri.host.equals("lemida.biu.ac.il", ignoreCase = true) ||
             uri.port !in setOf(-1, 443) || uri.userInfo != null) return null
         val type = Regex("^/mod/([a-z0-9]+)/view\\.php$")
             .matchEntire(uri.path.orEmpty())?.groupValues?.get(1)
-            ?.takeIf { it in LemidaActivities.types } ?: return null
+            ?.takeIf { it in LemidaActivities.types || it in LemidaMaterial.types } ?: return null
         val ids = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
             val key = URLDecoder.decode(part.substringBefore('='), "UTF-8")
             if (key == "id") URLDecoder.decode(part.substringAfter('=', ""), "UTF-8") else null

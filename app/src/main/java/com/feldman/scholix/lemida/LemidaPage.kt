@@ -41,6 +41,10 @@ import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.openu.OpenUAssignmentsRepository
 import com.feldman.scholix.ui.components.CoursePickerBar
 import com.feldman.scholix.ui.components.SettingsTopBar
+import com.feldman.scholix.openu.course.CourseRow
+import com.feldman.scholix.openu.course.moduleLabel
+import com.feldman.scholix.openu.course.moduleSymbol
+import com.feldman.motion.rememberSymbolPainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -136,7 +140,11 @@ fun LemidaPage(searchQuery: String = "", onNavigate: com.feldman.motion.MotionNa
                 courseKey, coursePicker, onCoursesChanged = { refreshedCourses[providerId] = it; app.onCourseCacheChanged() })
             is GoogleClassroomPlatform -> com.feldman.scholix.classroom.ClassroomHomeworkPage(selected, searchQuery,
                 coursePicker, selectedCourseId = courseKey, materialsOnly = filesOnly, onCoursesChanged = { refreshedCourses[providerId] = it; app.onCourseCacheChanged() })
-            else -> LemidaPageContent(repo, searchQuery, coursePicker, selectedCourseId = courseKey?.toIntOrNull(), filesOnly = filesOnly)
+            // Under the provider bar this page's own picker is hidden, and it silently kept the first course.
+            // Lemida's main page lists every course, with its course chips to narrow it down.
+            else -> if (com.feldman.scholix.LocalProviderHeaderVisible.current)
+                LemidaPageContent(repo, searchQuery, coursePicker = null, selectedCourseId = null, filesOnly = filesOnly)
+            else LemidaPageContent(repo, searchQuery, coursePicker, selectedCourseId = courseKey?.toIntOrNull(), filesOnly = filesOnly)
         }
     }
 }
@@ -161,6 +169,26 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
     var query by rememberSaveable { mutableStateOf("") }
     var options by remember { mutableStateOf(false) }
     val exportHomework = rememberHomeworkExportAction()
+    var materialFile by remember { mutableStateOf<java.io.File?>(null) }
+    var materialName by remember { mutableStateOf("") }
+    var openingMaterial by remember { mutableStateOf<String?>(null) }
+    var materialError by remember { mutableStateOf<String?>(null) }
+    val materialScope = rememberCoroutineScope()
+    DisposableEffect(materialFile) { val file = materialFile; onDispose { file?.delete() } }
+    fun openMaterial(material: LemidaMaterial) {
+        fun onLemida() = context.startActivity(com.feldman.scholix.browser.ScholixBrowserActivity.intent(context, material.url, material.title))
+        if (material.type != "resource") { onLemida(); return }
+        if (openingMaterial != null) return
+        materialScope.launch {
+            openingMaterial = material.id; materialError = null
+            try { materialFile = repo.openMaterial(material); materialName = material.title }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: LemidaSessionExpired) { materialError = e.message ?: "Sign in to Lemida again to open this file." }
+            // Slides and documents aren't PDFs; Lemida's own page offers them.
+            catch (e: Exception) { onLemida() }
+            finally { openingMaterial = null }
+        }
+    }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         // A completed sign-in may change accounts. Return to the freshly loaded list.
@@ -195,6 +223,10 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         }
         return
     }
+    materialFile?.let { file ->
+        LemidaPdfScreen(file, materialName, onBack = { materialFile = null })
+        return
+    }
     LaunchedEffect(lifecycle) {
         lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val canRecover = withContext(Dispatchers.IO) { LemidaSignInStore(context).canRecover() } && LemidaBackgroundSignIn.available(context)
@@ -209,6 +241,11 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         (typeFilter == "all" || LemidaActivities.group(it.type) == typeFilter) &&
         (!filesOnly || repo.cachedDetail(it)?.pdfs?.isNotEmpty() == true) &&
         it.matchesSearch(query, searchQuery) } }
+    val materials = remember(snapshot.materials, courseFilter, query, searchQuery, filesOnly) {
+        if (!filesOnly) emptyList() else snapshot.materials.filter {
+            (courseFilter == null || it.courseId == courseFilter) && it.matchesSearch(query, searchQuery)
+        }
+    }
     MotionScaffold(modifier = Modifier.fillMaxSize(), topBar = { if (filesOnly && !com.feldman.scholix.LocalProviderHeaderVisible.current) SettingsTopBar("Files", onBack) }) {
         if (!filesOnly && onBack != null) Item { com.feldman.motion.MotionBackButton(onClick = onBack) }
         if (coursePicker != null && !com.feldman.scholix.LocalProviderHeaderVisible.current) Item { coursePicker() }
@@ -254,15 +291,6 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
             }
             }
         }
-        if (filesOnly) Item {
-            Column(Modifier.padding(12.dp)) {
-                Text("Saved PDF attachments from assignments. Open an assignment and refresh its details to find its files.")
-                if (selectedCourseId != null) TextButton(onClick = {
-                    context.startActivity(com.feldman.scholix.browser.ScholixBrowserActivity.intent(context,
-                        "${LemidaParser.BASE}/course/view.php?id=$selectedCourseId", "Course files"))
-                }) { Text("Browse course files on Lemida") }
-            }
-        }
         Item {
             LemidaHomeworkFilters(
                 count = visible.size, updated = updated, courses = courses,
@@ -274,6 +302,8 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                     .let { present -> LemidaActivities.groups.filter { it in present } },
                 automaticUpdates = enabled,
                 showCourseFilters = coursePicker == null,
+                searchLabel = if (filesOnly) "Search files" else "Search assignments",
+                showTypeFilters = !filesOnly,
             )
         }
         if (updated == 0L || needsLogin) Section {
@@ -282,7 +312,37 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
             })
         }
         if (status.startsWith("Update failed")) Item { Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-        if (visible.isEmpty()) Item { Text(when {
+        if (filesOnly) {
+            if (materials.isEmpty()) Item {
+                Column(Modifier.padding(12.dp)) {
+                    Text(when {
+                        updated == 0L -> "Connect Lemida to see your course files."
+                        snapshot.materials.isEmpty() -> "Course files appear after the next Lemida update. Tap Refresh to update now."
+                        else -> "No course files match."
+                    })
+                    if (selectedCourseId != null) TextButton(onClick = {
+                        context.startActivity(com.feldman.scholix.browser.ScholixBrowserActivity.intent(context,
+                            "${LemidaParser.BASE}/course/view.php?id=$selectedCourseId", "Course files"))
+                    }) { Text("Browse course files on Lemida") }
+                }
+            }
+            materialError?.let { message -> Item { Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(12.dp)) } }
+            // Lemida's own course sections ("הרצאות", "תרגולים", "לוח"), in the course's order.
+            materials.groupBy { it.courseId }.forEach { (_, inCourse) ->
+                if (courseFilter == null) Title(inCourse.first().course)
+                inCourse.groupBy { it.sectionIndex to it.section }.forEach { (section, items) ->
+                    Item { Text("${section.second.ifBlank { "General" }} · ${items.size}", style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 4.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    Section { items.forEach { material ->
+                        CourseRow(title = material.title, key = material.id, onClick = { openMaterial(material) },
+                            icon = rememberSymbolPainter(moduleSymbol(material.type)),
+                            description = if (openingMaterial == material.id) "Opening…" else moduleLabel(material.type))
+                    } }
+                }
+            }
+            if (visible.isNotEmpty()) Title("Assignment attachments")
+        }
+        if (visible.isEmpty() && !(filesOnly && materials.isNotEmpty())) Item { Text(when {
             updated == 0L -> "Connect Lemida to see your assignments."
             filesOnly -> "No saved PDF attachments in this course yet."
             homework.isEmpty() -> "No assignments available yet. New activities will appear after an update."
@@ -322,6 +382,9 @@ internal fun LemidaHomeworkFilters(
     groups: List<String> = LemidaActivities.groups,
     automaticUpdates: Boolean = true,
     showCourseFilters: Boolean = true,
+    /** What the search box searches; Files searches course material by its title and section. */
+    searchLabel: String = "Search assignments",
+    showTypeFilters: Boolean = true,
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -330,9 +393,9 @@ internal fun LemidaHomeworkFilters(
         }
         OutlinedTextField(value = query, onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth().testTag("homework-search"),
-            singleLine = true, placeholder = { Text("Search assignments") }, shape = MaterialTheme.shapes.large,
+            singleLine = true, placeholder = { Text(searchLabel) }, shape = MaterialTheme.shapes.large,
             trailingIcon = if (query.isNotEmpty()) {
-                { IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Clear assignments search") } }
+                { IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Clear search") } }
             } else null)
         if (showCourseFilters) Row(Modifier.fillMaxWidth().testTag("homework-course-filters").horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -340,7 +403,7 @@ internal fun LemidaHomeworkFilters(
             courses.forEach { c -> FilterChip(selected = courseFilter == c.id,
                 onClick = { onCourseChange(c.id) }, label = { Text(c.name, maxLines = 1) }) }
         }
-        Row(Modifier.fillMaxWidth().testTag("homework-type-filters").horizontalScroll(rememberScrollState()),
+        if (showTypeFilters) Row(Modifier.fillMaxWidth().testTag("homework-type-filters").horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             (listOf("all" to "All") + groups.map { it to it }).forEach { (type, label) ->
                 FilterChip(selected = typeFilter == type, onClick = { onTypeChange(type) }, label = { Text(label) })

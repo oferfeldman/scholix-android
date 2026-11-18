@@ -585,8 +585,14 @@ fun MainScreen(
             } else emptyList()
     }
     val providerOptions = platforms.filter { com.feldman.scholix.courses.supportedProviderPages(it).isNotEmpty() }.map { it.id } + listOf("lemida")
-    var selectedProviderId by rememberSaveable { mutableStateOf(platforms.firstOrNull { it.suportsGrades }?.id ?: providerOptions.firstOrNull().orEmpty()) }
+    // Reopen on the provider used last, rather than always the first one with grades.
+    val providerPreferences = remember(context) { context.getSharedPreferences("navigation_scope", android.content.Context.MODE_PRIVATE) }
+    var selectedProviderId by rememberSaveable { mutableStateOf(providerPreferences.getString("provider", null)
+        ?.takeIf { it in providerOptions } ?: platforms.firstOrNull { it.suportsGrades }?.id ?: providerOptions.firstOrNull().orEmpty()) }
     val activeProviderId = selectedProviderId.takeIf { it in providerOptions } ?: providerOptions.firstOrNull().orEmpty()
+    LaunchedEffect(activeProviderId) {
+        if (activeProviderId.isNotBlank()) providerPreferences.edit().putString("provider", activeProviderId).apply()
+    }
     val activeProvider = platforms.firstOrNull { it.id == activeProviderId }
     val supportedPages = com.feldman.scholix.courses.supportedProviderPages(activeProvider, activeProviderId == "lemida")
     var providerPickerExpanded by remember { mutableStateOf(false) }
@@ -853,6 +859,7 @@ fun MainScreen(
                 },
                 expanded = providerPickerExpanded, onExpandedChange = { providerPickerExpanded = it },
                 providersById = platforms.associateBy { it.id },
+                providerLevel = courseScope == null && pickerCourses.getOrNull(pickerIndex)?.optBoolean("providerRoot") != true,
                 modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
                     .statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp))
         }
