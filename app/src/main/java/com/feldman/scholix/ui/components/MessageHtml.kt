@@ -1,7 +1,18 @@
 package com.feldman.scholix.ui.components
 
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
+import org.jsoup.nodes.Node
+import org.jsoup.nodes.TextNode
+import org.jsoup.parser.Parser
 import org.jsoup.safety.Safelist
+import org.jsoup.select.NodeFilter
+import org.jsoup.select.NodeTraversor
+
+/** The "From / To / date / subject" block Webtop puts under a divider when a message quotes an earlier one. */
+data class QuotedHeader(val from: String, val date: String, val subject: String)
+
+class DisplayMessage(val html: String, val quoted: QuotedHeader?)
 
 /** Rich mail is untrusted, including drafts opened from Webtop. */
 object MessageHtml {
@@ -34,5 +45,87 @@ object MessageHtml {
         }.forEach { it.remove() }
         clean.select("[contenteditable]").forEach { it.removeAttr("contenteditable") }
         return clean.body().html()
+    }
+
+    /** Webtop sends subjects and names HTML-escaped (`tomorrow&#39;s`); some arrive escaped twice. */
+    fun plainText(value: String): String {
+        var text = value
+        repeat(2) { text = Parser.unescapeEntities(text, false) }
+        return text.replace('\u00A0', ' ').trim()
+    }
+
+    private val blocks = setOf("p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ul", "ol", "tr", "table", "blockquote", "section", "article", "pre")
+    private val fromLabel = Regex("""^(מאת|From)\s*:\s*""", RegexOption.IGNORE_CASE)
+    private val dateLine = Regex("""\d{1,2}[/.]\d{1,2}[/.]\d{2,4}""")
+
+    /**
+     * Pulls a leading quoted-message header and its divider out of the body so it can be shown natively.
+     * Only applies when nothing but whitespace precedes the divider; otherwise the HTML is returned as is.
+     */
+    fun splitQuotedHeader(html: String): DisplayMessage {
+        val doc = Jsoup.parseBodyFragment(html)
+        doc.outputSettings().prettyPrint(false)
+        val body = doc.body()
+        val hr = body.selectFirst("hr") ?: return DisplayMessage(html, null)
+        val lines = mutableListOf(mutableListOf<TextNode>())
+        val breaks = mutableListOf<Pair<Element, Int>>()
+        var leadingContent = false
+        var passed = false
+        fun completed() = lines.count { line -> line.any { it.text().isNotBlank() } }
+        fun newLine() { if (lines.last().any { it.text().isNotBlank() }) lines += mutableListOf<TextNode>() }
+        NodeTraversor.filter(object : NodeFilter {
+            override fun head(node: Node, depth: Int): NodeFilter.FilterResult {
+                if (node === hr) { passed = true; return NodeFilter.FilterResult.CONTINUE }
+                if (!passed) {
+                    if ((node is TextNode && node.text().isNotBlank()) || (node is Element && node.normalName() in setOf("img", "table", "math"))) {
+                        leadingContent = true
+                        return NodeFilter.FilterResult.STOP
+                    }
+                    return NodeFilter.FilterResult.CONTINUE
+                }
+                when {
+                    node is TextNode -> if (node.text().isNotBlank()) lines.last() += node
+                    node is Element && node.normalName() == "br" -> { breaks += node to completed(); newLine() }
+                    node is Element && node.normalName() in blocks -> newLine()
+                }
+                return if (completed() > 6) NodeFilter.FilterResult.STOP else NodeFilter.FilterResult.CONTINUE
+            }
+            override fun tail(node: Node, depth: Int): NodeFilter.FilterResult {
+                if (passed && node is Element && node.normalName() in blocks) newLine()
+                return NodeFilter.FilterResult.CONTINUE
+            }
+        }, body)
+        if (leadingContent) return DisplayMessage(html, null)
+        val content = lines.filter { line -> line.any { it.text().isNotBlank() } }
+        fun text(index: Int) = content.getOrNull(index)?.joinToString("") { it.text() }?.replace('\u00A0', ' ')?.trim().orEmpty()
+        if (!fromLabel.containsMatchIn(text(0))) return DisplayMessage(html, null)
+        val dateIndex = (1..4).firstOrNull { dateLine.containsMatchIn(text(it)) } ?: return DisplayMessage(html, null)
+        val subject = text(dateIndex + 1).takeIf { it.isNotBlank() && it.length <= 200 }
+        val last = if (subject != null) dateIndex + 1 else dateIndex
+        val header = QuotedHeader(fromLabel.replace(text(0), "").trim(), text(dateIndex), subject.orEmpty())
+
+        val touched = mutableListOf<Element>()
+        var ancestor: Element? = hr
+        while (ancestor != null && ancestor !== body) {
+            ancestor.siblingNodes().filter { it.siblingIndex() < ancestor!!.siblingIndex() }.forEach { it.remove() }
+            ancestor = ancestor.parent()
+        }
+        hr.parent()?.let(touched::add); hr.remove()
+        (0..last).flatMap { content[it] }.forEach { node -> (node.parent() as? Element)?.let(touched::add); node.remove() }
+        breaks.filter { (_, before) -> before <= last + 1 }.forEach { (br, _) -> br.parent()?.let(touched::add); br.remove() }
+        fun Element.blank() = text().isBlank() && select("img, table, math, hr").isEmpty()
+        touched.forEach { start ->
+            var element: Element? = start
+            while (element != null && element !== body && element.parent() != null && element.blank()) {
+                val parent = element.parent(); element.remove(); element = parent
+            }
+        }
+        while (true) {
+            val first = body.childNodes().firstOrNull() ?: break
+            val blank = (first is TextNode && first.text().isBlank()) || (first is Element && (first.normalName() == "br" || first.blank()))
+            if (!blank) break
+            first.remove()
+        }
+        return DisplayMessage(body.html(), header)
     }
 }

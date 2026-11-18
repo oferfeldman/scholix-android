@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
@@ -300,11 +301,13 @@ private fun MessageCard(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal
+                        fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
+                        textDirection = TextDirection.Content
                     ),
                     color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
 
@@ -543,12 +546,9 @@ fun MessagesScreen(onNavigate: MotionNavigator, onBack: () -> Unit) {
                         val id = message.text("messageId")
                         val unread = vm.folder == MailboxFolder.INBOX && message.optInt("hasRead") == 0
                         val destination = AppDest.MessageDetail(vm.providerId, id, vm.folder.name, message.optInt("fromInbox", 1))
-                        val rawTitle = message.text("subject").ifBlank { "No subject" }
-                        val rawSender = messageSender(message, vm.folder)
-                        val isRtl = isRtlText(if (rawSender.isNotBlank()) rawSender else rawTitle)
-                        val bidi = BidiFormatter.getInstance()
-                        val title = bidi.unicodeWrap(rawTitle)
-                        val sender = if (rawSender.isNotBlank()) bidi.unicodeWrap(rawSender) else ""
+                        val title = MessageHtml.plainText(message.text("subject")).ifBlank { "No subject" }
+                        val sender = MessageHtml.plainText(messageSender(message, vm.folder))
+                        val isRtl = isRtlText(sender.ifBlank { title })
                         val date = mailDate(message.text("sendingDate").ifBlank { message.text("createdOn") })
                         val hasAttachments = message.optInt("filesWereAttached") > 0
                         val isSelected = id in selected
@@ -677,13 +677,11 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
             if (key in vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             else MailAction("Retry") { vm.loadMessage(destination.providerId, destination.messageId, folder, destination.fromInbox, true) }
         } else {
+            val subjectText = MessageHtml.plainText(message.text("subject"))
             Section { Item {
-                val rawSubject = message.text("subject")
-                val rawSender = "${message.text("privateName")} ${message.text("lastName")}".trim()
-                val isRtl = isRtlText("$rawSender $rawSubject")
-                val bidi = BidiFormatter.getInstance()
-                val subject = bidi.unicodeWrap(rawSubject)
-                val sender = bidi.unicodeWrap(rawSender)
+                // Each line takes its own direction, so an English subject stays left-aligned beside a Hebrew sender.
+                val subject = subjectText
+                val sender = MessageHtml.plainText("${message.text("privateName")} ${message.text("lastName")}")
                 val platform = LocalAppState.current.platforms.firstOrNull { it.id == destination.providerId } as? WebtopPlatform
                 val instiCode = platform?.studentInstitution.orEmpty()
                 val cookies = platform?.cookies
@@ -691,9 +689,10 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
                 val isSystem = message.optBoolean("isSystemMessage", false) || message.optInt("userType") == 4
                 val date = mailDate(message.text("sendingDate"))
 
-                CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                        Text(subject, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text(subject, style = MaterialTheme.typography.titleLarge.copy(textDirection = TextDirection.Content),
+                        fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth())
+                    CompositionLocalProvider(LocalLayoutDirection provides if (isRtlText(sender)) LayoutDirection.Rtl else LayoutDirection.Ltr) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -726,13 +725,14 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
                                 }
                             }
                         }
-                        val rec = recipients ?: message.text("recipientsName")
-                        if (rec.isNotBlank()) {
-                            Text(rec, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        if (message.optInt("totalRecipientsCount") > 3) MailAction("All recipients") {
-                            vm.action("recipients:$key") { recipients = withContext(Dispatchers.IO) { vm.mailbox(destination.providerId).recipients(destination.messageId, vm.labelId).toString() } }
-                        }
+                    }
+                    val rec = MessageHtml.plainText(recipients ?: message.text("recipientsName"))
+                    if (rec.isNotBlank()) {
+                        Text(rec, style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Content),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
+                    }
+                    if (message.optInt("totalRecipientsCount") > 3) MailAction("All recipients") {
+                        vm.action("recipients:$key") { recipients = withContext(Dispatchers.IO) { vm.mailbox(destination.providerId).recipients(destination.messageId, vm.labelId).toString() } }
                     }
                 }
             } }
@@ -755,7 +755,25 @@ fun MessageDetailPage(destination: AppDest.MessageDetail, onNavigate: MotionNavi
                     MailIconAction(MotionSymbols.ic_delete, "Delete") { confirmDelete = true }
                 }
             }
-            Item { RichMessageBody(message.text("messageContent"), Modifier.fillMaxWidth(), onView = { reader = it }) }
+            val content = message.text("messageContent")
+            Item {
+                val display = remember(content) { MessageHtml.splitQuotedHeader(content) }
+                Column(Modifier.fillMaxWidth()) {
+                    display.quoted?.let { quoted ->
+                        // The quoted message's header, lifted out of the body in place of Webtop's divider block.
+                        val quotedStyle = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Content)
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            val quotedSubject = MessageHtml.plainText(quoted.subject)
+                            if (quotedSubject.isNotBlank() && quotedSubject != subjectText) {
+                                Text(quotedSubject, style = MaterialTheme.typography.titleSmall.copy(textDirection = TextDirection.Content), modifier = Modifier.fillMaxWidth())
+                            }
+                            Text(listOf(MessageHtml.plainText(quoted.from), quoted.date).filter { it.isNotBlank() }.joinToString(" · "),
+                                style = quotedStyle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    RichMessageBody(display.html, Modifier.fillMaxWidth(), onView = { reader = it })
+                }
+            }
             val attachments = message.optJSONArray("filesList")?.objects().orEmpty()
             if (attachments.isNotEmpty()) {
                 Title("Attachments")
