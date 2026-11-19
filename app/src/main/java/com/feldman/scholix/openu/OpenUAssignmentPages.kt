@@ -43,6 +43,7 @@ import com.feldman.scholix.TopBarSpacing
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.WebtopDownloadedAttachment
+import com.feldman.scholix.browser.ScholixBrowserActivity
 import com.feldman.scholix.drive.DrivePdfReader
 import com.feldman.scholix.studies.StudyActions
 import com.feldman.scholix.studies.StudyAssignment
@@ -168,6 +169,11 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
     var retry by remember { mutableIntStateOf(0) }
     val uri = LocalUriHandler.current
     var openingUpload by remember { mutableStateOf(false) }
+    var returningFromSubmission by remember { mutableStateOf(false) }
+    val submitAssignment = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        returningFromSubmission = true
+        retry++
+    }
     var sendingFiles by remember(assignmentKey) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(repo, assignmentKey, retry) {
@@ -177,6 +183,12 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
         try {
             val current = selected
             data = repo.detail(current)
+            if (returningFromSubmission) {
+                returningFromSubmission = false
+                repo.cachedCourses().firstOrNull { it.optString("courseKey") == current.courseKey }?.let { course ->
+                    item = repo.refresh(course).firstOrNull { it.key == current.key } ?: current
+                }
+            }
             for (draft in repo.cachedDrafts(current)) {
                 try { repo.draft(current, draft.reference) }
                 catch (e: CancellationException) { throw e }
@@ -239,7 +251,7 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                     })
                 if (assignment.module == "ouilassign") {
                     Spacer(Modifier.height(2.dp))
-                    MotionButton(text = if (openingUpload) "Opening…" else "Upload files", icon = MotionIcons.Outlined.Upload,
+                    MotionButton(text = if (openingUpload) "Opening…" else "Submit assignment", icon = MotionIcons.Outlined.Upload,
                         modifier = Modifier.fillMaxWidth(), enabled = !openingUpload,
                         sizes = MotionButtonDefaults.sizes(height = 48.dp, fontSize = 16.sp, iconSize = 20.dp),
                         contentPadding = PaddingValues(horizontal = 20.dp),
@@ -249,18 +261,20 @@ internal fun OpenUAssignmentPage(providerId: String, assignmentKey: String, onNa
                         openingUpload = true
                         scope.launch {
                             try {
-                                withContext(Dispatchers.IO) { provider.assignmentPage(assignment.url) }
+                                data = repo.detail(assignment)
                                 val cookies = withContext(Dispatchers.IO) { provider.assignmentBrowserCookies(assignment.url) }
-                                val manager = android.webkit.CookieManager.getInstance()
+                                if (cookies.isEmpty()) throw java.io.IOException("Reconnect OpenU before submitting this assignment.")
+                                val profile = "openu-submissions-${provider.id}"
+                                val manager = ScholixBrowserActivity.cookieManager(profile)
                                 for (cookie in cookies) kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
                                     manager.setCookie(assignment.url, cookie) { accepted ->
                                         if (continuation.isActive) continuation.resumeWith(if (accepted) Result.success(Unit)
                                             else Result.failure(java.io.IOException("Could not open the OpenU session.")))
                                     }
                                 }
-                                uri.openUri(assignment.url)
+                                submitAssignment.launch(ScholixBrowserActivity.intent(context, assignment.url, "Submit assignment", profile))
                             } catch (e: CancellationException) { throw e
-                            } catch (e: Exception) { error = e.message ?: "Could not open uploads."
+                            } catch (e: Exception) { error = e.message ?: "Could not open submission."
                             } finally { openingUpload = false }
                         }
                     })

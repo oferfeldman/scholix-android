@@ -2,8 +2,9 @@
 
 OpenU assignments are listed in the course's **Grades** page, including ungraded
 work. Tap an assignment to see its status, due date, files, instructions and available
-submission details. **Upload files** opens Opal's submission controls using the
-selected account's session. Choose files and confirm submission there.
+submission details. **Submit assignment** opens Opal inside Scholix using the
+selected account's session. Choose files and confirm using Opal's controls.
+Returning to the assignment refreshes its status, receipt and files.
 
 **Open in Documents** first shows supported local and remote devices, even when Documents is
 absent on the phone. Remote discovery and launch use the installed Seamless app's

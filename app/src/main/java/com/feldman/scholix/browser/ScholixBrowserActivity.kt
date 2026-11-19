@@ -46,6 +46,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.feldman.motion.MotionTheme
 import com.feldman.scholix.ui.components.SettingsTopBar
 
@@ -55,6 +58,8 @@ import com.feldman.scholix.ui.components.SettingsTopBar
  */
 class ScholixBrowserActivity : ComponentActivity() {
     private var web: WebView? = null
+    private val profileName by lazy { intent.getStringExtra(EXTRA_PROFILE) }
+    private val cookies by lazy { cookieManager(profileName) }
     private var pendingFiles: ValueCallback<Array<Uri>>? = null
     private val fileChooser = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         pendingFiles?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data))
@@ -82,13 +87,17 @@ class ScholixBrowserActivity : ComponentActivity() {
                         if (progress in 1..99) LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
                         AndroidView(modifier = Modifier.weight(1f).fillMaxWidth().navigationBarsPadding(), factory = { context ->
                             WebView(context).apply {
+                                val profile = profileName
+                                if (profile != null && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+                                    WebViewCompat.setProfile(this, profile)
+                                }
                                 web = this
                                 settings.javaScriptEnabled = true
                                 settings.domStorageEnabled = true
                                 settings.allowFileAccess = false
                                 settings.allowContentAccess = false
-                                CookieManager.getInstance().setAcceptCookie(true)
-                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                                cookies.setAcceptCookie(true)
+                                cookies.setAcceptThirdPartyCookies(this, true)
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                                         if (!request.isForMainFrame || request.url.scheme.equals("https", ignoreCase = true)) return false
@@ -142,7 +151,7 @@ class ScholixBrowserActivity : ComponentActivity() {
         val name = URLUtil.guessFileName(url, disposition, mime)
         return runCatching {
             val request = DownloadManager.Request(Uri.parse(url))
-                .addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url).orEmpty())
+                .addRequestHeader("Cookie", cookies.getCookie(url).orEmpty())
                 .apply { userAgent?.let { addRequestHeader("User-Agent", it) } }
                 .setMimeType(mime)
                 .setTitle(name)
@@ -160,7 +169,7 @@ class ScholixBrowserActivity : ComponentActivity() {
 
     override fun onPause() {
         web?.onPause()
-        CookieManager.getInstance().flush()
+        cookies.flush()
         super.onPause()
     }
 
@@ -180,11 +189,18 @@ class ScholixBrowserActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_URL = "com.feldman.scholix.browser.URL"
         private const val EXTRA_TITLE = "com.feldman.scholix.browser.TITLE"
+        private const val EXTRA_PROFILE = "com.feldman.scholix.browser.PROFILE"
 
-        fun intent(context: Context, url: String, title: String? = null): Intent {
+        internal fun cookieManager(profileName: String?): CookieManager =
+            if (profileName != null && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+                ProfileStore.getInstance().getOrCreateProfile(profileName).cookieManager
+            } else CookieManager.getInstance()
+
+        fun intent(context: Context, url: String, title: String? = null, profileName: String? = null): Intent {
             require(ScholixLinks.loadable(url)) { "Only secure web pages open in Scholix." }
             return Intent(context, ScholixBrowserActivity::class.java).putExtra(EXTRA_URL, url).apply {
                 title?.let { putExtra(EXTRA_TITLE, it) }
+                profileName?.let { putExtra(EXTRA_PROFILE, it) }
                 if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         }

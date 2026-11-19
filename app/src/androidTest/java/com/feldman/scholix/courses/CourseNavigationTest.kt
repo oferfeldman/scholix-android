@@ -35,6 +35,7 @@ import org.json.JSONObject
 import com.feldman.scholix.pages.LockerDatabase
 import com.feldman.scholix.pages.LockerRepository
 import com.feldman.scholix.pages.GradesLoadingIndicator
+import com.feldman.scholix.browser.ScholixBrowserActivity
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
@@ -58,9 +59,11 @@ class CourseNavigationTest {
         }
         compose.onNodeWithText("Sign in on Webtop").performClick()
         compose.runOnIdle {
-            assertEquals("https://webtop.smartschool.co.il/account/login", opened?.dataString)
-            assertEquals(Intent.ACTION_VIEW, opened?.action)
-            assertEquals(setOf(Intent.CATEGORY_BROWSABLE), opened?.categories)
+            val expected = ScholixBrowserActivity.intent(InstrumentationRegistry.getInstrumentation().targetContext,
+                "https://webtop.smartschool.co.il/account/login", "Webtop", profileName = "webtop-sign-in")
+            assertEquals(expected.component, opened?.component)
+            assertEquals(expected.extras?.keySet()?.associateWith { expected.getStringExtra(it) },
+                opened?.extras?.keySet()?.associateWith { opened?.getStringExtra(it) })
         }
     }
 

@@ -6,7 +6,7 @@ switches between providers and courses, with a folder for accounts with two or
 more courses. Saved courses, including Mashov subjects, are available in the
 picker while accounts refresh. Back from a course returns to its provider's main page.
 
-**Sign in on Webtop** opens the official login in the device's browser. The
+**Sign in on Webtop** opens the official login in Scholix's browser. The
 action is available while Webtop grades load and from Webtop's error states.
 Native sync still uses its own provider session. When refresh fails or takes
 more than 20 seconds, Grades shows any saved result for the selected term.
