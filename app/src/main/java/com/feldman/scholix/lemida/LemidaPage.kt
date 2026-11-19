@@ -256,7 +256,20 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
         if (!filesOnly && onBack != null) Item { com.feldman.motion.MotionBackButton(onClick = onBack) }
         if (coursePicker != null && !com.feldman.scholix.LocalProviderHeaderVisible.current) Item { coursePicker() }
         Item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            LemidaHomeworkFilters(
+                count = visible.size, updated = updated, courses = courses,
+                query = query, onQueryChange = { query = it },
+                courseFilter = courseFilter, onCourseChange = { courseFilter = it; onCourseFilterChange?.invoke(it) },
+                typeFilter = typeFilter, onTypeChange = { typeFilter = it },
+                groups = homework.filter { courseFilter == null || it.courseId == courseFilter }
+                    .map { LemidaActivities.group(it.type) }.toSet()
+                    .let { present -> LemidaActivities.groups.filter { it in present } },
+                automaticUpdates = enabled,
+                showCourseFilters = coursePicker == null,
+                searchLabel = if (filesOnly) "Search files" else "Search assignments",
+                showTypeFilters = !filesOnly,
+                // Refresh and Lemida's options sit beside the search box rather than on a row of their own.
+                actions = {
             IconButton(onClick = { LemidaSyncWorker.refresh(context, manual = true) }, enabled = updated > 0L && !syncing && !needsLogin) {
                 if (syncing) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Default.Refresh, "Refresh")
@@ -295,21 +308,7 @@ internal fun LemidaPageContent(repo: LemidaRepository, searchQuery: String = "",
                     })
                 })
             }
-            }
-        }
-        Item {
-            LemidaHomeworkFilters(
-                count = visible.size, updated = updated, courses = courses,
-                query = query, onQueryChange = { query = it },
-                courseFilter = courseFilter, onCourseChange = { courseFilter = it; onCourseFilterChange?.invoke(it) },
-                typeFilter = typeFilter, onTypeChange = { typeFilter = it },
-                groups = homework.filter { courseFilter == null || it.courseId == courseFilter }
-                    .map { LemidaActivities.group(it.type) }.toSet()
-                    .let { present -> LemidaActivities.groups.filter { it in present } },
-                automaticUpdates = enabled,
-                showCourseFilters = coursePicker == null,
-                searchLabel = if (filesOnly) "Search files" else "Search assignments",
-                showTypeFilters = !filesOnly,
+                },
             )
         }
         if (updated == 0L || needsLogin) Section {
@@ -408,18 +407,22 @@ internal fun LemidaHomeworkFilters(
     /** What the search box searches; Files searches course material by its title and section. */
     searchLabel: String = "Search assignments",
     showTypeFilters: Boolean = true,
+    actions: @Composable RowScope.() -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (updated > 0 && !automaticUpdates) Text("Automatic updates paused",
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         OutlinedTextField(value = query, onValueChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth().testTag("homework-search"),
+            modifier = Modifier.weight(1f).testTag("homework-search"),
             singleLine = true, placeholder = { Text(searchLabel) }, shape = MaterialTheme.shapes.large,
             trailingIcon = if (query.isNotEmpty()) {
                 { IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Clear search") } }
             } else null)
+        actions()
+        }
         if (showCourseFilters) {
             // The chosen course may come from the bar above; bring its chip into view.
             val chips = androidx.compose.foundation.lazy.rememberLazyListState()

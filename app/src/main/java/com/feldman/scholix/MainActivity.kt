@@ -556,11 +556,11 @@ fun MainScreen(
     val hasSchedule = platforms.any { it.supportsSchedule }
     val hasAttendance = platforms.any { it.supportsAttendance }
     val lemida = remember(context) { LemidaRepository(context) }
-    val lemidaSnapshot by lemida.snapshots.collectAsState(initial = remember(lemida) { LemidaSnapshot(courses = lemida.cachedCourses(), enabled = lemida.enabled()) })
+    val lemidaSnapshot by lemida.snapshots.collectAsState(initial = remember(lemida) { lemida.cachedSnapshot() })
     val hasCourseProviders = platforms.any { it is OpenAUPlatform || it is GoogleClassroomPlatform } ||
         lemidaSnapshot.enabled || lemidaSnapshot.courses.isNotEmpty()
     var courseCacheEpoch by remember { mutableIntStateOf(0) }
-    val courseCatalog = remember(preloadedCourses, platforms, lemidaSnapshot.courses, lemidaSnapshot.account, courseCacheEpoch) {
+    val courseCatalog = remember(preloadedCourses, platforms, lemidaSnapshot.courses, lemidaSnapshot.account, lemidaSnapshot.homework, lemidaSnapshot.materials, courseCacheEpoch) {
         platforms.filter { it is OpenAUPlatform || it is GoogleClassroomPlatform }.flatMap { provider ->
             val saved = if (provider is OpenAUPlatform)
                 com.feldman.scholix.openu.OpenUAssignmentsRepository(context, provider).cachedCourses()
@@ -580,8 +580,16 @@ fun MainScreen(
         }.plus(preloadedCourses.filter { course -> platforms.any { it.id == course.optString("platformId") && it !is OpenAUPlatform && it !is GoogleClassroomPlatform } })
             .filter { it.stableCourseKey().isNotBlank() }.distinctBy { it.courseDestination() } +
             if (lemidaSnapshot.account.isNotBlank()) lemidaSnapshot.courses.map { course ->
+                // What the course holds, which also tells apart two Lemida courses with one name.
+                val work = lemidaSnapshot.homework.count { it.courseId == course.id }
+                val files = lemidaSnapshot.materials.count { it.courseId == course.id }
                 JSONObject().put("platformId", "lemida:${lemidaSnapshot.account}")
                     .put("courseKey", course.id.toString()).put("name", course.name)
+                    .put("status", listOfNotNull(
+                        work.takeIf { it > 0 }?.let { if (it == 1) "1 activity" else "$it activities" },
+                        files.takeIf { it > 0 }?.let { if (it == 1) "1 file" else "$it files" },
+                    // Isolated left-to-right, so the English counts keep their order under a Hebrew title.
+                    ).joinToString(" · ").ifBlank { "Nothing posted yet" }.let { "⁦$it⁩" })
             } else emptyList()
     }
     val providerOptions = platforms.filter { com.feldman.scholix.courses.supportedProviderPages(it).isNotEmpty() }.map { it.id } + listOf("lemida")

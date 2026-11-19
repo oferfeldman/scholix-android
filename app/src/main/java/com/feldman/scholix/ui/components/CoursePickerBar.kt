@@ -261,7 +261,7 @@ internal fun CoursePickerBar(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 640.dp)
+                            .heightIn(max = maxOf(420, (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.6f).toInt()).dp)
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
