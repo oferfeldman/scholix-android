@@ -93,6 +93,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.draw.clip
 import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
+import com.feldman.scholix.ui.components.WEBTOP_SIGN_IN_LABEL
+import com.feldman.scholix.ui.components.openWebtopSignIn
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
@@ -306,14 +308,17 @@ class MainActivity : ComponentActivity() {
                     val failures = failedPlatforms.toSet()
                     if (failures.isNotEmpty() && failures != reportedFailures) {
                         scope.launch {
+                            val webtopOnly = failures == setOf("Webtop")
                             // These are expired sign-ins: retrying fails the same way,
                             // signing in again is what fixes them.
                             val result = snackbarHostState.showSnackbar(
                                 message = getString(R.string.providers_refresh_failed, failedPlatforms.joinToString(", ")),
-                                actionLabel = getString(R.string.providers_sign_in_again),
+                                actionLabel = if (webtopOnly) WEBTOP_SIGN_IN_LABEL else getString(R.string.providers_sign_in_again),
                                 duration = SnackbarDuration.Long
                             )
-                            if (result == SnackbarResult.ActionPerformed) providersOpenRequest++
+                            if (result == SnackbarResult.ActionPerformed) {
+                                if (webtopOnly) openWebtopSignIn(context) else providersOpenRequest++
+                            }
                         }
                     }
                     reportedFailures = failures

@@ -74,7 +74,6 @@ import com.feldman.scholix.ui.HiddenMoeLogin
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.ui.HiddenInbarLogin
-import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.ui.components.WebtopReconnectButton
 import com.feldman.scholix.storage.expressiveDesignFlow
 import com.feldman.scholix.ui.components.ChipPicker
@@ -86,6 +85,7 @@ import com.feldman.scholix.ui.components.subjectIconName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.checkerframework.common.subtyping.qual.Bottom
 import org.json.JSONArray
 import org.json.JSONObject
@@ -131,15 +131,18 @@ fun gradeColor(gradeStr: String): Color {
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun GradesLoadingIndicator(modifier: Modifier = Modifier) {
+fun GradesLoadingIndicator(modifier: Modifier = Modifier, offerWebtopSignIn: Boolean = false) {
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        ContainedLoadingIndicator(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-            indicatorColor = MaterialTheme.colorScheme.onTertiaryContainer
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            ContainedLoadingIndicator(
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                indicatorColor = MaterialTheme.colorScheme.onTertiaryContainer
+            )
+            if (offerWebtopSignIn) WebtopReconnectButton()
+        }
     }
 }
 
@@ -417,7 +420,7 @@ fun GradesScreen(
         if (focusedProviderId == null) return PlatformStorage.getCourses(context)
         val provider = PlatformStorage.loadPlatforms(context).singleOrNull { it.id == focusedProviderId }
             ?: return emptyList()
-        return scopedCourses(PlatformStorage.getProviderCourses(context, provider))
+        return scopedCourses(PlatformStorage.getProviderCourses(context, provider, fetchWebtopGrades = false))
     }
     var courses by remember { mutableStateOf(scopedPreloadedCourses) }
     var courseLoadInProgress by remember { mutableStateOf(false) }
@@ -491,7 +494,8 @@ fun GradesScreen(
         }
     }
     var portalRelogin by remember { mutableStateOf<StudentsPortalPlatform?>(null) }
-    var webtopRelogin by remember { mutableStateOf<WebtopPlatform?>(null) }
+    val isWebtopScope = providersById[focusedProviderId ?: courses.getOrNull(selectedTab)?.optString("platformId")] is WebtopPlatform ||
+        courses.getOrNull(selectedTab)?.optString("courseKey") == "Webtop"
     fun keyFor(course: JSONObject?, year: Int, semester: String) =
         course?.let {
             "${it.optString("courseKey").ifBlank { it.optString("name") }}|$year|${semester.lowercase()}|$canAccessInbar"
@@ -513,7 +517,13 @@ fun GradesScreen(
         grades = emptyList()
         average = 0f
 
-        scope.launch {
+        fun savedWebtopGrades(): Triple<List<JSONObject>, Float, JSONObject?>? {
+            if (course.optInt("gradesYear") != year || !course.optString("gradesSemester").equals(semester, ignoreCase = true)) return null
+            return course.optJSONArray("grades")?.let(::processGrades)
+                ?.takeIf { (saved, _, final) -> saved.isNotEmpty() || final != null }
+        }
+
+        val fetch = scope.launch {
             var gradesArray = JSONArray()
             var list = emptyList<JSONObject>()
             var avg = 0f
@@ -595,6 +605,8 @@ fun GradesScreen(
                         }
                     }
                 }
+            } catch (exception: kotlinx.coroutines.CancellationException) {
+                throw exception
             } catch (exception: Exception) {
                 Log.w("GradesPage", "Failed to load grades", exception)
                 requestError = if (requestPlatform is com.feldman.scholix.api.platforms.GoogleClassroomPlatform)
@@ -625,28 +637,15 @@ fun GradesScreen(
                     return@launch
                 }
                 val webtop = requestPlatform as? WebtopPlatform
-                if (requestErrorCode == "login_failed" && webtop != null &&
-                    webtop.needsInteractiveRelogin() && !reloginAttempted
-                ) {
-                    Log.d("GradesPage", "webtop session expired; re-signing in off-screen")
-                    reloginAttempted = true
-                    loadedKey = keyFor(course, year, semester)
-                    webtopRelogin = webtop
-                    return@launch
-                }
                 if (requestError == null || webtop == null) {
                     course.put("grades", gradesArray)
                     if (webtop != null) course.put("gradesYear", year).put("gradesSemester", semester.lowercase())
-                } else if (webtop != null && course.optInt("gradesYear") == year &&
-                    course.optString("gradesSemester").equals(semester, ignoreCase = true)) {
-                    course.optJSONArray("grades")?.let { saved ->
-                        val (savedGrades, savedAverage, savedFinal) = processGrades(saved)
+                } else {
+                    savedWebtopGrades()?.let { (savedGrades, savedAverage, savedFinal) ->
                         list = savedGrades
                         avg = savedAverage
                         finalGradeObj = savedFinal
-                        if (savedGrades.isNotEmpty() || savedFinal != null) {
-                            requestError = "Could not refresh Webtop. Showing saved grades."
-                        }
+                        requestError = "Could not refresh Webtop. Showing saved grades."
                     }
                 }
                 onResult(list, avg, requestError ?: assignmentWarning)
@@ -654,6 +653,18 @@ fun GradesScreen(
                 isLoading = false
                 loadedKey = keyFor(course, year, semester)
             }
+        }
+        if (isWebtopScope) scope.launch {
+            val completed = withTimeoutOrNull(20_000L) { fetch.join(); true }
+            if (completed != null || currentId != requestId) return@launch
+            requestId++
+            fetch.cancel()
+            val saved = savedWebtopGrades()
+            finalGrade = saved?.third
+            onResult(saved?.first.orEmpty(), saved?.second ?: 0f,
+                if (saved == null) "Webtop did not respond. Try signing in on Webtop." else "Could not refresh Webtop. Showing saved grades.")
+            loadedKey = keyFor(course, year, semester)
+            isLoading = false
         }
     }
 
@@ -763,50 +774,6 @@ fun GradesScreen(
         }
     }
 
-    webtopRelogin?.let { webtop ->
-        HiddenWebtopMoeLogin(
-            username = webtop.getUsername().orEmpty(),
-            password = webtop.getPassword().orEmpty()
-        ) { key, error ->
-            webtopRelogin = null
-            val course = courses.getOrNull(selectedTab)
-            if (key == null || course == null) {
-                Log.w("GradesPage", "webtop re-login failed: " + (error ?: "no key"))
-                isLoading = false
-                errorMessage = "Login failed.\nPlease re-login."
-                return@HiddenWebtopMoeLogin
-            }
-            scope.launch {
-                val ok = withContext(Dispatchers.IO) {
-                    webtop.adoptSession(key).also { success ->
-                        if (success) {
-                            val platforms = PlatformStorage.loadPlatforms(context).toMutableList()
-                            val index = platforms.indexOfFirst { it.id == webtop.id }
-                            if (index >= 0) platforms[index] = webtop else platforms += webtop
-                            PlatformStorage.savePlatforms(context, platforms)
-                        }
-                    }
-                }
-                if (!ok) {
-                    isLoading = false
-                    errorMessage = "Login failed.\nPlease re-login."
-                    return@launch
-                }
-                launchGradesRequest(
-                    context,
-                    course,
-                    year = yearState,
-                    semester = semesterState.lowercase()
-                ) { g, avg, err ->
-                    grades = g
-                    average = avg
-                    errorMessage = err
-                    if (err == null) reloginAttempted = false
-                }
-            }
-        }
-    }
-
     inbarRelogin?.takeIf { canAccessInbar }?.let { savedAccount ->
         val pending = remember(savedAccount) { savedAccount.forSmsLogin() }
         HiddenInbarLogin(account = pending,
@@ -841,7 +808,7 @@ fun GradesScreen(
     if (courses.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (!courseLoadFinished || inbarRelogin != null || isLoading) {
-                GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
+                GradesLoadingIndicator(modifier = Modifier.fillMaxSize(), offerWebtopSignIn = isWebtopScope)
             } else if (!canAccessInbar && providersById.values.any { it is InbarPlatform && it.hasSavedLoginDetails() }) {
                 TextButton(onClick = { inbarRequestedByUser = true }) { Text("Load Inbar grades") }
             } else if (errorMessage != null) {
@@ -1208,7 +1175,7 @@ fun GradesScreen(
                                         textAlign = TextAlign.Center
                                     )
                                     val savedInbar = providersById[selectedCourse?.optString("platformId")] as? InbarPlatform
-                                    if (providersById[selectedCourse?.optString("platformId")] is WebtopPlatform) {
+                                    if (isWebtopScope) {
                                         WebtopReconnectButton()
                                     }
                                     if (savedInbar?.hasSavedLoginDetails() == true) {
@@ -1228,7 +1195,7 @@ fun GradesScreen(
                     if (!stillLoading){
                         if ((grades.isNotEmpty() || finalGrade != null) && errorMessage != null) item {
                             Text(errorMessage!!, color = MaterialTheme.colorScheme.error)
-                            if (providersById[courses.getOrNull(selectedTab)?.optString("platformId")] is WebtopPlatform) {
+                            if (isWebtopScope) {
                                 WebtopReconnectButton()
                             }
                         }
@@ -1356,7 +1323,7 @@ fun GradesScreen(
         }
         }
             if (stillLoading) {
-                GradesLoadingIndicator(modifier = Modifier.fillMaxSize())
+                GradesLoadingIndicator(modifier = Modifier.fillMaxSize(), offerWebtopSignIn = isWebtopScope)
             }
         }
     }

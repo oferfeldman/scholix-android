@@ -6,10 +6,10 @@ switches between providers and courses, with a folder for accounts with two or
 more courses. Saved courses, including Mashov subjects, are available in the
 picker while accounts refresh. Back from a course returns to its provider's main page.
 
-When Webtop data fails to load, **Sign in on Webtop** opens the official login
-in Scholix's visible browser. This gives access to Webtop's verification and
-website. Native sync still uses its own provider session. Grades can display a
-saved result for the selected school year and semester when refresh fails.
+**Sign in on Webtop** opens the official login in the device's browser. The
+action is available while Webtop grades load and from Webtop's error states.
+Native sync still uses its own provider session. When refresh fails or takes
+more than 20 seconds, Grades shows any saved result for the selected term.
 
 The Motion bar and rail switch to the selected course's sections. When switching
 providers, the navigation updates from the selected provider's capabilities while

@@ -301,7 +301,9 @@ class WebtopPlatform(
     }
 
     /** Return the single Webtop course, fetch grades only once */
-    override fun getCourses(): ArrayList<JSONObject> {
+    override fun getCourses(): ArrayList<JSONObject> = getCourses(fetchGrades = true)
+
+    internal fun getCourses(fetchGrades: Boolean): ArrayList<JSONObject> {
         if (_courses.isEmpty()) {
             _courses.add(
                 JSONObject()
@@ -322,7 +324,7 @@ class WebtopPlatform(
 
         // Attach grades if not already present
         val course = _courses[0]
-        if (!course.has("grades")) {
+        if (fetchGrades && !course.has("grades")) {
             val semester = getCurrentSemester()
             val year = Year.now().value + if (semester == "a") 1 else 0
             val grades = getGrades(year = year, semester = semester)

@@ -518,8 +518,12 @@ object PlatformStorage {
     fun getProviderCourses(
         context: Context,
         provider: Platform,
-        includeHidden: Boolean = false
-    ): List<JSONObject> = applyCourseOverrides(context, provider.id, provider.getCourses(), includeHidden)
+        includeHidden: Boolean = false,
+        fetchWebtopGrades: Boolean = true,
+    ): List<JSONObject> {
+        val courses = if (provider is WebtopPlatform) provider.getCourses(fetchWebtopGrades) else provider.getCourses()
+        return applyCourseOverrides(context, provider.id, courses, includeHidden)
+    }
 
     private fun applyCourseOverrides(
         context: Context,

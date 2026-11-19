@@ -80,6 +80,11 @@ class WebtopSessionTest {
         assertEquals("webToken=expired", platform.cookies)
     }
 
+    @Test fun webtopCourseIsAvailableBeforeAnyGradesRequest() {
+        val platform = platform { error("Listing the course must not contact Webtop") }
+        assertEquals("Webtop", platform.getCourses(fetchGrades = false).single().getString("courseKey"))
+    }
+
     @Test fun attendanceRenewsAnExpiredSessionAndUsesTheFreshSettings() {
         var settingsCalls = 0
         val platform = platform { request ->
