@@ -28,6 +28,7 @@ import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
+import com.feldman.scholix.ui.components.WebtopReconnectButton
 import com.feldman.scholix.attendance.*
 import com.feldman.scholix.ui.components.ProviderPickerBar
 import com.feldman.scholix.ui.components.ChipPicker
@@ -420,6 +421,7 @@ fun AttendancePage(
             Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center) {
                 Text(errorMessage.orEmpty(), textAlign = TextAlign.Center)
+                if (selectedPlatform is WebtopPlatform) WebtopReconnectButton()
                 TextButton(onClick = { reloginAttempted = false; reloadTrigger++ }) { Text("Retry") }
             }
         } else {

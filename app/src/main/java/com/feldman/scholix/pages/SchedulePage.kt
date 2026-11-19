@@ -41,6 +41,7 @@ import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.ui.HiddenInbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
+import com.feldman.scholix.ui.components.WebtopReconnectButton
 import com.feldman.scholix.ui.components.ChipPicker
 import com.feldman.scholix.ui.components.ProviderPickerBar
 import com.feldman.scholix.ui.components.SubjectIcon
@@ -775,6 +776,7 @@ fun SchedulePage(
                                 )
                             )
                             val inbar = platform as? InbarPlatform
+                            if (platform is WebtopPlatform) WebtopReconnectButton()
                             if (inbar != null && inbar.hasSavedLoginDetails()) {
                                 TextButton(onClick = {
                                     inbarRequestedByUser = true

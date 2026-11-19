@@ -75,6 +75,7 @@ import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.ui.HiddenInbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
+import com.feldman.scholix.ui.components.WebtopReconnectButton
 import com.feldman.scholix.storage.expressiveDesignFlow
 import com.feldman.scholix.ui.components.ChipPicker
 import com.feldman.scholix.ui.components.CoursePickerBar
@@ -633,7 +634,21 @@ fun GradesScreen(
                     webtopRelogin = webtop
                     return@launch
                 }
-                course.put("grades", gradesArray)
+                if (requestError == null || webtop == null) {
+                    course.put("grades", gradesArray)
+                    if (webtop != null) course.put("gradesYear", year).put("gradesSemester", semester.lowercase())
+                } else if (webtop != null && course.optInt("gradesYear") == year &&
+                    course.optString("gradesSemester").equals(semester, ignoreCase = true)) {
+                    course.optJSONArray("grades")?.let { saved ->
+                        val (savedGrades, savedAverage, savedFinal) = processGrades(saved)
+                        list = savedGrades
+                        avg = savedAverage
+                        finalGradeObj = savedFinal
+                        if (savedGrades.isNotEmpty() || savedFinal != null) {
+                            requestError = "Could not refresh Webtop. Showing saved grades."
+                        }
+                    }
+                }
                 onResult(list, avg, requestError ?: assignmentWarning)
                 finalGrade = finalGradeObj
                 isLoading = false
@@ -1193,6 +1208,9 @@ fun GradesScreen(
                                         textAlign = TextAlign.Center
                                     )
                                     val savedInbar = providersById[selectedCourse?.optString("platformId")] as? InbarPlatform
+                                    if (providersById[selectedCourse?.optString("platformId")] is WebtopPlatform) {
+                                        WebtopReconnectButton()
+                                    }
                                     if (savedInbar?.hasSavedLoginDetails() == true) {
                                         TextButton(onClick = {
                                             inbarRequestedByUser = true
@@ -1210,6 +1228,9 @@ fun GradesScreen(
                     if (!stillLoading){
                         if ((grades.isNotEmpty() || finalGrade != null) && errorMessage != null) item {
                             Text(errorMessage!!, color = MaterialTheme.colorScheme.error)
+                            if (providersById[courses.getOrNull(selectedTab)?.optString("platformId")] is WebtopPlatform) {
+                                WebtopReconnectButton()
+                            }
                         }
                         val indexedGrades = grades.withIndex().toList()
                         val sortedGrades = if (sortBy == "Grade") {

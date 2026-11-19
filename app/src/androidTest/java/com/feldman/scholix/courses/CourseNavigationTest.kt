@@ -9,6 +9,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
@@ -31,6 +33,7 @@ import com.feldman.scholix.api.platforms.MashovPlatform
 import org.json.JSONObject
 import com.feldman.scholix.pages.LockerDatabase
 import com.feldman.scholix.pages.LockerRepository
+import com.feldman.scholix.ui.components.WebtopReconnectButton
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
@@ -38,6 +41,20 @@ import org.junit.Assume.assumeTrue
 
 class CourseNavigationTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun webtopReconnectOpensTheOfficialSignIn() {
+        var opened: String? = null
+        val browser = object : UriHandler {
+            override fun openUri(uri: String) { opened = uri }
+        }
+        compose.setContent {
+            MotionTheme {
+                CompositionLocalProvider(LocalUriHandler provides browser) { WebtopReconnectButton() }
+            }
+        }
+        compose.onNodeWithText("Sign in on Webtop").performClick()
+        compose.runOnIdle { assertEquals("https://webtop.smartschool.co.il/account/login", opened) }
+    }
 
     @Test fun mashovPickerShowsSavedSubjectsBeforeRefresh() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

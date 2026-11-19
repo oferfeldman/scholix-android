@@ -68,6 +68,18 @@ class WebtopSessionTest {
         assertFalse(platform.isMoe())
     }
 
+    @Test fun htmlLoginResponseLeavesTheSavedAccountAvailable() {
+        val platform = platform { request ->
+            assertTrue(request.url.encodedPath.endsWith("LoginByUserNameAndPassword"))
+            200 to "<!DOCTYPE html><title>Webtop sign-in</title>"
+        }
+        assertFalse(platform.refreshCookies())
+        assertFalse(platform.isLoggedIn())
+        assertTrue(platform.canRestoreSession)
+        assertEquals("Open Webtop to complete sign-in.", platform.loginError)
+        assertEquals("webToken=expired", platform.cookies)
+    }
+
     @Test fun attendanceRenewsAnExpiredSessionAndUsesTheFreshSettings() {
         var settingsCalls = 0
         val platform = platform { request ->

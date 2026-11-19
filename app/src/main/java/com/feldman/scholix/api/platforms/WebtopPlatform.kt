@@ -97,7 +97,8 @@ class WebtopPlatform(
         isMoe() && !loggedIn && (!username.isNullOrBlank() || password.isNullOrBlank())
 
     override val canRestoreSession: Boolean
-        get() = isMoe() && password.isNullOrBlank() && !username.isNullOrBlank()
+        get() = if (isMoe()) password.isNullOrBlank() && !username.isNullOrBlank()
+        else !studentId.isNullOrBlank()
 
     fun adoptSession(key: String): Boolean {
         val payload = JSONObject()
@@ -218,9 +219,15 @@ class WebtopPlatform(
 
             _client.newCall(request).execute().use { response ->
                 val body = response.body.string()
+                if (body.trimStart().startsWith("<")) {
+                    loggedIn = false
+                    loginError = "Open Webtop to complete sign-in."
+                    Log.w("WebtopPlatform", "Webtop sign-in returned HTML (HTTP ${response.code})")
+                    return false
+                }
                 if (!response.isSuccessful || body.isEmpty()) {
                     loginError = "Webtop sign-in is temporarily unavailable (HTTP ${response.code}). Try again later or sign in on the provider website."
-                    Log.e("WebtopPlatform", "Login failed: HTTP ${response.code}, body=$body")
+                    Log.e("WebtopPlatform", "Login failed: HTTP ${response.code}")
                     return false
                 }
                 val jsonResponse = JSONObject(body)
@@ -316,7 +323,12 @@ class WebtopPlatform(
         // Attach grades if not already present
         val course = _courses[0]
         if (!course.has("grades")) {
-            course.put("grades", getGrades("webtop", null, null))
+            val semester = getCurrentSemester()
+            val year = Year.now().value + if (semester == "a") 1 else 0
+            val grades = getGrades(year = year, semester = semester)
+            if (grades.optJSONObject(0)?.has("error") != true) {
+                course.put("grades", grades).put("gradesYear", year).put("gradesSemester", semester)
+            }
         }
         return _courses
     }
@@ -1149,31 +1161,7 @@ class WebtopPlatform(
         }
 
         loggedIn = false
-        return try {
-            val loginData = JSONObject()
-                .put("Data", encrypt(username + "0"))
-                .put("UserName", username)
-                .put("Password", password)
-                .put("deviceDataJson", "{\"isMobile\":true,\"os\":\"Android\",\"browser\":\"Chrome\",\"cookies\":true}")
-
-            val request = Request.Builder()
-                .url("https://webtopserver.smartschool.co.il/server/api/user/LoginByUserNameAndPassword")
-                .header("language", "he")
-                .header("rememberMe", "0")
-                .post(loginData.toString()
-                    .toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
-
-            _client.newCall(request).execute().use { response ->
-                val jsonResponse = JSONObject(response.body.string())
-                if (!jsonResponse.optBoolean("status") || jsonResponse.optString("message") == "get2FA") return false
-                val data = jsonResponse.optJSONObject("data") ?: return false
-                adoptPasswordLoginData(data, response.headers("Set-Cookie").joinToString("; "))
-            }
-        } catch (e: Exception) {
-            Log.e("WebtopPlatform", "Failed to refresh cookies", e)
-            false
-        }
+        return login(username.orEmpty(), password.orEmpty())
     }
 
     override fun toJson(): JSONObject {
@@ -1368,6 +1356,8 @@ class WebtopPlatform(
                 val saved = coursesArray.optJSONObject(0)
                 if (saved != null && saved.has("grades")) {
                     course.put("grades", saved.getJSONArray("grades"))
+                    course.put("gradesYear", saved.optInt("gradesYear"))
+                    course.put("gradesSemester", saved.optString("gradesSemester"))
                 }
             }
 
