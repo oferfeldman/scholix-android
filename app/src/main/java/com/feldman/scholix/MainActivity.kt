@@ -732,9 +732,10 @@ fun MainScreen(
         if (homeworkOpenRequest > handledHomeworkOpenRequest) {
             if (requestedAssignment != null && !lemidaSnapshot.loaded) return@LaunchedEffect
             val item = requestedAssignment?.let { HomeworkLinks.match(it, lemidaSnapshot.homework, lemidaSnapshot.account) }
-            if (item != null) navigateFromUser(CourseSection("lemida:${lemidaSnapshot.account}",
-                item.courseId.toString(), section = CourseSectionKind.ASSIGNMENTS))
-            else backStack.navigateTop(AppDest.Homework)
+            // Assignments narrowed to the activity's course; the page then opens the activity itself.
+            lemidaCourse = item?.courseId
+            if (item != null || "lemida" in providerOptions) selectedProviderId = "lemida"
+            backStack.navigateTop(AppDest.Homework)
             handledHomeworkOpenRequest = homeworkOpenRequest
         }
     }
