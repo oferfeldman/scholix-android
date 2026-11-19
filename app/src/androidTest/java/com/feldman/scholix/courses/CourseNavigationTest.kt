@@ -23,6 +23,7 @@ import com.feldman.scholix.AppDest
 import com.feldman.scholix.CourseSection
 import com.feldman.scholix.LocalAppState
 import com.feldman.scholix.AppState
+import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platforms.OpenAUPlatform
 import com.feldman.scholix.api.platforms.DemoPlatform
 import com.feldman.scholix.api.platforms.WebtopPlatform
@@ -37,6 +38,45 @@ import org.junit.Assume.assumeTrue
 
 class CourseNavigationTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun mashovPickerShowsSavedSubjectsBeforeRefresh() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue(context.packageName.endsWith(".studyhandoff.qa"))
+        val database = Room.inMemoryDatabaseBuilder(context, LockerDatabase::class.java).build()
+        val repository = LockerRepository(database.lockerItemDao(), database.lockerTabDao())
+        val original = PlatformStorage.loadPlatforms(context)
+        val courses = listOf("Mashov algebra", "Mashov physics").map { name ->
+            JSONObject().put("name", name).put("courseKey", name)
+                .put("grades", org.json.JSONArray().put(JSONObject().put("subject", name)
+                    .put("name", "$name exam").put("grade", 90)))
+        }
+        val provider = MashovPlatform.fromJson(JSONObject().put("displayName", "Mashov test account")
+            .put("courses", org.json.JSONArray(courses)))
+        var activity: ComponentActivity? = null
+        try {
+            PlatformStorage.savePlatforms(context, listOf(provider))
+            val saved = PlatformStorage.getSavedCourses(context, listOf(provider))
+            assertEquals(courses.map { it.getString("name") }, saved.map { it.getString("name") })
+            compose.setContent {
+                MotionTheme {
+                    activity = LocalActivity.current as ComponentActivity
+                    MainScreen(saved, repository, {}, listOf(provider), {}, {})
+                }
+            }
+            compose.onNodeWithContentDescription("Choose course").performClick()
+            compose.onNodeWithText("Mashov test account").assertExists()
+            compose.onNodeWithText("Mashov physics").assertExists()
+            compose.onAllNodesWithText("Mashov algebra")[0].assertExists()
+            compose.onNodeWithText("Mashov physics").performClick()
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("Mashov physics exam").fetchSemanticsNodes().isNotEmpty()
+            }
+        } finally {
+            activity?.let { compose.runOnUiThread { it.finish() } }
+            PlatformStorage.savePlatforms(context, original)
+            database.close()
+        }
+    }
 
     @Test fun messagesPickerStaysWithInboxDuringSubpageTransitions() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

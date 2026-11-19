@@ -519,15 +519,22 @@ object PlatformStorage {
         context: Context,
         provider: Platform,
         includeHidden: Boolean = false
+    ): List<JSONObject> = applyCourseOverrides(context, provider.id, provider.getCourses(), includeHidden)
+
+    private fun applyCourseOverrides(
+        context: Context,
+        providerId: String,
+        courses: List<JSONObject>,
+        includeHidden: Boolean = false
     ): List<JSONObject> {
-        val overrides = loadProviderCourseOverrides(context, provider.id)
-        val rawCourses = provider.getCourses()
+        val overrides = loadProviderCourseOverrides(context, providerId)
+        val rawCourses = courses
             .filter { includeHidden || !isCourseHidden(it, overrides.hiddenCourseKeys) }
             .map { withCustomName(it, overrides.courseNames) }
             .map { course ->
                 val copy = JSONObject(course.toString())
                 if (!copy.has("platformId") || copy.optString("platformId").isBlank()) {
-                    copy.put("platformId", provider.id)
+                    copy.put("platformId", providerId)
                 }
                 copy
             }
@@ -538,6 +545,16 @@ object PlatformStorage {
             val key = courseOverrideKey(course)
             val legacyKey = legacyCourseOverrideKey(course)
             orderIndex[key] ?: orderIndex[legacyKey] ?: Int.MAX_VALUE
+        }
+    }
+
+    fun getSavedCourses(context: Context, platforms: List<Platform>): List<JSONObject> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val saved = runCatching { JSONArray(prefs.getString(KEY_PLATFORMS, "[]")) }.getOrElse { return emptyList() }
+        val byId = (0 until saved.length()).mapNotNull(saved::optJSONObject).associateBy { it.optString("id") }
+        return platforms.flatMap { platform ->
+            val courses = byId[platform.id]?.optJSONArray("courses") ?: return@flatMap emptyList()
+            applyCourseOverrides(context, platform.id, (0 until courses.length()).mapNotNull(courses::optJSONObject))
         }
     }
 

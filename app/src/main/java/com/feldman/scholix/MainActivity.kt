@@ -274,8 +274,10 @@ class MainActivity : ComponentActivity() {
                     scope.launch(Dispatchers.IO) {
                         val newPlatforms = PlatformStorage.loadPlatforms(ctx)
                         val valid = newPlatforms.any { it.isLoggedIn() || it.canRestoreSession }
+                        val savedCourses = PlatformStorage.getSavedCourses(ctx, newPlatforms)
                         withContext(Dispatchers.Main) {
                             platforms = newPlatforms
+                            preloadedCourses = savedCourses
                             isLoggedIn = valid
                             // delay, not Thread.sleep: this runs on the main
                             // thread, so sleeping here froze the UI for 120ms
@@ -434,14 +436,16 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(Unit) {
                     withContext(Dispatchers.IO) {
-                        reloadPreloads(snackbarHostState)
                         val newPlatforms = PlatformStorage.loadPlatforms(context)
                         val valid = newPlatforms.any { it.isLoggedIn() || it.canRestoreSession }
+                        val savedCourses = PlatformStorage.getSavedCourses(context, newPlatforms)
 
                         withContext(Dispatchers.Main) {
                             platforms = newPlatforms
+                            preloadedCourses = savedCourses
                             isLoggedIn = valid
                             isLoading = false
+                            reloadPreloads(snackbarHostState)
                         }
                     }
                 }
@@ -808,8 +812,8 @@ fun MainScreen(
         val pickerCourses = providerOptions.flatMap { id ->
             val provider = platforms.firstOrNull { it.id == id }
             val catalogId = if (id == "lemida" && lemidaSnapshot.account.isNotBlank()) "lemida:${lemidaSnapshot.account}" else id
-            // School-provider grade rows belong to their main page, even when stored as courses.
-            val courses = if (provider is OpenAUPlatform || provider is GoogleClassroomPlatform || id == "lemida")
+            val courses = if (provider is OpenAUPlatform || provider is GoogleClassroomPlatform ||
+                provider is MashovPlatform || id == "lemida")
                 courseCatalog.filter { it.optString("platformId") == catalogId } else emptyList()
             courses.map { course ->
                 JSONObject(course.toString()).put("platformName", provider?.providerLabel() ?: "Lemida")

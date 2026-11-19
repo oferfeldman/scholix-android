@@ -3,7 +3,8 @@
 Scholix opens the selected provider's Grades when supported, or its first
 supported page. Notification intents still take priority. The shared picker
 switches between providers and courses, with a folder for accounts with two or
-more courses. Back from a course returns to its provider's main page.
+more courses. Saved courses, including Mashov subjects, are available in the
+picker while accounts refresh. Back from a course returns to its provider's main page.
 
 The Motion bar and rail switch to the selected course's sections. When switching
 providers, the navigation updates from the selected provider's capabilities while
