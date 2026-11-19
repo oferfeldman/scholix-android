@@ -42,6 +42,9 @@ import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.ui.HiddenInbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
 import com.feldman.scholix.ui.components.ChipPicker
+import com.feldman.scholix.ui.components.PageProblem
+import com.feldman.scholix.ui.components.WEBTOP_REJECTED_MOE
+import com.feldman.scholix.ui.components.signInFailedMessage
 import com.feldman.scholix.ui.components.ProviderPickerBar
 import com.feldman.scholix.ui.components.SubjectIcon
 import com.feldman.motion.MotionIconBackground
@@ -358,7 +361,7 @@ fun SchedulePage(
                         }
                         val err = when (errorCode) {
                             "server_unreachable" -> "Cannot reach the server.\nCheck your internet connection."
-                            "login_failed" -> "Login failed.\nPlease re-login."
+                            "login_failed" -> signInFailedMessage(requestPlatform)
                             else -> "Unknown error occurred while loading schedule."
                         }
                         errorMessages[page] = err
@@ -423,7 +426,7 @@ fun SchedulePage(
             Log.e("SchedulePage", "Error fetching schedule", e)
             errorMessages[page] = when (e.message) {
                 "server_unreachable" -> "Cannot reach the server.\nCheck your internet connection."
-                "login_failed" -> "Login failed.\nPlease re-login."
+                "login_failed" -> signInFailedMessage(platform)
                 else -> "Unknown error occurred while loading schedule."
             }
         }
@@ -509,7 +512,7 @@ fun SchedulePage(
                     scheduleReloadTrigger++
                 } else {
                     inbarRelogin = null
-                    errorMessages[pagerState.currentPage] = error ?: "Login failed.\nPlease re-login."
+                    errorMessages[pagerState.currentPage] = signInFailedMessage(pending, error)
                     isLoading = false
                 }
             })
@@ -523,7 +526,7 @@ fun SchedulePage(
             webtopRelogin = null
             if (key == null) {
                 Log.w("SchedulePage", "Webtop re-login failed: " + (error ?: "no key"))
-                errorMessages[pagerState.currentPage] = "Login failed.\nPlease re-login."
+                errorMessages[pagerState.currentPage] = signInFailedMessage(webtop, error)
                 return@HiddenWebtopMoeLogin
             }
             coroutineScope.launch {
@@ -544,7 +547,7 @@ fun SchedulePage(
                     allSchedulesOriginal.remove(pagerState.currentPage)
                     scheduleReloadTrigger++
                 } else {
-                    errorMessages[pagerState.currentPage] = "Login failed.\nPlease re-login."
+                    errorMessages[pagerState.currentPage] = signInFailedMessage(webtop, WEBTOP_REJECTED_MOE)
                 }
             }
         }
@@ -764,34 +767,24 @@ fun SchedulePage(
                     }
                     errMessage != null -> {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = errMessage,
-                                color = Color.Red,
-                                textAlign = TextAlign.Center,
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 18.sp
-                                )
-                            )
                             val inbar = platform as? InbarPlatform
                             if (inbar != null && inbar.hasSavedLoginDetails()) {
-                                TextButton(onClick = {
+                                PageProblem(errMessage, platform.id, retryLabel =
+                                    if (canAccessInbar) "Retry login" else "Load Inbar schedule", onRetry = {
                                     inbarRequestedByUser = true
                                     errorMessages[page] = null
                                     isLoading = true
                                     if (canAccessInbar) inbarRelogin = inbar.forSmsLogin()
                                     else scheduleReloadTrigger++
-                                }) { Text(if (canAccessInbar) "Retry login" else "Load Inbar schedule") }
+                                })
                             } else {
-                                TextButton(onClick = {
+                                PageProblem(errMessage, platform?.id, onRetry = {
                                     allSchedulesUpdated.remove(page)
                                     allSchedulesOriginal.remove(page)
                                     errorMessages[page] = null
                                     reloginAttempted = false
                                     scheduleReloadTrigger++
-                                }) { Text("Retry") }
-                            }
+                                })
                             }
                         }
                     }

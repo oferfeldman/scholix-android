@@ -75,6 +75,9 @@ import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.api.platforms.InbarPlatform
 import com.feldman.scholix.ui.HiddenInbarLogin
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
+import com.feldman.scholix.ui.components.PageProblem
+import com.feldman.scholix.ui.components.WEBTOP_REJECTED_MOE
+import com.feldman.scholix.ui.components.signInFailedMessage
 import com.feldman.scholix.storage.expressiveDesignFlow
 import com.feldman.scholix.ui.components.ChipPicker
 import com.feldman.scholix.ui.components.CoursePickerBar
@@ -580,7 +583,7 @@ fun GradesScreen(
                             requestErrorCode = first.optString("error")
                             requestError = when (requestErrorCode) {
                                 "server_unreachable" -> "Cannot reach the server.\nCheck your internet connection."
-                                "login_failed" -> "Login failed.\nPlease re-login."
+                                "login_failed" -> signInFailedMessage(requestPlatform)
                                 else -> "Unknown error occurred while loading grades."
                             }
                         }
@@ -709,7 +712,7 @@ fun GradesScreen(
             if (cookies == null || course == null) {
                 Log.w("GradesPage", "portal re-login failed: " + (error ?: "no cookie"))
                 isLoading = false
-                errorMessage = "Login failed.\nPlease re-login."
+                errorMessage = signInFailedMessage(portal, error)
                 return@HiddenMoeLogin
             }
             scope.launch {
@@ -727,7 +730,7 @@ fun GradesScreen(
                 }
                 if (!ok) {
                     isLoading = false
-                    errorMessage = "Login failed.\nPlease re-login."
+                    errorMessage = signInFailedMessage(portal)
                     return@launch
                 }
                 launchGradesRequest(
@@ -758,7 +761,7 @@ fun GradesScreen(
             if (key == null || course == null) {
                 Log.w("GradesPage", "webtop re-login failed: " + (error ?: "no key"))
                 isLoading = false
-                errorMessage = "Login failed.\nPlease re-login."
+                errorMessage = signInFailedMessage(webtop, error)
                 return@HiddenWebtopMoeLogin
             }
             scope.launch {
@@ -774,7 +777,7 @@ fun GradesScreen(
                 }
                 if (!ok) {
                     isLoading = false
-                    errorMessage = "Login failed.\nPlease re-login."
+                    errorMessage = signInFailedMessage(webtop, WEBTOP_REJECTED_MOE)
                     return@launch
                 }
                 launchGradesRequest(
@@ -830,15 +833,15 @@ fun GradesScreen(
             } else if (!canAccessInbar && providersById.values.any { it is InbarPlatform && it.hasSavedLoginDetails() }) {
                 TextButton(onClick = { inbarRequestedByUser = true }) { Text("Load Inbar grades") }
             } else if (errorMessage != null) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(errorMessage.orEmpty(), color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = {
+                val savedInbar = providersById.values.filterIsInstance<InbarPlatform>()
+                    .firstOrNull { it.hasSavedLoginDetails() }
+                PageProblem(errorMessage.orEmpty(), (savedInbar ?: providersById.values.singleOrNull())?.id,
+                    retryLabel = "Retry login", onRetry = savedInbar?.let { inbar -> {
                         inbarRequestedByUser = true
-                        inbarRelogin = providersById.values.filterIsInstance<InbarPlatform>()
-                            .firstOrNull { it.hasSavedLoginDetails() }
-                        if (inbarRelogin != null) { isLoading = true; errorMessage = null }
-                    }) { Text("Retry login") }
-                }
+                        inbarRelogin = inbar
+                        isLoading = true
+                        errorMessage = null
+                    } })
             } else {
                 Text(
                     text = stringResource(R.string.no_courses_available),
@@ -1182,25 +1185,15 @@ fun GradesScreen(
                                         )
                                     }
                                 } else {
-                                    Text(
-                                        text = displayError,
-                                        style = MaterialTheme.typography.bodyLarge.copy(
-                                            fontWeight = FontWeight.Medium,
-                                            fontSize = 18.sp
-                                        ),
-                                        color = Color.Red,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        textAlign = TextAlign.Center
-                                    )
-                                    val savedInbar = providersById[selectedCourse?.optString("platformId")] as? InbarPlatform
-                                    if (savedInbar?.hasSavedLoginDetails() == true) {
-                                        TextButton(onClick = {
+                                    val courseProvider = providersById[selectedCourse?.optString("platformId")]
+                                    val savedInbar = (courseProvider as? InbarPlatform)?.takeIf { it.hasSavedLoginDetails() }
+                                    PageProblem(displayError, courseProvider?.id, modifier = Modifier.fillMaxWidth(),
+                                        retryLabel = "Retry login", onRetry = savedInbar?.let { inbar -> {
                                             inbarRequestedByUser = true
-                                            inbarRelogin = savedInbar
+                                            inbarRelogin = inbar
                                             isLoading = true
                                             errorMessage = null
-                                        }) { Text("Retry login") }
-                                    }
+                                        } })
                                 }
                             }
 

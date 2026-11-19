@@ -159,6 +159,8 @@ private fun HiddenWebtopMoeLoginBrowser(
         // without drowning the log.
         var lastConsent: String? = null
         var lastMoe: String? = null
+        var lastProblem: String? = null
+        var submittedAt = 0L
         val ok = withTimeoutOrNull(if (smsLogin) 600_000 else timeoutMs) {
             while (!done.get()) {
                 val host = runCatching { web.url?.toUri()?.host }.getOrNull().orEmpty()
@@ -200,9 +202,19 @@ private fun HiddenWebtopMoeLoginBrowser(
                         r == "filled" -> {
                             Log.d(TAG, "MOE credentials submitted")
                             credsFilled.set(true)
+                            submittedAt = System.currentTimeMillis()
                         }
                         r != null && r.startsWith("error") -> finish(null, r)
                     }
+                } else if (!smsLogin && credsFilled.get() && host.endsWith("lgn.edu.gov.il", true) &&
+                    System.currentTimeMillis() - submittedAt > STUCK_ON_MOE_MS
+                ) {
+                    // A working sign-in leaves the Ministry page within seconds. Still being here
+                    // means it refused the saved password or wants another step; say which,
+                    // instead of waiting out the timeout and blaming Webtop.
+                    val r = suspendEval(web, MOE_PROBLEM_JS)?.trim('"', ' ').orEmpty()
+                    if (r != lastProblem) { Log.d(TAG, "MOE page probe: ${r.substringBefore(':')}"); lastProblem = r }
+                    moeProblemMessage(r)?.let { finish(null, it) }
                 }
                 delay(500)
             }
@@ -216,6 +228,8 @@ private fun HiddenWebtopMoeLoginBrowser(
                         "Please try again."
                 !credsFilled.get() ->
                     "The Ministry of Education login page did not load. Please try again."
+                runCatching { web.url?.toUri()?.host }.getOrNull().orEmpty().endsWith("lgn.edu.gov.il", true) ->
+                    MOE_DID_NOT_FINISH
                 else ->
                     "Signed in to the Ministry of Education, but Webtop did not " +
                         "complete the login. Please try again."
@@ -237,6 +251,47 @@ private fun HiddenWebtopMoeLoginBrowser(
 
 private const val TAG = "HiddenWebtopMoe"
 private const val WEBTOP_LOGIN = "https://webtop.smartschool.co.il/account/login"
+private const val STUCK_ON_MOE_MS = 15_000L
+private const val MOE_DID_NOT_FINISH = "The Ministry of Education didn't accept the saved password, or asked " +
+    "for another step. Tap Sign in again and use MOE SMS to finish on the Ministry's page."
+
+/**
+ * What the Ministry page shows after the saved password was submitted and it didn't move on:
+ * "problem:<its own message>", "otp" (asks for a code), "newpassword" (asks to choose a new
+ * password) or "none".
+ */
+private val MOE_PROBLEM_JS = """
+    (function(){
+      try{
+        function shown(el){ return el && el.offsetParent !== null && (el.innerText||'').trim(); }
+        var sels = ['[role=alert]','mat-error','.mat-error','.mat-mdc-form-field-error','.error-message',
+                    '.errorMessage','.alert-danger','.invalid-feedback','.validation-message','.text-danger'];
+        for (var i = 0; i < sels.length; i++) {
+          var els = document.querySelectorAll(sels[i]);
+          for (var j = 0; j < els.length; j++) {
+            var t = shown(els[j]);
+            if (t) return 'problem:' + t.replace(/\s+/g,' ').substring(0, 200);
+          }
+        }
+        if (document.querySelector('input[autocomplete=one-time-code],input[formcontrolname*=otp i],' +
+            'input[formcontrolname*=code i],input[name*=otp i]')) return 'otp';
+        var pw = Array.prototype.filter.call(document.querySelectorAll('input[type=password]'), shown_input);
+        function shown_input(el){ return el.offsetParent !== null; }
+        if (pw.length >= 2) return 'newpassword';
+        return 'none';
+      } catch(e){ return 'none'; }
+    })()
+""".trimIndent()
+
+/** The message for a [MOE_PROBLEM_JS] answer, or null while nothing is wrong yet. */
+internal fun moeProblemMessage(probe: String): String? = when {
+    probe.startsWith("problem:") -> "The Ministry of Education said: " + probe.removePrefix("problem:").trim() +
+        "\nTap Sign in again to check the saved details, or use MOE SMS."
+    probe == "otp" -> "The Ministry of Education asked for a code. Tap Sign in again and use MOE SMS."
+    probe == "newpassword" -> "The Ministry of Education asks you to choose a new password. Tap Sign in again " +
+        "and use MOE SMS to finish on the Ministry's page."
+    else -> null
+}
 
 /** The `key` from a .../loginMoe?key=... redirect, or null. */
 private fun keyFrom(url: String): String? {

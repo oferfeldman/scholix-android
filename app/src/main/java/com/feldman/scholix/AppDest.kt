@@ -810,13 +810,17 @@ sealed class AppDest : MotionDest {
 
     @Serializable
     @Parcelize
-    data class EditProvider(val providerId: String) : AppDest() {
+    data class EditProvider(
+        val providerId: String,
+        /** The page that asked to sign in again, so closing the sheet returns there, not to Settings. */
+        val origin: AppDest? = null,
+    ) : AppDest() {
         @IgnoredOnParcel
         @Transient
         override val label = "Edit provider"
         @IgnoredOnParcel
         @Transient
-        override val parent: MotionDest = Platforms
+        override val parent: MotionDest = origin ?: Platforms
         @IgnoredOnParcel
         @Transient
         override val pane: MotionPaneType = MotionPaneType.BOTTOM_SHEET

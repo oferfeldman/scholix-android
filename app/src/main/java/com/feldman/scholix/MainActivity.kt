@@ -822,6 +822,8 @@ fun MainScreen(
             onCourseCacheChanged = { courseCacheEpoch++ },
             lemidaCourse = lemidaCourse,
             onLemidaCourseChanged = { lemidaCourse = it },
+            onSignInAgain = { providerId ->
+                backStack.navigateTo(AppDest.EditProvider(providerId, origin = currentScreen as? AppDest)) },
             onScopeSelected = { destination -> navigateFromUser(destination,
                 topLevel = destination.parent == null) },
             onCourseResumed = { course ->
