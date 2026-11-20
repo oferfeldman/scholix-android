@@ -1,5 +1,6 @@
 package com.feldman.scholix.pages
 
+import com.feldman.scholix.ui.components.addAccountFailedMessage
 import com.feldman.motion.MotionTooltip
 import com.feldman.motion.MotionDialog
 import androidx.compose.ui.res.stringResource
@@ -586,7 +587,7 @@ fun AddPlatformSheet(
                     onAdded()
                     onClose()
                 } else {
-                    errorMessage = "Invalid credentials"
+                    errorMessage = addAccountFailedMessage(created)
                 }
             } catch (exception: Exception) {
                 errorMessage = "Error: ${exception.localizedMessage}"

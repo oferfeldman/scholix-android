@@ -39,6 +39,13 @@ class SignInProblemTest {
         assertNull(refreshFailureToAnnounce("Webtop", emptySet(), emptyList()))
     }
 
+    @Test fun addingAnAccountShowsWebtopsOwnReason() {
+        val blocked = webtopThatFailed("Webtop sign-in is temporarily unavailable (HTTP 403). Try again later or sign in on the provider website.")
+        assertEquals(blocked.loginError, addAccountFailedMessage(blocked))
+        assertEquals("Invalid credentials", addAccountFailedMessage(WebtopPlatform()))
+        assertEquals("Invalid credentials", addAccountFailedMessage(null))
+    }
+
     @Test fun aMinistryPageThatDidNotMoveOnIsExplained() {
         assertTrue(moeProblemMessage("problem:Wrong password")!!.startsWith("The Ministry of Education said: Wrong password"))
         assertTrue(moeProblemMessage("otp")!!.contains("MOE SMS"))

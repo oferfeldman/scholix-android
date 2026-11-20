@@ -47,6 +47,13 @@ fun signInFailedMessage(platform: Platform?, detail: String? = null): String {
 fun refreshFailureToAnnounce(activeProvider: String?, failures: Set<String>, announced: List<String>): String? =
     activeProvider?.takeIf { it in failures && it !in announced }
 
+/**
+ * What adding an account says when [platform] didn't sign in: the provider's own reason when it has
+ * one, so a blocked or unavailable Webtop no longer reads as wrong credentials.
+ */
+fun addAccountFailedMessage(platform: Platform?): String =
+    (platform as? WebtopPlatform)?.loginError?.takeIf { it.isNotBlank() } ?: "Invalid credentials"
+
 fun isSignInProblem(message: String?): Boolean =
     message != null && (message.startsWith(SIGN_IN_PREFIX) || message.startsWith("Login failed"))
 

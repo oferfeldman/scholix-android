@@ -25,7 +25,7 @@ internal class WebtopAttachmentDownload(
     private val cookie: () -> String,
     client: OkHttpClient = OkHttpClient()
 ) {
-    private val client = client.newBuilder().followRedirects(false).followSslRedirects(false)
+    private val client = client.newBuilder().withWebtopBrowserIdentity().followRedirects(false).followSslRedirects(false)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(60, TimeUnit.SECONDS).build()
 

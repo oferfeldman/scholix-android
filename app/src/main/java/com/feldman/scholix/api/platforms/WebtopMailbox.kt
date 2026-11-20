@@ -85,7 +85,7 @@ class WebtopMailbox(
     private val refreshSession: () -> Boolean,
     client: OkHttpClient = OkHttpClient()
 ) {
-    private val client = client.newBuilder()
+    private val client = client.newBuilder().withWebtopBrowserIdentity()
         .retryOnConnectionFailure(false)
         .followRedirects(false)
         .connectTimeout(20, TimeUnit.SECONDS)

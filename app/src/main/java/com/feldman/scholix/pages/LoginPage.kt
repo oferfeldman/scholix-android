@@ -1,5 +1,6 @@
 package com.feldman.scholix.pages
 
+import com.feldman.scholix.ui.components.addAccountFailedMessage
 import androidx.compose.ui.res.stringResource
 import com.feldman.scholix.R
 
@@ -383,7 +384,7 @@ fun LoginPage(
 
                                                 onLoginSuccess()
                                             }
-                                            else errorMessage = "Invalid credentials"
+                                            else errorMessage = addAccountFailedMessage(created)
 
                                         } catch (e: Exception) {
                                             errorMessage = "Login failed: ${e.localizedMessage}"

@@ -30,12 +30,14 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 class WebtopPlatform(
-    private val _client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient().newBuilder()
+    client: OkHttpClient = UnsafeOkHttpClient.getUnsafeOkHttpClient().newBuilder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .callTimeout(90, TimeUnit.SECONDS)
         .build()
 ) : Platform {
+    private val _client: OkHttpClient = client.newBuilder().withWebtopBrowserIdentity().build()
+
     override var platformDisplayName: String = "WebtopPlatform"
 
     private val loginFields = LoginFields()
