@@ -39,6 +39,14 @@ fun signInFailedMessage(platform: Platform?, detail: String? = null): String {
     return "$SIGN_IN_PREFIX$name.\n$reason"
 }
 
+/**
+ * The provider whose failed background refresh should be announced now: the one in view, once per
+ * failure. Failures of other providers wait until the user switches to them, so a Webtop sign-in
+ * doesn't interrupt Lemida pages; Lemida itself isn't a [Platform] and has no name here.
+ */
+fun refreshFailureToAnnounce(activeProvider: String?, failures: Set<String>, announced: List<String>): String? =
+    activeProvider?.takeIf { it in failures && it !in announced }
+
 fun isSignInProblem(message: String?): Boolean =
     message != null && (message.startsWith(SIGN_IN_PREFIX) || message.startsWith("Login failed"))
 

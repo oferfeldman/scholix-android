@@ -30,6 +30,15 @@ class SignInProblemTest {
         assertFalse(isSignInProblem(null))
     }
 
+    @Test fun aFailedRefreshIsAnnouncedOnlyOnItsOwnProviderAndOnce() {
+        val failures = setOf("Webtop")
+        assertNull(refreshFailureToAnnounce(null, failures, emptyList()))        // Lemida pages
+        assertNull(refreshFailureToAnnounce("OpenU", failures, emptyList()))
+        assertEquals("Webtop", refreshFailureToAnnounce("Webtop", failures, emptyList()))
+        assertNull(refreshFailureToAnnounce("Webtop", failures, listOf("Webtop")))
+        assertNull(refreshFailureToAnnounce("Webtop", emptySet(), emptyList()))
+    }
+
     @Test fun aMinistryPageThatDidNotMoveOnIsExplained() {
         assertTrue(moeProblemMessage("problem:Wrong password")!!.startsWith("The Ministry of Education said: Wrong password"))
         assertTrue(moeProblemMessage("otp")!!.contains("MOE SMS"))

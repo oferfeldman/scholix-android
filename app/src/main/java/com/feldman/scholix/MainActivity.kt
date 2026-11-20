@@ -3,6 +3,7 @@ package com.feldman.scholix
 import com.feldman.scholix.ui.HiddenMoeLogin
 import com.feldman.scholix.ui.HiddenMashovSmsLogin
 import com.feldman.scholix.api.providerName
+import com.feldman.scholix.ui.components.refreshFailureToAnnounce
 import com.feldman.scholix.api.platforms.StudentsPortalPlatform
 import com.feldman.scholix.courses.*
 import com.feldman.scholix.lemida.LemidaRepository
@@ -171,8 +172,6 @@ fun BottomBarSpacing(): Dp {
 
 class MainActivity : ComponentActivity() {
     private var homeworkOpenRequest by mutableIntStateOf(0)
-    // Bumped by the refresh-failure snackbar's action; MainScreen opens the providers page.
-    private var providersOpenRequest by mutableIntStateOf(0)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -292,8 +291,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // The failures last reported, so a resume that fails the same way stays quiet.
-                var reportedFailures by remember { mutableStateOf<Set<String>>(emptySet()) }
+                // Providers whose saved sign-in last failed to refresh. MainScreen tells the user only
+                // while they're on that provider, so a Webtop failure doesn't interrupt Lemida pages.
+                var refreshFailures by remember { mutableStateOf<Set<String>>(emptySet()) }
                 // Failures waiting on the off-screen portal sign-in before they are reported.
                 var pendingFailures by remember { mutableStateOf<List<String>>(emptyList()) }
                 var portalRelogin by remember { mutableStateOf<StudentsPortalPlatform?>(null) }
@@ -301,21 +301,15 @@ class MainActivity : ComponentActivity() {
                 var preloadRefreshRunning by remember { mutableStateOf(false) }
 
                 fun reportFailures(failedPlatforms: List<String>) {
-                    val failures = failedPlatforms.toSet()
-                    if (failures.isNotEmpty() && failures != reportedFailures) {
-                        scope.launch {
-                            // These are expired sign-ins: retrying fails the same way,
-                            // signing in again is what fixes them.
-                            val result = snackbarHostState.showSnackbar(
-                                message = getString(R.string.providers_refresh_failed, failedPlatforms.joinToString(", ")),
-                                actionLabel = getString(R.string.providers_sign_in_again),
-                                duration = SnackbarDuration.Long
-                            )
-                            if (result == SnackbarResult.ActionPerformed) providersOpenRequest++
-                        }
-                    }
-                    reportedFailures = failures
+                    refreshFailures = failedPlatforms.toSet()
                 }
+
+                // These are expired sign-ins: retrying fails the same way, signing in again is what fixes them.
+                suspend fun showRefreshFailure(provider: String): Boolean = snackbarHostState.showSnackbar(
+                    message = getString(R.string.providers_refresh_failed, provider),
+                    actionLabel = getString(R.string.providers_sign_in_again),
+                    duration = SnackbarDuration.Long
+                ) == SnackbarResult.ActionPerformed
 
                 fun reloadPreloads(snackbarHostState: SnackbarHostState) {
                     if (preloadRefreshRunning || portalRelogin != null || mashovRelogin != null) return
@@ -505,8 +499,9 @@ class MainActivity : ComponentActivity() {
                         else -> {
                             MainScreen(
                                 snackbarHost = snackbarHost,
+                                refreshFailures = refreshFailures,
+                                onRefreshFailure = ::showRefreshFailure,
                                 homeworkOpenRequest = homeworkOpenRequest,
-                                providersOpenRequest = providersOpenRequest,
                                 preloadedCourses = preloadedCourses,
                                 repository = repository,
                                 onPlatformsChanged = {
@@ -547,8 +542,9 @@ fun MainScreen(
     onLoginSuccess: () -> Unit,
     onLogout: () -> Unit,
     homeworkOpenRequest: Int = 0,
-    providersOpenRequest: Int = 0,
     snackbarHost: @Composable () -> Unit = {},
+    refreshFailures: Set<String> = emptySet(),
+    onRefreshFailure: suspend (provider: String) -> Boolean = { false },
 ) {
     val context = LocalContext.current
 
@@ -721,13 +717,6 @@ fun MainScreen(
         } else backStack.navigateTo(destination)
     }
     var handledHomeworkOpenRequest by rememberSaveable { mutableIntStateOf(0) }
-    var handledProvidersOpenRequest by rememberSaveable { mutableIntStateOf(0) }
-    LaunchedEffect(providersOpenRequest) {
-        if (providersOpenRequest > handledProvidersOpenRequest) {
-            backStack.navigateTo(AppDest.Platforms)
-            handledProvidersOpenRequest = providersOpenRequest
-        }
-    }
     LaunchedEffect(homeworkOpenRequest, requestedAssignment, lemidaSnapshot.loaded) {
         if (homeworkOpenRequest > handledHomeworkOpenRequest) {
             if (requestedAssignment != null && !lemidaSnapshot.loaded) return@LaunchedEffect
@@ -740,6 +729,17 @@ fun MainScreen(
         }
     }
     val currentScreen = backStack.backStack.lastOrNull() ?: startDestination
+    // A provider's failed refresh is announced once, when that provider is the one in view; Sign in
+    // opens its account sheet over the page. Switching away dismisses it, and it's forgotten on recovery.
+    var announcedFailures by rememberSaveable { mutableStateOf(listOf<String>()) }
+    val activeProviderName = activeProvider?.providerName()
+    LaunchedEffect(refreshFailures, activeProviderName) {
+        announcedFailures = announcedFailures.filter { it in refreshFailures }
+        val name = refreshFailureToAnnounce(activeProviderName, refreshFailures, announcedFailures)
+            ?: return@LaunchedEffect
+        announcedFailures = announcedFailures + name
+        if (onRefreshFailure(name)) backStack.navigateTo(AppDest.EditProvider(activeProviderId, origin = currentScreen as? AppDest))
+    }
     LaunchedEffect(currentScreen, activeProviderId) {
         if (currentScreen == AppDest.Home) {
             backStack.navigateTop(mainDestination)
