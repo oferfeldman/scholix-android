@@ -21,7 +21,7 @@ import java.io.IOException
 
 data class LemidaSnapshot(val homework: List<Homework> = emptyList(), val courses: List<LemidaCourse> = emptyList(),
     val status: String = "", val updated: Long = 0, val enabled: Boolean = false, val needsLogin: Boolean = false,
-    val loaded: Boolean = false, val account: String = "")
+    val loaded: Boolean = false, val account: String = "", val materials: List<LemidaMaterial> = emptyList())
 
 class LemidaRepository internal constructor(context: Context, preferencesName: String,
     private val browserFactory: (Context, String?, WebView?) -> LemidaTransport) {
@@ -35,6 +35,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
     fun status() = prefs.getString("status", "Sign in to Lemida to sync assignments.").orEmpty()
     fun lastSync() = prefs.getLong("last_sync", 0L)
     fun cached() = LemidaParser.decode(prefs.getString("homework", "[]") ?: "[]")
+    fun cachedMaterials() = LemidaMaterial.decode(prefs.getString("materials", "[]") ?: "[]")
     fun cachedCourses(): List<LemidaCourse> = prefs.getString("courses", null)?.let { LemidaCourse.decode(it) }
         ?: cached().map { LemidaCourse(it.courseId, it.course) }.distinctBy { it.id }
     // Preference notifications carry no data; decode the snapshot off the UI thread only when it changes.
@@ -43,16 +44,21 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
         prefs.registerOnSharedPreferenceChangeListener(listener)
         trySend(Unit)
         awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
-    }.conflate().map {
+    }.conflate().map { snapshotOf(prefs.all) }.flowOn(Dispatchers.IO)
+
+    /** The saved snapshot, read now, so a page can draw saved data on its first frame (and during its transition). */
+    fun cachedSnapshot(): LemidaSnapshot = snapshotOf(prefs.all)
+
+    private fun snapshotOf(values: Map<String, *>): LemidaSnapshot {
         // One atomic preference snapshot; never wait behind a network sync just to show saved data.
-        val values = prefs.all
         val homework = LemidaParser.decode(values["homework"] as? String ?: "[]")
         val courses = (values["courses"] as? String)?.let { LemidaCourse.decode(it) }
             ?: homework.map { LemidaCourse(it.courseId, it.course) }.distinctBy { it.id }
-        LemidaSnapshot(homework, courses.sortedBy { it.name }, values["status"] as? String ?: "",
+        return LemidaSnapshot(homework, courses.sortedBy { it.name }, values["status"] as? String ?: "",
             values["last_sync"] as? Long ?: 0L, values["enabled"] as? Boolean ?: false,
-            values["needs_login"] as? Boolean ?: false, loaded = true, account = values["user_id"] as? String ?: "")
-    }.flowOn(Dispatchers.IO)
+            values["needs_login"] as? Boolean ?: false, loaded = true, account = values["user_id"] as? String ?: "",
+            materials = LemidaMaterial.decode(values["materials"] as? String ?: "[]"))
+    }
     fun setUserAgent(value: String) { prefs.edit().putString("user_agent", value).apply() }
     private fun detailKey(item: Homework) = "detail:${prefs.getString("user_id", "")}:${item.id}"
     fun cachedDetail(item: Homework): HomeworkDetail? = prefs.getString(detailKey(item), null)?.let {
@@ -123,6 +129,36 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
         }
     }
 
+    /** Downloads posted course material that is a PDF; anything else opens on Lemida instead. */
+    suspend fun openMaterial(material: LemidaMaterial): java.io.File = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            require(material.type == "resource" && LemidaPdf.allowedUrl(material.url) &&
+                cachedMaterials().any { it.id == material.id && it.url == material.url }) { "Refresh Lemida before opening this file." }
+            val directory = java.io.File(appContext.cacheDir, "lemida-pdf").apply { mkdirs() }
+            directory.listFiles()?.filter { it.name.startsWith("material-") && it.extension == "pdf" }
+                ?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
+            val file = java.io.File.createTempFile("material-", ".pdf", directory)
+            val browser = withContext(Dispatchers.Main) { browserFactory(appContext, prefs.getString("user_agent", null), null) }
+            var complete = false
+            try {
+                browser.prepare()
+                val page = browser.get("${LemidaParser.BASE}/my/")
+                if (!LemidaParser.authenticated(page)) throw LemidaSessionExpired()
+                check(LemidaParser.config(page, "userId") == prefs.getString("user_id", null)) { "The signed-in account changed. Refresh Lemida first." }
+                browser.downloadPdf(material.url, file)
+                LemidaPdf.requireFile(file)
+                complete = true
+                file
+            } catch (e: LemidaSessionExpired) {
+                prefs.edit().putBoolean("needs_login", true).putString("status", e.message).commit()
+                throw e
+            } finally {
+                if (!complete) file.delete()
+                browser.close()
+            }
+        }
+    }
+
     /** Returns the account of the successfully committed snapshot, for guarded alert delivery. */
     suspend fun sync(view: WebView? = null): String = mutex.withLock {
         syncState.value = true
@@ -163,12 +199,15 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                         if (!complete) throw IOException("Course pagination did not finish; previous data preserved.")
                         val sameAccount = prefs.getString("user_id", null) == user
                         val previous = if (sameAccount) cached().associateBy { it.id } else emptyMap()
+                        val materials = mutableListOf<LemidaMaterial>()
                         val items = courses.flatMap { (id, name) ->
                             val payload = JSONArray().put(JSONObject().put("index", 0)
                                 .put("methodname", "core_courseformat_get_state").put("args", JSONObject().put("courseid", id)))
                             val raw = browser.post("${LemidaParser.BASE}/lib/ajax/service.php?sesskey=$key", payload.toString())
                             val state = LemidaParser.ajaxData(raw) as? String
                                 ?: throw IOException("Unexpected Moodle activity data. Previous assignments preserved.")
+                            // Material is extra; a course whose layout can't be read still gives its work.
+                            materials += runCatching { LemidaMaterial.fromState(state, id, name) }.getOrDefault(emptyList())
                             LemidaParser.stateHomework(state, id, name).map { item ->
                                 item.copy(dates = previous[item.id]?.dates.orEmpty())
                             }
@@ -178,6 +217,7 @@ class LemidaRepository internal constructor(context: Context, preferencesName: S
                         val alerts = LemidaParser.pendingAlerts(items, seen, pending)
                         // Commit only after every course succeeded. Never turn an error into an empty baseline.
                         check(prefs.edit().putString("homework", LemidaParser.encode(items)).putString("user_id", user)
+                            .putString("materials", LemidaMaterial.encode(materials))
                             .putString("courses", LemidaCourse.encode(courses.map { (id, name) -> LemidaCourse(id, name) }))
                             .putStringSet("seen", seen.orEmpty() + items.map { it.id })
                             .putString("pending", LemidaParser.encode(alerts))

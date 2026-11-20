@@ -27,11 +27,15 @@ data class CourseSection(
 ) : AppDest() {
     @IgnoredOnParcel @Transient override val label = section.label
     @IgnoredOnParcel @Transient override val parent: MotionDest = AppDest.Home
-    @IgnoredOnParcel @Transient override val pane = MotionPaneType.LIST
+    // OpenU course rows sit beside the page they open. A Lemida course section is one page of its own;
+    // as a list pane it shared the screen with whatever list was open before, often another course.
+    @IgnoredOnParcel @Transient override val pane =
+        if (providerId.startsWith("lemida:")) MotionPaneType.FULL else MotionPaneType.LIST
     @IgnoredOnParcel @Transient override val icon = when (section) {
         CourseSectionKind.OVERVIEW -> MotionIcons.Outlined.Dashboard
         CourseSectionKind.UNITS -> MotionIcons.Outlined.ViewModule
-        CourseSectionKind.ASSIGNMENTS -> MotionIcons.Outlined.Assignment
+        // Not the clipboard of the provider's Assignments page, which shares the course bar.
+        CourseSectionKind.ASSIGNMENTS -> MotionIcons.Outlined.Checklist
         CourseSectionKind.RECORDINGS -> MotionIcons.Outlined.VideoLibrary
         CourseSectionKind.FORUMS -> MotionIcons.Outlined.Forum
         CourseSectionKind.ARCHIVE -> MotionIcons.Outlined.Archive
@@ -95,13 +99,34 @@ data class CourseSection(
                             if (term.isNotBlank()) Text(term)
                         }
                     }
-                    Section {
-                        courseSections(provider, course).filter { it != CourseSectionKind.OVERVIEW }.forEach { target ->
-                            PageItem(title = target.label, onClick = { state.onScopeSelected(copy(section = target)) })
+                    // What each section holds, read from the saved Lemida snapshot.
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val counts = androidx.compose.runtime.remember(providerId, courseKey) {
+                        if (!providerId.startsWith("lemida:")) null else {
+                            val repo = com.feldman.scholix.lemida.LemidaRepository(context)
+                            val id = courseKey.toIntOrNull()
+                            repo.cached().count { it.courseId == id } to repo.cachedMaterials().count { it.courseId == id }
                         }
                     }
-                    if (providerId.startsWith("lemida:")) Item {
-                        MotionButton(text = "Save homework for PC", onClick = export)
+                    Section {
+                        courseSections(provider, course).filter { it != CourseSectionKind.OVERVIEW }.forEach { target ->
+                            PageItem(title = target.label, onClick = { state.onScopeSelected(copy(section = target)) },
+                                icon = rememberSymbolPainter(when (target) {
+                                    CourseSectionKind.ASSIGNMENTS -> MotionSymbols.ic_assignment
+                                    CourseSectionKind.FILES -> MotionSymbols.ic_folder
+                                    CourseSectionKind.GRADES -> MotionSymbols.ic_grade
+                                    else -> MotionSymbols.ic_open_in_new
+                                }),
+                                description = counts?.let { (work, files) -> when (target) {
+                                    CourseSectionKind.ASSIGNMENTS -> if (work == 1) "1 activity" else "$work activities"
+                                    CourseSectionKind.FILES -> if (files == 0) "Lectures, recitations and other course files"
+                                        else if (files == 1) "1 course file" else "$files course files"
+                                    else -> null
+                                } })
+                        }
+                        if (providerId.startsWith("lemida:")) PageItem(title = "Save homework for PC",
+                            description = "A file of all your Lemida homework, for Feldman Hub on a computer",
+                            icon = rememberSymbolPainter(MotionSymbols.ic_save), onClick = export)
                     }
                     BottomBarSpacer(minMargin = 24.dp)
                 }

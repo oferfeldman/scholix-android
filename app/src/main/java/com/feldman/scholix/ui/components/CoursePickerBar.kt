@@ -168,7 +168,9 @@ internal fun CoursePickerBar(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     providersById: Map<String, Platform>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** A provider's own page (all its courses) is open; the bar names the provider, not one course. */
+    providerLevel: Boolean = false,
 ) {
     val courseLabel = stringResource(R.string.course)
     val menuEntries = remember(courses) { buildCourseDropdownEntries(courses) }
@@ -219,16 +221,24 @@ internal fun CoursePickerBar(
                 .firstOrNull { selectedIndex in it.courseIndices }?.platformId
             onExpandedChange(opening)
         },
-        optionLabel = courseDisplayLabel,
-        optionDescription = { course -> coursePickerDescription(course) },
+        optionLabel = { course ->
+            if (providerLevel && course === courses.getOrNull(selectedIndex))
+                providersById[course.optString("platformId")]?.getName()?.takeIf { it.isNotBlank() }
+                    ?: course.optString("platformName").ifBlank { courseDisplayLabel(course) }
+            else courseDisplayLabel(course)
+        },
+        optionDescription = { course -> if (providerLevel && course === courses.getOrNull(selectedIndex)) "" else coursePickerDescription(course) },
         optionKey = { course ->
             "${course.optString("platformId")}|${course.optString("courseKey")}|${course.optString("name")}"
         },
         optionIcon = { course ->
+            val provider = providersById[course.optString("platformId")]
+            val asProvider = providerLevel && course === courses.getOrNull(selectedIndex)
             SubjectIcon(
                 subject = course.optString("name").ifBlank { courseLabel },
-                assignment = "course",
-                painter = courseIconPainter(course, providersById),
+                assignment = if (asProvider) "folder" else "course",
+                painter = if (asProvider) provider?.let { providerPainter(it) } ?: rememberSymbolPainter(MotionSymbols.ic_folder_open)
+                    else courseIconPainter(course, providersById),
                 size = 40.dp,
                 iconSize = 22.dp
             )
@@ -251,7 +261,7 @@ internal fun CoursePickerBar(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 400.dp)
+                            .heightIn(max = maxOf(420, (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.6f).toInt()).dp)
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
@@ -286,7 +296,7 @@ internal fun CoursePickerBar(
                                 CourseDropdownMenuRow(
                                     title = courseDisplayLabel(course),
                                     description = coursePickerDescription(course),
-                                    selected = courseIndex == selectedIndex,
+                                    selected = !providerLevel && courseIndex == selectedIndex,
                                     leadingContent = {
                                         SubjectIcon(
                                             subject = course.optString("name").ifBlank { courseLabel },
@@ -310,7 +320,7 @@ internal fun CoursePickerBar(
                                         CourseDropdownMenuRow(
                                             title = courseDisplayLabel(course),
                                             description = coursePickerDescription(course),
-                                            selected = entry.courseIndex == selectedIndex,
+                                            selected = !providerLevel && entry.courseIndex == selectedIndex,
                                             leadingContent = {
                                                 SubjectIcon(
                                                     subject = course.optString("name").ifBlank { courseLabel },

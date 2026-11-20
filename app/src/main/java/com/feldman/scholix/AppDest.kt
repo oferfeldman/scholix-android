@@ -151,6 +151,22 @@ sealed class AppDest : MotionDest {
         }
     }
 
+    /** One Lemida activity's details, opened as its own page so Motion animates it in and back. */
+    @Serializable
+    @Parcelize
+    data class LemidaAssignment(val itemId: String = "", val providerId: String = "", val courseKey: String = "") : AppDest() {
+        @IgnoredOnParcel @Transient override val label = "Assignment"
+        @IgnoredOnParcel @Transient override val parent: MotionDest = if (courseKey.isNotBlank())
+            CourseSection(providerId, courseKey, section = com.feldman.scholix.courses.CourseSectionKind.ASSIGNMENTS) else Homework
+        @IgnoredOnParcel @Transient override val pane = MotionPaneType.DETAIL
+        @IgnoredOnParcel @Transient override val showNavigation = false
+        @Composable
+        override fun Content(onNavigate: MotionNavigator, onBack: () -> Unit, searchQuery: String,
+                             onFabAction: ((() -> Unit) -> Unit) -> Unit) {
+            com.feldman.scholix.lemida.LemidaAssignmentPage(itemId, onBack)
+        }
+    }
+
     @Serializable
     @Parcelize
     data class OpenUAttachment(val providerId: String = "", val name: String = "", val url: String = "",
@@ -794,13 +810,17 @@ sealed class AppDest : MotionDest {
 
     @Serializable
     @Parcelize
-    data class EditProvider(val providerId: String) : AppDest() {
+    data class EditProvider(
+        val providerId: String,
+        /** The page that asked to sign in again, so closing the sheet returns there, not to Settings. */
+        val origin: AppDest? = null,
+    ) : AppDest() {
         @IgnoredOnParcel
         @Transient
         override val label = "Edit provider"
         @IgnoredOnParcel
         @Transient
-        override val parent: MotionDest = Platforms
+        override val parent: MotionDest = origin ?: Platforms
         @IgnoredOnParcel
         @Transient
         override val pane: MotionPaneType = MotionPaneType.BOTTOM_SHEET

@@ -1,7 +1,11 @@
 # Courses and provider views
 
 Scholix opens the selected provider's Grades when supported, or its first
-supported page. Notification intents still take priority. The shared picker
+supported page. The bar lists every page any account supports in one fixed order;
+picking a page the selected provider lacks switches to the account last used for it.
+A Lemida course picked in the bar above Assignments or Materials narrows that page
+in place, with its course chips scrolled to the course; Lemida activity details are a
+destination of their own. Course lists put the course with the newest activity first. Notification intents still take priority. The shared picker
 switches between providers and courses, with a folder for accounts with two or
 more courses. Saved courses, including Mashov subjects, are available in the
 picker while accounts refresh. Back from a course returns to its provider's main page.
@@ -31,8 +35,14 @@ Saved Archive routes also open Overview. The archive's separate Drive collection
 is unavailable in Scholix.
 
 Lemida keeps its original assignment detail, PDF reader and built-in hand-in page.
-Files lists saved assignment PDF attachments and links to the official course for
-other files. Classroom Materials is scoped to the selected course. Course Studies
+Files lists the course's posted material (lectures, recitations, whiteboards, links,
+folders and pages) under Lemida's own section titles, then saved assignment PDF
+attachments. PDF files open in the Scholix reader; other files and links open on
+Lemida in the built-in browser. A Lemida course section fills the window instead of
+sharing a list pane with the previously open list. At provider level (no course
+selected), Lemida Assignments and Materials list every course with the course chips,
+and the picker names the provider rather than its first course. Scholix reopens on
+the provider used last. Classroom Materials is scoped to the selected course. Course Studies
 filters existing assignment links by stable identity and records course scope for
 new general links without changing existing study IDs or Documents receipts.
 

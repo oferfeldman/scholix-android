@@ -25,6 +25,9 @@ fun ChipPicker(
     optionIcon: (@Composable (String) -> Painter?)? = null,
     menuAnimation: MotionDropdownAnimation = MotionDropdownAnimation.Transform,
 ) {
+    // A narrow chip wraps a single word mid-word ("Updat" / "ed"); shrink one word to fit instead,
+    // and keep wrapping for values of several words such as subject names.
+    val valueFit = if (selected.trim().contains(' ')) MotionDropdownTextFit.Wrap else MotionDropdownTextFit.AutoSize
     val menuWidth = pickerMenuWidth(options, horizontalSpace = if (optionIcon == null) 76.dp else 108.dp)
     val anchorContainer = MaterialTheme.colorScheme.tertiaryContainer
     val anchorContent = MaterialTheme.colorScheme.onTertiaryContainer
@@ -60,7 +63,7 @@ fun ChipPicker(
         colors = dropdownColors,
         items = MotionDropdownDefaults.items(icon = optionIcon),
         trailingIcon = rememberSymbolPainter(MotionSymbols.ic_keyboard_arrow_down),
-        text = MotionDropdownDefaults.text(value = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), label = MaterialTheme.typography.labelMedium, valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
+        text = MotionDropdownDefaults.text(value = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), label = MaterialTheme.typography.labelMedium, valueFit = valueFit, valueMaxLines = if (valueFit == MotionDropdownTextFit.Wrap) 2 else 1),
         sizes = MotionDropdownDefaults.sizes(menuMinWidth = 112.dp.coerceAtMost(menuWidth), menuMaxWidth = menuWidth),
         menu = MotionDropdownDefaults.menu(animation = menuAnimation,
             matchAnchorWidth = false,

@@ -28,7 +28,9 @@ import com.feldman.scholix.api.Platform
 import com.feldman.scholix.api.PlatformStorage
 import com.feldman.scholix.api.platforms.WebtopPlatform
 import com.feldman.scholix.ui.HiddenWebtopMoeLogin
-import com.feldman.scholix.ui.components.WebtopReconnectButton
+import com.feldman.scholix.ui.components.PageProblem
+import com.feldman.scholix.ui.components.WEBTOP_REJECTED_MOE
+import com.feldman.scholix.ui.components.signInFailedMessage
 import com.feldman.scholix.attendance.*
 import com.feldman.scholix.ui.components.ProviderPickerBar
 import com.feldman.scholix.ui.components.ChipPicker
@@ -331,7 +333,7 @@ fun AttendancePage(
                     reloginAttempted = true
                     webtopRelogin = webtop
                 } else {
-                    errorMessage = if (json.optString("error") == "login_failed") "Login failed.\nPlease re-login."
+                    errorMessage = if (json.optString("error") == "login_failed") signInFailedMessage(requestPlatform)
                         else "Could not load attendance.\nPlease try again."
                     isLoading = false
                 }
@@ -361,10 +363,10 @@ fun AttendancePage(
     }
 
     webtopRelogin?.let { webtop ->
-        HiddenWebtopMoeLogin(webtop.getUsername(), webtop.getPassword()) { key, _ ->
+        HiddenWebtopMoeLogin(webtop.getUsername(), webtop.getPassword()) { key, error ->
             if (key == null) {
                 webtopRelogin = null
-                errorMessage = "Login failed.\nPlease re-login."
+                errorMessage = signInFailedMessage(webtop, error)
                 isLoading = false
             } else scope.launch {
                 val success = withContext(Dispatchers.IO) {
@@ -375,7 +377,7 @@ fun AttendancePage(
                 }
                 webtopRelogin = null
                 if (success) reloadTrigger++ else {
-                    errorMessage = "Login failed.\nPlease re-login."
+                    errorMessage = signInFailedMessage(webtop, WEBTOP_REJECTED_MOE)
                     isLoading = false
                 }
             }
@@ -418,11 +420,10 @@ fun AttendancePage(
         if (isLoading) {
             GradesLoadingIndicator(modifier = modifier.fillMaxSize())
         } else if (errorMessage != null) {
-            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center) {
-                Text(errorMessage.orEmpty(), textAlign = TextAlign.Center)
-                if (selectedPlatform is WebtopPlatform) WebtopReconnectButton()
-                TextButton(onClick = { reloginAttempted = false; reloadTrigger++ }) { Text("Retry") }
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                PageProblem(errorMessage.orEmpty(), selectedPlatform?.id,
+                    onRetry = { reloginAttempted = false; reloadTrigger++ },
+                    offerWebtopSignIn = selectedPlatform is WebtopPlatform)
             }
         } else {
             if (events.isEmpty()) {

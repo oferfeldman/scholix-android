@@ -181,7 +181,7 @@ fun <T> PickerBar(
                 .height(64.dp),
             items = MotionDropdownDefaults.items(label = optionLabel, description = { option -> optionDescription(option).takeIf { it.isNotBlank() } }, key = optionKey),
             shapes = MotionDropdownDefaults.shapes(anchor = RoundedCornerShape(28.dp), menu = RoundedCornerShape(28.dp), menuItem = RoundedCornerShape(24.dp)),
-            sizes = MotionDropdownDefaults.sizes(borderWidth = 0.dp, minHeight = 64.dp, menuMaxHeight = 420.dp, menuMinWidth = 112.dp.coerceAtMost(menuWidth), menuMaxWidth = menuWidth),
+            sizes = MotionDropdownDefaults.sizes(borderWidth = 0.dp, minHeight = 64.dp, menuMaxHeight = maxOf(420, (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * 0.6f).toInt()).dp, menuMinWidth = 112.dp.coerceAtMost(menuWidth), menuMaxWidth = menuWidth),
             text = MotionDropdownDefaults.text(value = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), valueFit = MotionDropdownTextFit.Wrap, valueMaxLines = 2),
             menu = MotionDropdownDefaults.menu(animation = menuAnimation, matchAnchorWidth = false, alignment = MotionDropdownMenuAlignment.Center)
         )

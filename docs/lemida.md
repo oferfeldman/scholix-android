@@ -1,5 +1,17 @@
 # Lemida homework on the phone
 
+## Course material
+
+Each sync already reads every course's `core_courseformat_get_state`. Besides course
+work, Scholix now keeps the visible files, folders, links, pages and books from it,
+with their section title and order (`materials` in the Lemida preferences, the same
+account and commit as the homework snapshot). Recitation sheets ("תרגול") and
+whiteboard scans therefore appear in Materials and in each course's Files, even though
+the assignment list still counts posted material only when its title names an
+exercise. A course whose layout can't be read keeps its course work and simply has no
+material. `LemidaRepository.openMaterial` downloads a posted PDF through the signed-in
+browser with the same size and `%PDF-` checks as attachments.
+
 ## PDF attachments
 
 Assignments details now show a **PDF attachments** section. Tap a file to open it

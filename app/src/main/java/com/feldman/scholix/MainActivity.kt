@@ -565,11 +565,11 @@ fun MainScreen(
     val hasSchedule = platforms.any { it.supportsSchedule }
     val hasAttendance = platforms.any { it.supportsAttendance }
     val lemida = remember(context) { LemidaRepository(context) }
-    val lemidaSnapshot by lemida.snapshots.collectAsState(initial = remember(lemida) { LemidaSnapshot(courses = lemida.cachedCourses(), enabled = lemida.enabled()) })
+    val lemidaSnapshot by lemida.snapshots.collectAsState(initial = remember(lemida) { lemida.cachedSnapshot() })
     val hasCourseProviders = platforms.any { it is OpenAUPlatform || it is GoogleClassroomPlatform } ||
         lemidaSnapshot.enabled || lemidaSnapshot.courses.isNotEmpty()
     var courseCacheEpoch by remember { mutableIntStateOf(0) }
-    val courseCatalog = remember(preloadedCourses, platforms, lemidaSnapshot.courses, lemidaSnapshot.account, courseCacheEpoch) {
+    val courseCatalog = remember(preloadedCourses, platforms, lemidaSnapshot.courses, lemidaSnapshot.account, lemidaSnapshot.homework, lemidaSnapshot.materials, courseCacheEpoch) {
         platforms.filter { it is OpenAUPlatform || it is GoogleClassroomPlatform }.flatMap { provider ->
             val saved = if (provider is OpenAUPlatform)
                 com.feldman.scholix.openu.OpenUAssignmentsRepository(context, provider).cachedCourses()
@@ -589,16 +589,41 @@ fun MainScreen(
         }.plus(preloadedCourses.filter { course -> platforms.any { it.id == course.optString("platformId") && it !is OpenAUPlatform && it !is GoogleClassroomPlatform } })
             .filter { it.stableCourseKey().isNotBlank() }.distinctBy { it.courseDestination() } +
             if (lemidaSnapshot.account.isNotBlank()) lemidaSnapshot.courses.map { course ->
+                // What the course holds, which also tells apart two Lemida courses with one name.
+                val work = lemidaSnapshot.homework.count { it.courseId == course.id }
+                val files = lemidaSnapshot.materials.count { it.courseId == course.id }
                 JSONObject().put("platformId", "lemida:${lemidaSnapshot.account}")
                     .put("courseKey", course.id.toString()).put("name", course.name)
+                    .put("status", listOfNotNull(
+                        work.takeIf { it > 0 }?.let { if (it == 1) "1 activity" else "$it activities" },
+                        files.takeIf { it > 0 }?.let { if (it == 1) "1 file" else "$it files" },
+                    // Isolated left-to-right, so the English counts keep their order under a Hebrew title.
+                    ).joinToString(" · ").ifBlank { "Nothing posted yet" }.let { "⁦$it⁩" })
             } else emptyList()
     }
     val providerOptions = platforms.filter { com.feldman.scholix.courses.supportedProviderPages(it).isNotEmpty() }.map { it.id } + listOf("lemida")
-    var selectedProviderId by rememberSaveable { mutableStateOf(platforms.firstOrNull { it.suportsGrades }?.id ?: providerOptions.firstOrNull().orEmpty()) }
+    // Reopen on the provider used last, rather than always the first one with grades.
+    val providerPreferences = remember(context) { context.getSharedPreferences("navigation_scope", android.content.Context.MODE_PRIVATE) }
+    var selectedProviderId by rememberSaveable { mutableStateOf(providerPreferences.getString("provider", null)
+        ?.takeIf { it in providerOptions } ?: platforms.firstOrNull { it.suportsGrades }?.id ?: providerOptions.firstOrNull().orEmpty()) }
     val activeProviderId = selectedProviderId.takeIf { it in providerOptions } ?: providerOptions.firstOrNull().orEmpty()
+    LaunchedEffect(activeProviderId) {
+        if (activeProviderId.isNotBlank()) providerPreferences.edit().putString("provider", activeProviderId).apply()
+    }
     val activeProvider = platforms.firstOrNull { it.id == activeProviderId }
     val supportedPages = com.feldman.scholix.courses.supportedProviderPages(activeProvider, activeProviderId == "lemida")
+    // The bar keeps every page any account offers, in the same place, as Scholix had before course
+    // scoping: a page the selected provider lacks opens with a provider that has it.
+    val pagesByProvider = providerOptions.associateWith { id ->
+        com.feldman.scholix.courses.supportedProviderPages(platforms.firstOrNull { it.id == id }, id == "lemida")
+    }
+    fun providerFor(page: MotionDest): String? = when {
+        page !in com.feldman.scholix.courses.providerDependentPages || page in supportedPages -> activeProviderId
+        else -> providerPreferences.getString("page:${page.label}", null)?.takeIf { page in pagesByProvider[it].orEmpty() }
+            ?: providerOptions.firstOrNull { page in pagesByProvider[it].orEmpty() }
+    }
     var providerPickerExpanded by remember { mutableStateOf(false) }
+    var lemidaCourse by rememberSaveable { mutableStateOf<Int?>(null) }
     val requestedAssignment by HomeworkLinks.pending.collectAsState()
 
     val destinations = remember(hasGrades, hasSchedule, hasAttendance) {
@@ -627,6 +652,7 @@ fun MainScreen(
             AppDest.Messages,
             AppDest.MessageDetail("", ""),
             AppDest.OpenUAssignment("", ""),
+            AppDest.LemidaAssignment(),
             AppDest.OpenUAttachment("", "", ""),
             AppDest.OpenUDraftHelp,
             AppDest.ComposeMessage("", ""),
@@ -651,9 +677,10 @@ fun MainScreen(
         .collectAsState(initial = defaultNavigationOrder)
     // Lockerim is a service of its own; without an account its page has nothing to show, and its
     // lock sat in the bar next to Locker's, reading as the same page twice.
-    val globalNavigationPages = remember(destinations, navigationOrder, hasCourseProviders, supportedPages) {
+    val anyProviderPages = pagesByProvider.values.flatten().toSet()
+    val globalNavigationPages = remember(destinations, navigationOrder, hasCourseProviders, anyProviderPages) {
         destinations.filter { it.parent == null && it !is ProviderGrades && it.label in navigationOrder &&
-            it != AppDest.Home && (it !in com.feldman.scholix.courses.providerDependentPages || it in supportedPages) }
+            it != AppDest.Home && (it !in com.feldman.scholix.courses.providerDependentPages || it in anyProviderPages) }
             .sortedBy { navigationOrder.indexOf(it.label) }
     }
 
@@ -693,6 +720,7 @@ fun MainScreen(
             while (backStack.backStack.lastOrNull()?.courseScope() != null) backStack.pop()
             backStack.navigateTo(destination)
         } else if (topLevel) {
+            providerFor(destination)?.let { selectedProviderId = it }
             backStack.navigateTop(destination)
             if (destination == mainDestination || destination == AppDest.Grades) {
                 while (backStack.backStack.lastOrNull() != destination) {
@@ -713,9 +741,10 @@ fun MainScreen(
         if (homeworkOpenRequest > handledHomeworkOpenRequest) {
             if (requestedAssignment != null && !lemidaSnapshot.loaded) return@LaunchedEffect
             val item = requestedAssignment?.let { HomeworkLinks.match(it, lemidaSnapshot.homework, lemidaSnapshot.account) }
-            if (item != null) navigateFromUser(CourseSection("lemida:${lemidaSnapshot.account}",
-                item.courseId.toString(), section = CourseSectionKind.ASSIGNMENTS))
-            else backStack.navigateTop(AppDest.Homework)
+            // Assignments narrowed to the activity's course; the page then opens the activity itself.
+            lemidaCourse = item?.courseId
+            if (item != null || "lemida" in providerOptions) selectedProviderId = "lemida"
+            backStack.navigateTop(AppDest.Homework)
             handledHomeworkOpenRequest = homeworkOpenRequest
         }
     }
@@ -725,9 +754,14 @@ fun MainScreen(
             backStack.navigateTop(mainDestination)
         }
         if (currentScreen in com.feldman.scholix.courses.providerDependentPages && currentScreen !in supportedPages) {
-            if (!backStack.pop()) backStack.resetTo(mainDestination)
+            val other = providerFor(currentScreen)
+            if (other != null && other != activeProviderId) selectedProviderId = other
+            else if (!backStack.pop()) backStack.resetTo(mainDestination)
             else backStack.navigateTop(mainDestination)
         }
+        // Remember which account each page was last used with.
+        if (currentScreen in com.feldman.scholix.courses.providerDependentPages && currentScreen in supportedPages)
+            providerPreferences.edit().putString("page:${currentScreen.label}", activeProviderId).apply()
         if (currentScreen == mainDestination) courseCacheEpoch++
     }
     val courseScope = currentScreen.courseScope()
@@ -795,6 +829,10 @@ fun MainScreen(
             courseCatalog = courseCatalog,
             recentCourses = recentCourses,
             onCourseCacheChanged = { courseCacheEpoch++ },
+            lemidaCourse = lemidaCourse,
+            onLemidaCourseChanged = { lemidaCourse = it },
+            onSignInAgain = { providerId ->
+                backStack.navigateTo(AppDest.EditProvider(providerId, origin = currentScreen as? AppDest)) },
             onScopeSelected = { destination -> navigateFromUser(destination,
                 topLevel = destination.parent == null) },
             onCourseResumed = { course ->
@@ -826,8 +864,11 @@ fun MainScreen(
                 .put("platformName", provider?.providerLabel() ?: "Lemida")
                 .put("name", provider?.providerLabel() ?: "Lemida")) }
         }
+        val narrowedLemida = lemidaCourse?.takeIf { courseScope == null && activeProviderId == "lemida" }
         val pickerIndex = pickerCourses.indexOfFirst { course ->
             if (courseScope != null) courseScope.matches(course)
+            else if (narrowedLemida != null) course.optString("platformId").startsWith("lemida:") &&
+                course.optString("courseKey") == narrowedLemida.toString()
             else course.optString("platformId") == activeProviderId ||
                 activeProviderId == "lemida" && course.optString("platformId").startsWith("lemida:")
         }.coerceAtLeast(0)
@@ -848,6 +889,15 @@ fun MainScreen(
                             ?: pages.firstOrNull() ?: AppDest.Tiktek
                         if (id != activeProviderId) backStack.resetTo(target)
                         navigateFromUser(target, topLevel = true)
+                    } else if (id == "lemida") {
+                        // A Lemida course narrows the Assignments or Materials page in place; the bar stays.
+                        lemidaCourse = course.optString("courseKey").toIntOrNull()
+                        val page = when {
+                            currentScreen == AppDest.Materials || courseScope?.section == com.feldman.scholix.courses.CourseSectionKind.FILES -> AppDest.Materials
+                            else -> AppDest.Homework
+                        }
+                        if (courseScope != null) backStack.resetTo(page)
+                        navigateFromUser(page, topLevel = true)
                     } else {
                         val sections = courseSections(provider, course)
                         val preferred = if (id != activeProviderId) com.feldman.scholix.courses.CourseSectionKind.OVERVIEW
@@ -862,6 +912,8 @@ fun MainScreen(
                 },
                 expanded = providerPickerExpanded, onExpandedChange = { providerPickerExpanded = it },
                 providersById = platforms.associateBy { it.id },
+                providerLevel = courseScope == null && narrowedLemida == null &&
+                    pickerCourses.getOrNull(pickerIndex)?.optBoolean("providerRoot") != true,
                 modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
                     .statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp))
         }
