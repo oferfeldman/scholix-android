@@ -686,7 +686,8 @@ fun MainScreen(
     val backStack = rememberMotionDestBackStack(startDestination)
     // Opening the app on its default Grades page is not a request for an Inbar SMS.
     var userOpenedPages by remember { mutableStateOf<Set<AppDest>>(emptySet()) }
-    fun navigateFromUser(destination: MotionDest, topLevel: Boolean = false) {
+    /** [provider] is the account the user just chose for [destination]; without it the page keeps its own. */
+    fun navigateFromUser(destination: MotionDest, topLevel: Boolean = false, provider: String? = null) {
         if (destination is ProviderGrades) {
             selectedProviderId = destination.providerId
             userOpenedPages = userOpenedPages + AppDest.Grades
@@ -707,7 +708,8 @@ fun MainScreen(
             while (backStack.backStack.lastOrNull()?.courseScope() != null) backStack.pop()
             backStack.navigateTo(destination)
         } else if (topLevel) {
-            providerFor(destination)?.let { selectedProviderId = it }
+            // providerFor still sees the previous account in this frame; a choice made in the picker wins.
+            (provider ?: providerFor(destination))?.let { selectedProviderId = it }
             backStack.navigateTop(destination)
             if (destination == mainDestination || destination == AppDest.Grades) {
                 while (backStack.backStack.lastOrNull() != destination) {
@@ -879,7 +881,7 @@ fun MainScreen(
                         val target = (currentScreen as? AppDest)?.takeIf { id == activeProviderId && it in pages }
                             ?: pages.firstOrNull() ?: AppDest.Tiktek
                         if (id != activeProviderId) backStack.resetTo(target)
-                        navigateFromUser(target, topLevel = true)
+                        navigateFromUser(target, topLevel = true, provider = id)
                     } else if (id == "lemida") {
                         // A Lemida course narrows the Assignments or Materials page in place; the bar stays.
                         lemidaCourse = course.optString("courseKey").toIntOrNull()
@@ -888,7 +890,7 @@ fun MainScreen(
                             else -> AppDest.Homework
                         }
                         if (courseScope != null) backStack.resetTo(page)
-                        navigateFromUser(page, topLevel = true)
+                        navigateFromUser(page, topLevel = true, provider = id)
                     } else {
                         val sections = courseSections(provider, course)
                         val preferred = if (id != activeProviderId) com.feldman.scholix.courses.CourseSectionKind.OVERVIEW
